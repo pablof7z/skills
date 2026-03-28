@@ -8,6 +8,7 @@ This skill provides comprehensive knowledge for building Cashu wallets on Nostr 
 
 - **NIP-60 (Cashu Wallets)**: https://github.com/nostr-protocol/nips/blob/master/60.md
 - **NIP-61 (Nutzaps)**: https://github.com/nostr-protocol/nips/blob/master/61.md
+- **NIP-87 (Mint Discovery)**: https://github.com/nostr-protocol/nips/blob/master/87.md
 
 ---
 
@@ -495,6 +496,124 @@ const backupEvent = await wallet.backup(false);
 // ... review or modify ...
 await backupEvent.save(wallet.relaySet);
 ```
+
+---
+
+## Mint Discovery (NIP-87)
+
+NIP-87 enables decentralized mint discovery through announcements and recommendations.
+
+### Event Kinds for Mint Discovery
+
+| Kind | Name | Description |
+|------|------|-------------|
+| 38172 | CashuMintAnnouncement | Mint publishes its info (url, name, nuts supported, network) |
+| 38000 | EcashMintRecommendation | Users recommend mints with reviews |
+
+### Using the Mint Discovery Store
+
+```typescript
+import { createMintDiscoveryStore } from '@nostr-dev-kit/wallet';
+
+const store = createMintDiscoveryStore(ndk, {
+  network: 'mainnet',      // Filter by network ('mainnet' | 'testnet')
+  minRecommendations: 2,   // Minimum recommendations required
+  limit: 100,              // Max mints to fetch
+  followUsers: ['pubkey1', 'pubkey2'], // WoT-based: only recs from these users
+  timeout: 10000           // Auto-stop after ms
+});
+
+// Subscribe to state changes (zustand store)
+store.subscribe((state) => {
+  console.log('Mints found:', state.mints.length);
+  console.log('Progress:', state.progress);
+});
+
+// Get top mints by recommendation score
+const topMints = store.getState().getTopMints(10, 2);
+
+// Search mints by name/url/description
+const results = store.getState().searchMints('bitcoin');
+
+// Get specific mint by URL
+const mint = store.getState().getMint('https://mint.example.com');
+
+// Recommend a mint (publishes kind 38000 event)
+await store.getState().recommendMint('https://mint.example.com', 'Fast and reliable!');
+
+// Stop subscriptions when done
+store.getState().stop();
+```
+
+### MintMetadata Interface
+
+```typescript
+interface MintMetadata {
+  url: string;
+  identifier?: string;
+  network?: string;        // 'mainnet' | 'testnet'
+  nuts: string[];          // Supported NUTs (Cashu protocol extensions)
+  name?: string;
+  description?: string;
+  icon?: string;
+  longDescription?: string;
+  contact?: { nostr?: string; email?: string };
+  motd?: string;           // Message of the day
+  recommendations: NDKMintRecommendation[];
+  score: number;           // Number of recommendations
+  isOnline?: boolean;      // Verified by fetching /v1/info
+  lastUpdated: number;
+}
+```
+
+### Web of Trust Filtering
+
+Filter recommendations to only include those from users you follow for better trust:
+
+```typescript
+// Get user's follow list
+const follows = await ndk.activeUser.follows();
+const followPubkeys = Array.from(follows).map(u => u.pubkey);
+
+const store = createMintDiscoveryStore(ndk, {
+  followUsers: followPubkeys,
+  network: 'mainnet'
+});
+```
+
+### Selecting the Best Mint Programmatically
+
+```typescript
+async function selectBestMint(ndk: NDK): Promise<string | null> {
+  const store = createMintDiscoveryStore(ndk, {
+    network: 'mainnet',
+    timeout: 5000
+  });
+
+  // Wait for discovery to complete
+  await new Promise(resolve => setTimeout(resolve, 5000));
+
+  // Get top mints that are online and have recommendations
+  const topMints = store.getState().getTopMints(5, 1);
+  const onlineMints = topMints.filter(m => m.isOnline);
+
+  store.getState().stop();
+
+  return onlineMints[0]?.url ?? null;
+}
+```
+
+### How Mint Discovery Works
+
+1. **Mint Announcements (kind 38172)**: Mints publish addressable events announcing their existence with metadata (URL, supported NUTs, network, name, description, icon)
+
+2. **User Recommendations (kind 38000)**: Users publish recommendations for mints they trust, with optional reviews
+
+3. **Score Calculation**: Mints are scored by the number of recommendations they receive
+
+4. **Online Verification**: The store fetches `/v1/info` from each mint to verify it's online and get additional metadata
+
+5. **Caching**: Mint info is cached via NDK's cache adapter for performance
 
 ---
 
