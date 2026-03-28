@@ -1,0 +1,4 @@
+interface:
+  display_name: "NDK Core"
+  short_description: "Help with NDK Core tasks and workflows"
+  default_prompt: "Use $ndk-core to work on the core NDK package, shared runtime behavior, or public core APIs."

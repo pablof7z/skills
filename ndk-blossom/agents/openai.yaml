@@ -1,0 +1,4 @@
+interface:
+  display_name: "NDK Blossom"
+  short_description: "Help with NDK Blossom tasks"
+  default_prompt: "Use $ndk-blossom to work on Blossom uploads, mirroring, auth, or URL healing in NDK."
