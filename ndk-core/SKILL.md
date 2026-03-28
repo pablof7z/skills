@@ -1,90 +1,64 @@
 ---
 name: ndk-core
-description: Builder guide for using `@nostr-dev-kit/ndk` in apps, CLIs, bots, and services. Use when wiring relays, signers, subscriptions, publishing, profile or event loading, filters, or cache-backed Nostr flows.
+description: Deep builder guide for using `@nostr-dev-kit/ndk` in apps, bots, CLIs, and services. Use when designing or implementing relay setup, signers, subscriptions, publishing, event loading, profile loading, filter design, caching, local-first behavior, or Nostr product flows on top of NDK.
 ---
 
 # NDK Core
 
 ## Scope
 
-Use this skill when building on top of `@nostr-dev-kit/ndk`, not when maintaining NDK internals.
+Use this skill when the task is to build with `@nostr-dev-kit/ndk`.
 
-It is for:
+This skill is not for contributing to NDK internals. It is for agents that need to understand how to use NDK well in real product code.
 
-- app startup and relay configuration
-- signer setup and key handling
-- reading and publishing Nostr events
-- subscription-driven UI and feed flows
-- cache-backed or relay-backed data access
-- CLIs, bots, or servers that need Nostr primitives without a framework wrapper
+Common triggers:
+
+- bootstrapping an app's NDK instance
+- choosing relays, outbox, and cache setup
+- implementing feed, profile, timeline, or notification flows
+- deciding between `subscribe()`, `fetchEvent()`, and `fetchEvents()`
+- signer and session handling
+- publishing text notes, metadata, lists, or replaceable events
+- writing Node scripts, bots, or CLIs with NDK
 
 ## Work the Task
 
-Start from the public API, not `core/src/`.
+Read these in order:
 
-Create NDK with the smallest setup that matches the job:
+1. `references/mental-model.md`
+2. `references/workflows.md`
 
-```ts
-import NDK from "@nostr-dev-kit/ndk";
+Read additional repo docs only when the task needs more detail:
 
-const ndk = new NDK({
-  explicitRelayUrls: ["wss://relay.primal.net"],
-  aiGuardrails: true,
-});
-```
+- `core/docs/getting-started/usage.md`
+- `core/docs/getting-started/signers.md`
+- `core/docs/tutorial/local-first.md`
+- `core/docs/tutorial/publishing.md`
+- `core/docs/tutorial/filter-validation.md`
+- `core/docs/tutorial/subscription-management.md`
 
-Enable `aiGuardrails: true` during development. It catches the most common Nostr mistakes early, especially wrong filter values, bad tags, and blocking fetch anti-patterns.
+## Non-Negotiables
 
-Treat Nostr as an event stream, not a request-response API. For feeds, lists, profiles, reactions, and most screens, prefer `ndk.subscribe()` and render progressively as cached and live events arrive.
+- Think in streams, not request-response. Most product features should use `ndk.subscribe()`.
+- Do not make UIs wait for EOSE before showing data unless the product truly requires that.
+- Treat `fetchEvents()` as exceptional. It is a blocking operation.
+- Use `fetchEvent()` for genuine single-event lookups and addressable/replaceable resolution.
+- Filters use hex values, not bech32 user-facing encodings.
+- `NDKPrivateKeySigner` accepts `nsec` directly.
+- Enable `aiGuardrails: true` during development unless there is a concrete reason not to.
 
-Prefer passing `onEvent`, `onEvents`, and `onEose` directly into `ndk.subscribe()` instead of attaching listeners afterward. That avoids missing cached or early relay events.
+## What Good Looks Like
 
-Treat `fetchEvents()` as a smell in product code. It blocks until EOSE. Use it only when the caller truly must wait before continuing. `fetchEvent()` is reasonable for genuine single-event resolution, replaceable lookups, or one-shot CLI steps.
+An agent using this skill should:
 
-Use hex pubkeys and event ids in filters. `npub`, `note`, `nprofile`, and `nevent` are user-facing encodings, not filter values.
-
-Signers are optional for read-only work. Add a signer only when the flow needs to publish or sign HTTP auth events.
-
-`NDKPrivateKeySigner` accepts an `nsec` directly:
-
-```ts
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-
-const signer = new NDKPrivateKeySigner("nsec1...");
-ndk.signer = signer;
-```
-
-If the flow is direct HTTP plus local signing, you may not need relays or `await ndk.connect()` at all. Relay connections are for relay-backed reads and writes, not every use of NDK.
-
-For publishing, create events with the `ndk` instance attached so signing and publishing use the configured signer and relay pool:
-
-```ts
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-
-const event = new NDKEvent(ndk, {
-  kind: 1,
-  content: "hello from ndk",
-});
-
-await event.publish();
-```
-
-Use cache adapters to make apps feel immediate, not to justify blocking fetch flows. Cached events should be rendered as they arrive, then updated with live relay data.
-
-When building Node CLIs or servers, verify the package under plain `node`, not only Bun or a bundler.
-
-## Run Commands
-
-When you need examples or verification, prefer small real scripts over reading internals:
-
-```bash
-node your-script.js
-```
+- initialize one durable NDK instance per app or process
+- choose a signer and cache strategy that matches the environment
+- model product features as subscriptions and progressive rendering
+- publish events with the correct replaceable semantics
+- avoid common filter and fetch anti-patterns
+- understand when relays are required and when local signing alone is enough
 
 ## Read More
 
-Read these public docs when needed:
-
-- `core/README.md` for package-level behavior and guardrail positioning.
-- `core/docs/getting-started/signers.md` for signer choices and examples.
-- `core/snippets/` for public API usage patterns.
+- `references/mental-model.md` for how to think about NDK-powered products
+- `references/workflows.md` for concrete builder patterns and examples

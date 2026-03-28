@@ -1,4 +1,4 @@
 interface:
   display_name: "NDK Core"
-  short_description: "Build with the core NDK package"
-  default_prompt: "Use $ndk-core when building an app, bot, CLI, or service with @nostr-dev-kit/ndk."
+  short_description: "Build deeply with the core NDK package"
+  default_prompt: "Use $ndk-core when you need the mental model and implementation patterns for building products on top of @nostr-dev-kit/ndk."
