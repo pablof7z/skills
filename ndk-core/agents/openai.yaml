@@ -1,4 +1,4 @@
 interface:
   display_name: "NDK Core"
-  short_description: "Help with NDK Core tasks and workflows"
-  default_prompt: "Use $ndk-core to work on the core NDK package, shared runtime behavior, or public core APIs."
+  short_description: "Build with the core NDK package"
+  default_prompt: "Use $ndk-core when building an app, bot, CLI, or service with @nostr-dev-kit/ndk."

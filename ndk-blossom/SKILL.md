@@ -1,60 +1,92 @@
 ---
 name: ndk-blossom
-description: Contributor guide for the `blossom/` package. Use when changing Blossom upload and blob management flows, URL healing, mirroring, media-server auth, pluggable SHA256 behavior, or NDK integration for media storage.
+description: Builder guide for using `@nostr-dev-kit/blossom` to upload files, manage blobs, optimize media URLs, heal broken Blossom links, and work with users' Blossom server lists.
 ---
 
 # NDK Blossom
 
 ## Scope
 
-Work in `blossom/` for media and blob protocol behavior rather than generic relay logic.
+Use this skill when building on top of `@nostr-dev-kit/blossom`, not when editing the Blossom package itself.
 
-Important areas:
+It is for:
 
-- `src/blossom.ts` for top-level API shape
-- `src/upload/uploader.ts` for upload behavior
-- `src/healing/url-healing.ts` for fallback and repair logic
-- `src/utils/auth.ts`, `http.ts`, and `sha256.ts` for protocol plumbing
-- `src/types/` for public data contracts
+- uploading files to Blossom servers
+- checking, listing, or deleting blobs
+- generating optimized media URLs
+- recovering broken media URLs with user server lists
+- publishing or reading `kind:10063` Blossom server lists
+- Node, browser, or CLI tooling that talks to Blossom servers
 
 ## Work the Task
 
-Keep authenticated operations aligned with NDK signer behavior. Upload, delete, and mirroring flows rely on correct auth event generation.
+Separate direct-server work from relay-backed discovery.
 
-Separate direct-server HTTP flows from relay-backed discovery flows. `upload(file, { server })`, `checkServerForBlob()`, and `getOptimizedUrl()` can work with only an `NDK` instance plus signer and do not require `ndk.connect()` or relays. URL healing and server-list discovery do require Nostr data.
+Direct server operations do not need relays:
 
-For Node CLI work, verify the built package under plain `node`, not only Bun or a bundler. A real `node` run caught Node ESM import issues in `blossom/dist/` that Bun did not surface.
+- `upload(file, { server })`
+- `checkServerForBlob(server, sha256)`
+- `getOptimizedUrl(url, opts)`
 
-Use a real server when the task is about CLI or protocol interop. Testing against `https://blossom.primal.net` showed that authenticated upload worked, `/list/<pubkey>` required a kind `24242` auth event, and `DELETE /<hash>` could succeed but return slowly enough that CLI tools should consider timeouts.
+Relay-backed discovery does need relays:
 
-Do not assume the package README or spec docs are perfectly current. The skill used to point at `docs/`, but this package currently has `README.md`, `SPEC.md`, `AGENT.md`, and `context/SPEC.md` instead. Some spec text mentions methods such as `addServer`, `removeServer`, or `mirrorBlob` that are not on the current public API; trust `src/blossom.ts` over stale prose.
+- reading or publishing a user's `kind:10063` Blossom list
+- healing broken URLs with `fixUrl(...)`
+- any flow that depends on discovering the user's preferred Blossom servers from Nostr
 
-When changing upload or healing behavior, inspect both the transport code and the public docs so supported workflows stay consistent.
+Upload and delete flows need a signer. Read-only checks do not.
 
-Preserve the pluggable SHA256 hook. Browser, worker, or platform-specific callers may rely on replacing the default implementation.
+`NDKPrivateKeySigner` can take an `nsec` directly, so do not manually decode it first.
 
-Remember that this package uses web-style APIs even in Node. CLI code needs to convert local files into `File` objects and rely on Node 18+ globals such as `File`, `Blob`, `fetch`, and `crypto.subtle`.
+For uploads, always make the SHA256 path explicit in app or CLI code. Use the package's default calculator unless you truly need a custom one:
 
-List and delete have extra caveats. `listBlobs(user)` is for listing a user's blobs via their configured servers, and auth-sensitive servers may require the signer to match that same user. `deleteBlob(hash)` still works from the user's published Blossom server list rather than taking a direct `server` argument, so direct-server delete flows may need either the exported auth helpers from `@nostr-dev-kit/blossom` or a package-level API extension.
+```ts
+import NDK from "@nostr-dev-kit/ndk";
+import { NDKBlossom, defaultSHA256Calculator } from "@nostr-dev-kit/blossom";
 
-Keep Node-targeted source imports ESM-safe. Relative imports in package source need explicit `.js` suffixes when the emitted files are meant to run under plain Node ESM.
+const ndk = new NDK({ signer });
+const blossom = new NDKBlossom(ndk, signer);
+blossom.setSHA256Calculator(defaultSHA256Calculator);
+
+const imeta = await blossom.upload(file, {
+  server: "https://blossom.primal.net",
+  sha256Calculator: defaultSHA256Calculator,
+});
+```
+
+In Node, remember this package uses web-style APIs. CLI code should work with `File`, `Blob`, `fetch`, and `crypto.subtle`, which are available in Node 18+.
+
+Use user server lists correctly. NIP-B7 points to BUD-03, where a Blossom server list is a replaceable `kind:10063` event with ordered `["server", "<https-url>"]` tags. Order matters: the first server is the user's preferred default.
+
+When you need to manage that list, prefer `NDKBlossomList` from `@nostr-dev-kit/ndk` instead of hand-rolling the event:
+
+```ts
+import { NDKBlossomList } from "@nostr-dev-kit/ndk";
+
+const list = new NDKBlossomList(ndk);
+list.servers = [
+  "https://blossom.primal.net",
+  "https://cdn.example.com",
+];
+await list.publishReplaceable();
+```
+
+Treat direct-server auth as HTTP plus a signed Nostr event. Real-world interop against `https://blossom.primal.net` showed that upload worked, `/list/<pubkey>` required auth for your own blobs, and delete could be slow enough that CLI tools should use sensible timeouts.
+
+If you are building UI, do not block rendering on Blossom discovery. Show the original URL or local upload state immediately, then update when healing, upload progress, or server-list lookups complete.
 
 ## Run Commands
 
-Use:
+For app or CLI work, verify behavior against a real server when possible:
 
 ```bash
-cd blossom
-bun run build
-bun run test
+node your-script.js
 ```
 
 ## Read More
 
 Read:
 
-- `blossom/README.md` for package behavior and API examples.
-- `blossom/SPEC.md` for the intended protocol surface, with the caveat that parts of it are stale.
-- `blossom/AGENT.md` for the most useful implementation-oriented examples and protocol notes.
-- `blossom/context/SPEC.md` only when you need extra historical context and are prepared to verify claims against source.
-- `blossom/example/react/README.md` and `blossom/example/svelte/README.md` for how real consumers expect auth and upload flows to feel.
+- `blossom/README.md` for the main API surface.
+- `blossom/AGENT.md` for usage patterns and protocol notes.
+- NIP-B7 in `nostr-protocol/nips` and BUD-03 in the Blossom spec for server-list semantics.
