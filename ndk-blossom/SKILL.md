@@ -35,7 +35,7 @@ Preserve the pluggable SHA256 hook. Browser, worker, or platform-specific caller
 
 Remember that this package uses web-style APIs even in Node. CLI code needs to convert local files into `File` objects and rely on Node 18+ globals such as `File`, `Blob`, `fetch`, and `crypto.subtle`.
 
-List and delete have extra caveats. `listBlobs(user)` is for listing a user's blobs via their configured servers, and auth-sensitive servers may require the signer to match that same user. `deleteBlob(hash)` still works from the user's published Blossom server list rather than taking a direct `server` argument, so direct-server delete flows may need manual auth-event + `DELETE /<hash>` work unless the API is extended.
+List and delete have extra caveats. `listBlobs(user)` is for listing a user's blobs via their configured servers, and auth-sensitive servers may require the signer to match that same user. `deleteBlob(hash)` still works from the user's published Blossom server list rather than taking a direct `server` argument, so direct-server delete flows may need either the exported auth helpers from `@nostr-dev-kit/blossom` or a package-level API extension.
 
 Keep Node-targeted source imports ESM-safe. Relative imports in package source need explicit `.js` suffixes when the emitted files are meant to run under plain Node ESM.
 
