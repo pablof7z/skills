@@ -1,0 +1,4 @@
+interface:
+  display_name: "High Level"
+  short_description: "Concise high-level explanations"
+  default_prompt: "Use $high-level to explore this and explain it at a high level."
