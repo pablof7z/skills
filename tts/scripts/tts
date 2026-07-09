@@ -7,13 +7,81 @@ if [ -f "$ENV_FILE" ]; then
   source "$ENV_FILE"
 fi
 
+tts_state_dir() {
+  if [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s/tts\n' "$XDG_STATE_HOME"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s/.local/state/tts\n' "$HOME"
+  else
+    printf '/tmp/tts-state\n'
+  fi
+}
+
+truthy() {
+  case "${1:-}" in
+    1|true|True|TRUE|yes|Yes|YES|on|On|ON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+arg_present() {
+  local needle="$1"
+  shift
+
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+      return 1
+    fi
+    if [ "$arg" = "$needle" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+queue_background_if_needed() {
+  if truthy "${TTS_BACKGROUND_CHILD:-0}" || arg_present "--help" "$@" || arg_present "-h" "$@"; then
+    return
+  fi
+
+  local state_dir output_file log_file pid
+  state_dir="$(tts_state_dir)"
+  if ! mkdir -p "$state_dir" 2>/dev/null; then
+    state_dir="/tmp/tts-state"
+    mkdir -p "$state_dir" 2>/dev/null || state_dir="/tmp"
+  fi
+
+  output_file="${TTS_OUTPUT_FILE:-/tmp/tts_${RANDOM}.mp3}"
+  log_file="$state_dir/tts-$(date +%Y%m%d-%H%M%S)-$$.log"
+
+  nohup env TTS_BACKGROUND_CHILD=1 TTS_CALLER_PPID="$PPID" TTS_OUTPUT_FILE="$output_file" "$0" "$@" </dev/null >>"$log_file" 2>&1 &
+  pid=$!
+  disown "$pid" 2>/dev/null || true
+
+  if arg_present "--no-play" "$@"; then
+    printf '%s\n' "$output_file"
+  else
+    printf 'Queued TTS in background: pid %s, log %s\n' "$pid" "$log_file" >&2
+  fi
+  exit 0
+}
+
+queue_background_if_needed "$@"
+
 usage() {
   echo "Usage: ./scripts/tts [options] 'Your text here'" >&2
+  echo "Queues speech generation/playback in the background and returns immediately." >&2
   echo "Options:" >&2
   echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
   echo "  --introduction text        Brief identity/work context, 30 words or fewer." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
-  echo "  --no-play                  Generate the MP3 without playing it." >&2
+  echo "  --no-play                  Print target MP3 path and generate it without playback." >&2
   echo "  --no-media-pause           Do not pause/resume media apps." >&2
   echo "  --resume-delay seconds     Delay before resuming paused media." >&2
   echo "Example: ./scripts/tts --agent-name quinn-delta-306 --introduction 'Agent Quinn here, working on improving TTS identity cues.' 'The fix is ready.'" >&2
@@ -41,18 +109,12 @@ agent_identity() {
   if [ -n "$AGENT_NAME" ]; then
     printf 'name:%s\n' "$AGENT_NAME"
   else
-    printf 'ppid:%s\n' "$PPID"
+    printf 'ppid:%s\n' "${TTS_CALLER_PPID:-$PPID}"
   fi
 }
 
 intro_state_dir() {
-  if [ -n "${XDG_STATE_HOME:-}" ]; then
-    printf '%s/tts\n' "$XDG_STATE_HOME"
-  elif [ -n "${HOME:-}" ]; then
-    printf '%s/.local/state/tts\n' "$HOME"
-  else
-    printf '/tmp/tts-state\n'
-  fi
+  tts_state_dir
 }
 
 select_voice_from_seed() {
@@ -232,7 +294,7 @@ if [ -n "$INTRODUCTION" ]; then
   fi
 fi
 
-OUTPUT_FILE="/tmp/tts_${RANDOM}.mp3"
+OUTPUT_FILE="${TTS_OUTPUT_FILE:-/tmp/tts_${RANDOM}.mp3}"
 TMP_ERR="/tmp/tts_error_${RANDOM}.log"
 PAUSED_MEDIA_APPS=()
 
@@ -245,6 +307,10 @@ fi
 API_URL="$KOKORO_API_ENDPOINT"
 if [[ "$API_URL" != */v1/audio/speech ]]; then
   API_URL="${API_URL%/}/v1/audio/speech"
+fi
+
+if [ "$NO_PLAY" -eq 0 ]; then
+  record_agent_spoken
 fi
 
 media_control_enabled() {
