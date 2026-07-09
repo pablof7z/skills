@@ -1,134 +1,94 @@
 # Skills
 
-A compact collection of agent skills for design exploration, repo marketing, Nostr Cashu wallet guidance, text-to-speech, and high-level explanation.
+Turn recurring agent workflows into named skills you can invoke instead of re-explaining the job.
 
-Use this repo when you want reusable agent behavior as plain folders instead of long prompts that have to be pasted into every session.
+This catalog is for people who use coding agents often enough that the same high-value instructions keep coming back: repo launch work, design exploration, high-level explanation, speech generation, and Nostr Cashu wallet implementation guidance.
 
-```text
-repo-marketing/
-|-- SKILL.md                      # core instructions loaded when the skill triggers
-|-- agents/openai.yaml            # optional UI metadata for compatible hosts
-`-- references/readme-playbook.md # deeper playbook loaded only when needed
-```
-
-## Why this exists
-
-Agent skills work best when they are small, inspectable, and easy to copy between environments. This repo keeps each skill in its own folder with a `SKILL.md` entry point and optional bundled resources such as `references/`, `scripts/`, and `agents/openai.yaml`.
-
-The collection is useful when you need to:
-
-- Give agents durable domain knowledge without expanding every prompt.
-- Package a workflow with scripts or references that can be reused safely.
-- Share agent instructions across Codex, Claude-style, or other skill-aware hosts.
-- Keep sensitive workflows legible by making scripts, network behavior, and setup notes visible in the repo.
+Instead of pasting a long prompt every time, install the relevant skill once and invoke it by name. The agent gets a focused workflow, the right reference material, and clearer boundaries for what it should produce.
 
 ## Quick Start
 
-Clone the collection:
+Clone the catalog:
 
 ```bash
 git clone https://github.com/pablof7z/skills.git
 cd skills
 ```
 
-Install one skill by copying its folder into your agent host's skills directory. For Codex-style local skills:
+Install one skill by copying its folder into the directory your agent host scans. For a Codex-style local setup:
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
 cp -R repo-marketing "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
-Start a new agent session and invoke it:
+Start a new agent session and invoke it by name:
 
 ```text
-Use $repo-marketing to audit this README for positioning, quick start, proof, trust, and agent readiness.
+Use $repo-marketing to audit this README for positioning, proof, quick start, trust, and agent readiness.
 ```
 
-The agent should load `repo-marketing/SKILL.md`, then read `references/readme-playbook.md` only when doing a README rewrite or audit.
+Expected result: the agent loads `repo-marketing`, builds a marketing brief, and returns a scored audit or rewritten first screen instead of a generic documentation summary.
 
-## Included Skills
+## Start Here
 
-| Skill | Use it for |
-|---|---|
-| [design-exploration-capture](design-exploration-capture/) | Capture iterative design explorations with notes, uncertainty hygiene, adjacent checks, and convergence gates. |
-| [high-level](high-level/) | Explain a topic, codebase, document, system, or workflow at a plain-language high level. |
-| [nip60](nip60/) | Build Cashu wallets on Nostr with NIP-60 wallets, NIP-61 nutzaps, and NIP-87 mint discovery. |
-| [repo-marketing](repo-marketing/) | Create, rewrite, or audit README files and repo structures for adoption, launch readiness, trust, and agent-friendliness. |
-| [tts](tts/) | Generate spoken audio from text with a Kokoro-compatible TTS endpoint. |
+| Skill | Use it when | What it gives you |
+|---|---|---|
+| [`repo-marketing`](repo-marketing/) | A repo is useful, but the README does not make people want to try it. | A marketing brief, sharper first screen, proof plan, quick start, trust copy, and launch-readiness fixes. |
+| [`design-exploration-capture`](design-exploration-capture/) | A design question is turning into a real exploration with alternatives, objections, and shifting boundaries. | A named exploration session with notes, open questions, tradeoffs, rejected options, risks, and convergence discipline. |
+| [`high-level`](high-level/) | You need the gist of a repo, system, protocol, document, or workflow without a deep internal tour. | A concise mental model, the main moving parts, and the next useful thing to inspect. |
+| [`tts`](tts/) | The useful output is spoken audio, not another text reply. | Text-to-speech guidance plus a local helper that sends text to a Kokoro-compatible endpoint and returns MP3 audio. |
+| [`nip60`](nip60/) | You are implementing Cashu wallets or nutzaps on Nostr with NDK. | Event kind references, wallet flows, token operations, nutzap monitoring, mint discovery, and security notes. |
 
-## How It Works
+## Skills By Job
 
-Each skill is a self-contained folder:
+### Make A Repo Easier To Try
 
-```text
-<skill-name>/
-|-- SKILL.md             # required; frontmatter for host discovery plus instructions
-|-- agents/openai.yaml   # optional UI metadata for compatible skill hosts
-|-- references/          # optional docs loaded only when needed
-`-- scripts/             # optional executable helpers used by the skill
-```
+| Skill | Use it when | What it gives you |
+|---|---|---|
+| [`repo-marketing`](repo-marketing/) | The repo front door reads like implementation notes, internal metadata, or stale docs. | Human-facing positioning, README copy, launch copy, proof assets, and trust objections. |
 
-For host-discoverable skills, the `SKILL.md` frontmatter names the skill and describes when it should trigger. The body gives the agent the core workflow. Larger playbooks stay in `references/` so the host can load them only when the task needs that detail. Deterministic helper code lives in `scripts/`.
+### Keep Exploration Coherent
 
-Some older guide-style folders in this repo are plain Markdown `SKILL.md` files. Add frontmatter when modernizing them for automatic discovery.
+| Skill | Use it when | What it gives you |
+|---|---|---|
+| [`design-exploration-capture`](design-exploration-capture/) | The user is still probing the shape of a design rather than asking for implementation. | A compact decision trail that keeps evidence, assumptions, risks, alternatives, and decisions separate. |
+| [`high-level`](high-level/) | The user asks "what is this?", "how does this work at a high level?", or "give me the mental model." | A short explanation that starts broad, names the main parts, and stops before dumping internals. |
 
-## Project Structure
+### Produce Audio
 
-```text
-.
-|-- README.md
-|-- design-exploration-capture/
-|   |-- SKILL.md
-|   |-- agents/openai.yaml
-|   `-- references/note-schema-and-examples.md
-|-- high-level/
-|   |-- SKILL.md
-|   `-- agents/openai.yaml
-|-- nip60/
-|   `-- SKILL.md
-|-- repo-marketing/
-|   |-- SKILL.md
-|   |-- agents/openai.yaml
-|   `-- references/readme-playbook.md
-`-- tts/
-    |-- SKILL.md
-    |-- references/setup.md
-    `-- scripts/tts
-```
+| Skill | Use it when | What it gives you |
+|---|---|---|
+| [`tts`](tts/) | You want a generated voice note, narration, accessibility read, or short audio proof. | MP3 output through your configured Kokoro endpoint, with voice selection and playback controls. |
 
-## Trust and Safety
+### Build Nostr Wallet Flows
 
-Review a skill before installing it. Skills are plain text plus optional local scripts, so the trust boundary is the folder you copy into your agent host.
+| Skill | Use it when | What it gives you |
+|---|---|---|
+| [`nip60`](nip60/) | You need to build or debug Nostr Cashu wallet behavior. | Practical NDK examples for NIP-60 wallets, NIP-61 nutzaps, and NIP-87 mint discovery. |
 
-- `design-exploration-capture`, `high-level`, `repo-marketing`, and `nip60` are primarily instruction and reference skills.
-- `tts` includes an executable helper and uses a Kokoro-compatible endpoint.
-- `nip60` may involve relays, keys, wallets, or signed events when used in real workflows. Keep secret keys out of prompts and shell history.
-- No repo-wide install script runs automatically.
+## Trust Boundaries
 
-## Development
+Most skills here are instruction and reference material. A few touch local files, network services, or sensitive implementation domains:
 
-Add or update one skill at a time. For new skills, keep the root folder name, `SKILL.md` frontmatter `name`, and README entry aligned.
+- `design-exploration-capture` may write local notes when it is actively used for design exploration.
+- `tts` reads `~/.env.tts` by default, calls your configured Kokoro-compatible endpoint, writes MP3 files under `/tmp`, and may pause/resume Music or Spotify on macOS unless disabled.
+- `nip60` is wallet implementation guidance. Real use can involve Nostr keys, encrypted events, public nutzap events, relays, mints, and signed wallet operations.
 
-Useful local checks:
+For `tts`, configure the endpoint before use:
 
 ```bash
-find . -maxdepth 2 -name SKILL.md -print
-rg -n '^(name|description):' */SKILL.md
-git diff --check
+export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
+./tts/scripts/tts --no-play "Hello world" af_bella
 ```
 
-For skills with scripts, run the script manually on a harmless example before committing. For skills with `references/`, keep the main `SKILL.md` short and link directly to the reference files it expects an agent to read.
+Expected result: the script prints the path to a generated `/tmp/tts_*.mp3` file. Add auth variables only if your endpoint requires them.
 
-## Contributing
+## Human Copy Vs Router Metadata
 
-Good contributions are small and easy to inspect:
+The descriptions in this README are written for people deciding what to try. The `description` fields inside `SKILL.md` files are written for agent routing, so they can be more literal, conditional, and keyword-rich.
 
-- New skills with a clear trigger description and a focused workflow.
-- Reference files that remove bulky detail from `SKILL.md`.
-- Script fixes with a tested command and expected output.
-- Setup notes for skills that depend on local tools, endpoints, browser flags, relays, or credentials.
-
-Avoid adding generic documentation files inside a skill folder unless the skill actually uses them. A useful skill should be easy for another agent to load, understand, and apply without reading unrelated material.
+When judging a skill, read the human promise here first, then inspect the skill body for the exact trigger rules and boundaries.
 
 ## License
 
