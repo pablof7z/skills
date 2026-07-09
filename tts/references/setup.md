@@ -11,7 +11,6 @@ Set this environment variable before running `./scripts/tts`:
 ## Optional
 
 - `KOKORO_API_KEY` for bearer-token auth
-- `KOKORO_DEFAULT_VOICE` to set the default voice (for example, `af_bella`)
 
 ## Suggested local env file
 
@@ -20,7 +19,6 @@ The script loads environment variables from `~/.env.tts` by default. You can set
 ```bash
 KOKORO_API_ENDPOINT=https://<your-host>/v1/audio/speech
 KOKORO_API_KEY=<optional bearer token>
-KOKORO_DEFAULT_VOICE=af_bella
 ```
 
 To use a custom file path, set `KOKORO_ENV_FILE`.

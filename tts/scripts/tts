@@ -8,14 +8,119 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 usage() {
-  echo "Usage: ./scripts/tts [--no-play] [--no-media-pause] [--resume-delay seconds] 'Your text here' [voice]" >&2
-  echo "Example: ./scripts/tts 'Hello world' af_bella" >&2
+  echo "Usage: ./scripts/tts [options] 'Your text here'" >&2
+  echo "Options:" >&2
+  echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
+  echo "  --introduction text        Brief identity/work context, 30 words or fewer." >&2
+  echo "  --voice-id voice           Explicit Kokoro voice id." >&2
+  echo "  --no-play                  Generate the MP3 without playing it." >&2
+  echo "  --no-media-pause           Do not pause/resume media apps." >&2
+  echo "  --resume-delay seconds     Delay before resuming paused media." >&2
+  echo "Example: ./scripts/tts --agent-name quinn-delta-306 --introduction 'Agent Quinn here, working on improving TTS identity cues.' 'The fix is ready.'" >&2
 }
 
 NO_PLAY=0
 MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
 RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
+INTRODUCTION=""
+AGENT_NAME=""
+VOICE_ID=""
+INTRO_RECENT_SECONDS=600
+DETERMINISTIC_VOICES=(af_bella af_heart af_kore af_nova af_sarah am_michael am_puck)
 POSITIONAL=()
+
+normalize_space() {
+  printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+word_count() {
+  printf '%s\n' "$1" | awk '{ count += NF } END { print count + 0 }'
+}
+
+agent_identity() {
+  if [ -n "$AGENT_NAME" ]; then
+    printf 'name:%s\n' "$AGENT_NAME"
+  else
+    printf 'ppid:%s\n' "$PPID"
+  fi
+}
+
+intro_state_dir() {
+  if [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s/tts\n' "$XDG_STATE_HOME"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s/.local/state/tts\n' "$HOME"
+  else
+    printf '/tmp/tts-state\n'
+  fi
+}
+
+select_voice_from_seed() {
+  local seed="$1"
+  local checksum index
+  checksum=$(printf '%s' "$seed" | cksum | awk '{ print $1 }')
+  index=$(( checksum % ${#DETERMINISTIC_VOICES[@]} ))
+  printf '%s\n' "${DETERMINISTIC_VOICES[$index]}"
+}
+
+should_prepend_introduction() {
+  if [ -z "$INTRODUCTION" ]; then
+    return 1
+  fi
+
+  local now last_spoken_at last_agent_id age
+  now=$(date +%s)
+  last_spoken_at=""
+  last_agent_id=""
+
+  if [ -r "$INTRO_STATE_FILE" ]; then
+    {
+      IFS= read -r last_spoken_at || true
+      IFS= read -r last_agent_id || true
+    } < "$INTRO_STATE_FILE"
+  fi
+
+  if [ "$last_agent_id" = "$AGENT_ID" ] && [[ "$last_spoken_at" =~ ^[0-9]+$ ]]; then
+    age=$(( now - last_spoken_at ))
+    if [ "$age" -ge 0 ] && [ "$age" -le "$INTRO_RECENT_SECONDS" ]; then
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+prepend_introduction() {
+  local introduction="$1"
+  local text="$2"
+  case "$introduction" in
+    *[.!?])
+      printf '%s %s\n' "$introduction" "$text"
+      ;;
+    *)
+      printf '%s. %s\n' "$introduction" "$text"
+      ;;
+  esac
+}
+
+record_agent_spoken() {
+  local now tmp
+  now=$(date +%s)
+
+  if ! mkdir -p "$INTRO_STATE_DIR" 2>/dev/null; then
+    return 0
+  fi
+
+  tmp="$INTRO_STATE_FILE.$$"
+  if {
+    printf '%s\n' "$now"
+    printf '%s\n' "$AGENT_ID"
+  } > "$tmp"; then
+    mv "$tmp" "$INTRO_STATE_FILE" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -33,6 +138,30 @@ while [ "$#" -gt 0 ]; do
         exit 1
       fi
       RESUME_DELAY="$2"
+      shift 2
+      ;;
+    --agent-name)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --agent-name requires a value." >&2
+        exit 1
+      fi
+      AGENT_NAME="$2"
+      shift 2
+      ;;
+    --introduction)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --introduction requires a value." >&2
+        exit 1
+      fi
+      INTRODUCTION="$2"
+      shift 2
+      ;;
+    --voice-id)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --voice-id requires a value." >&2
+        exit 1
+      fi
+      VOICE_ID="$2"
       shift 2
       ;;
     --help|-h)
@@ -70,13 +199,43 @@ if [ -z "${POSITIONAL[0]:-}" ]; then
   exit 1
 fi
 
-TEXT="${POSITIONAL[0]}"
-VOICE="${POSITIONAL[1]:-${KOKORO_DEFAULT_VOICE:-af_bella}}"
+if [ -n "$VOICE_ID" ] && [ -n "${POSITIONAL[1]:-}" ]; then
+  echo "Error: pass either --voice-id or a positional voice, not both." >&2
+  usage
+  exit 1
+fi
+
+TEXT=$(normalize_space "${POSITIONAL[0]}")
+INTRODUCTION=$(normalize_space "$INTRODUCTION")
+AGENT_NAME=$(normalize_space "$AGENT_NAME")
+AGENT_ID="$(agent_identity)"
+VOICE_SEED="$AGENT_ID"
+if [ -n "$AGENT_NAME" ]; then
+  VOICE_SEED="$AGENT_NAME"
+fi
+VOICE="${VOICE_ID:-${POSITIONAL[1]:-}}"
+if [ -z "$VOICE" ]; then
+  VOICE="$(select_voice_from_seed "$VOICE_SEED")"
+fi
+INTRO_STATE_DIR="$(intro_state_dir)"
+INTRO_STATE_FILE="$INTRO_STATE_DIR/last-speaker"
+
+if [ -n "$INTRODUCTION" ]; then
+  INTRO_WORDS=$(word_count "$INTRODUCTION")
+  if [ "$INTRO_WORDS" -gt 30 ]; then
+    echo "Error: --introduction must be 30 words or fewer." >&2
+    exit 1
+  fi
+
+  if should_prepend_introduction; then
+    TEXT=$(prepend_introduction "$INTRODUCTION" "$TEXT")
+  fi
+fi
+
 OUTPUT_FILE="/tmp/tts_${RANDOM}.mp3"
 TMP_ERR="/tmp/tts_error_${RANDOM}.log"
 PAUSED_MEDIA_APPS=()
 
-TEXT=$(printf '%s' "$TEXT" | tr -s '[:space:]' ' ')
 if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
   echo "Error: KOKORO_API_ENDPOINT is not set." >&2
   echo "No KOKORO_API_ENDPOINT env var is set. Read references/setup.md for instructions on how to set it up." >&2
@@ -236,18 +395,20 @@ if [ "$NO_PLAY" -eq 1 ]; then
 fi
 
 echo "✓ Generated: $OUTPUT_FILE"
-if [ "$NO_PLAY" -eq 1 ]; then
-  echo "Playback skipped (--no-play)."
-else
-  pause_media_if_playing
-fi
+pause_media_if_playing
 
-if [ "$NO_PLAY" -eq 1 ]; then
-  :
-elif command -v afplay >/dev/null 2>&1; then
+PLAYED=0
+if command -v afplay >/dev/null 2>&1; then
   afplay "$OUTPUT_FILE"
+  PLAYED=1
 elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "$OUTPUT_FILE" >/dev/null 2>&1 || true
+  if xdg-open "$OUTPUT_FILE" >/dev/null 2>&1; then
+    PLAYED=1
+  fi
 else
   echo "Tip: open the file manually: $OUTPUT_FILE"
+fi
+
+if [ "$PLAYED" -eq 1 ]; then
+  record_agent_spoken
 fi
