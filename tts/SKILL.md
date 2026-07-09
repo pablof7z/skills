@@ -49,6 +49,9 @@ when a specific voice is required.
 By default, `scripts/tts` queues speech generation/playback in the background
 and returns immediately so the agent can keep working.
 
+Background workers share a speech gate, so only one audible TTS job speaks at a
+time even when multiple agents queue messages concurrently.
+
 On macOS, the background worker checks scriptable media apps before generation
 and again before playback. If Music or Spotify is already playing, it pauses
 them and resumes them a few seconds after playback ends.
