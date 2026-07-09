@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Marketing"
+  short_description: "Make repos trusted and launch-ready"
+  default_prompt: "Use $repo-marketing to rewrite this README for clearer positioning, proof, quick start, and trust signals."
