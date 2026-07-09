@@ -1,6 +1,6 @@
 # Skills
 
-A compact collection of agent skills for repo marketing, Nostr Cashu wallet guidance, text-to-speech, and high-level explanation.
+A compact collection of agent skills for design exploration, repo marketing, Nostr Cashu wallet guidance, text-to-speech, and high-level explanation.
 
 Use this repo when you want reusable agent behavior as plain folders instead of long prompts that have to be pasted into every session.
 
@@ -50,6 +50,7 @@ The agent should load `repo-marketing/SKILL.md`, then read `references/readme-pl
 
 | Skill | Use it for |
 |---|---|
+| [design-exploration-capture](design-exploration-capture/) | Capture iterative design explorations with notes, uncertainty hygiene, adjacent checks, and convergence gates. |
 | [high-level](high-level/) | Explain a topic, codebase, document, system, or workflow at a plain-language high level. |
 | [nip60](nip60/) | Build Cashu wallets on Nostr with NIP-60 wallets, NIP-61 nutzaps, and NIP-87 mint discovery. |
 | [repo-marketing](repo-marketing/) | Create, rewrite, or audit README files and repo structures for adoption, launch readiness, trust, and agent-friendliness. |
@@ -76,6 +77,10 @@ Some older guide-style folders in this repo are plain Markdown `SKILL.md` files.
 ```text
 .
 |-- README.md
+|-- design-exploration-capture/
+|   |-- SKILL.md
+|   |-- agents/openai.yaml
+|   `-- references/note-schema-and-examples.md
 |-- high-level/
 |   |-- SKILL.md
 |   `-- agents/openai.yaml
@@ -95,7 +100,7 @@ Some older guide-style folders in this repo are plain Markdown `SKILL.md` files.
 
 Review a skill before installing it. Skills are plain text plus optional local scripts, so the trust boundary is the folder you copy into your agent host.
 
-- `high-level`, `repo-marketing`, and `nip60` are primarily instruction and reference skills.
+- `design-exploration-capture`, `high-level`, `repo-marketing`, and `nip60` are primarily instruction and reference skills.
 - `tts` includes an executable helper and uses a Kokoro-compatible endpoint.
 - `nip60` may involve relays, keys, wallets, or signed events when used in real workflows. Keep secret keys out of prompts and shell history.
 - No repo-wide install script runs automatically.
