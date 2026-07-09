@@ -1,6 +1,6 @@
 # Skills
 
-A compact collection of agent skills for repo marketing, Nostr development, browser automation, text-to-speech, TENEX publishing, and high-level explanation.
+A compact collection of agent skills for repo marketing, Nostr Cashu wallet guidance, text-to-speech, and high-level explanation.
 
 Use this repo when you want reusable agent behavior as plain folders instead of long prompts that have to be pasted into every session.
 
@@ -50,13 +50,9 @@ The agent should load `repo-marketing/SKILL.md`, then read `references/readme-pl
 
 | Skill | Use it for |
 |---|---|
-| [chrome-cdp](chrome-cdp/) | Interact with a local Chrome browser session through a lightweight Chrome DevTools Protocol CLI. |
 | [high-level](high-level/) | Explain a topic, codebase, document, system, or workflow at a plain-language high level. |
-| [ndk-blossom](ndk-blossom/) | Build Nostr media flows with `@nostr-dev-kit/blossom`: uploads, server lists, imeta tags, and resilient media URLs. |
-| [ndk-core](ndk-core/) | Build product flows on `@nostr-dev-kit/ndk`: relays, signers, subscriptions, publishing, caching, and local-first behavior. |
 | [nip60](nip60/) | Build Cashu wallets on Nostr with NIP-60 wallets, NIP-61 nutzaps, and NIP-87 mint discovery. |
 | [repo-marketing](repo-marketing/) | Create, rewrite, or audit README files and repo structures for adoption, launch readiness, trust, and agent-friendliness. |
-| [tenex-agent](tenex-agent/) | Publish TENEX agent definition events, kind 4199, with the `nak` CLI. |
 | [tts](tts/) | Generate spoken audio from text with a Kokoro-compatible TTS endpoint. |
 
 ## How It Works
@@ -80,28 +76,15 @@ Some older guide-style folders in this repo are plain Markdown `SKILL.md` files.
 ```text
 .
 |-- README.md
-|-- chrome-cdp/
-|   |-- SKILL.md
-|   `-- scripts/cdp.mjs
 |-- high-level/
 |   |-- SKILL.md
 |   `-- agents/openai.yaml
-|-- ndk-blossom/
-|   |-- SKILL.md
-|   |-- agents/openai.yaml
-|   `-- references/
-|-- ndk-core/
-|   |-- SKILL.md
-|   |-- agents/openai.yaml
-|   `-- references/
 |-- nip60/
 |   `-- SKILL.md
 |-- repo-marketing/
 |   |-- SKILL.md
 |   |-- agents/openai.yaml
 |   `-- references/readme-playbook.md
-|-- tenex-agent/
-|   `-- SKILL.md
 `-- tts/
     |-- SKILL.md
     |-- references/setup.md
@@ -112,10 +95,9 @@ Some older guide-style folders in this repo are plain Markdown `SKILL.md` files.
 
 Review a skill before installing it. Skills are plain text plus optional local scripts, so the trust boundary is the folder you copy into your agent host.
 
-- `high-level`, `repo-marketing`, `ndk-core`, `ndk-blossom`, and `nip60` are primarily instruction and reference skills.
-- `chrome-cdp` includes `scripts/cdp.mjs` and requires a browser with remote debugging enabled. It is intended for explicit user-approved browser inspection or interaction.
+- `high-level`, `repo-marketing`, and `nip60` are primarily instruction and reference skills.
 - `tts` includes an executable helper and uses a Kokoro-compatible endpoint.
-- `tenex-agent`, `nip60`, and the Nostr-oriented NDK skills may involve relays, keys, wallets, or signed events when used in real workflows. Keep secret keys out of prompts and shell history.
+- `nip60` may involve relays, keys, wallets, or signed events when used in real workflows. Keep secret keys out of prompts and shell history.
 - No repo-wide install script runs automatically.
 
 ## Development
@@ -145,4 +127,4 @@ Avoid adding generic documentation files inside a skill folder unless the skill 
 
 ## License
 
-No license file is currently included. Add a license before redistributing or depending on this collection outside private/internal use.
+MIT. See [LICENSE](LICENSE).

@@ -21,3 +21,15 @@ Use natural sentences for best results.
 American English (default): `af_bella`, `af_heart`, `af_kore`, `af_nova`, `af_sarah`, `am_michael`, `am_puck`
 
 Other languages & accents available: British English, Japanese, Mandarin, French, Italian, Portuguese.
+
+## Playback control
+
+By default, `scripts/tts` generates an MP3 and plays it automatically with the local audio player when available.
+
+Use `--no-play` when the user wants the generated MP3 path returned instead of autoplayed:
+
+```bash
+./scripts/tts --no-play "Hello world" af_bella
+```
+
+With `--no-play`, stdout is the MP3 file path.

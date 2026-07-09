@@ -1,4 +1,0 @@
-interface:
-  display_name: "NDK Blossom"
-  short_description: "Build deeply with NDK Blossom"
-  default_prompt: "Use $ndk-blossom when you need the mental model and implementation patterns for building resilient media flows with @nostr-dev-kit/blossom."

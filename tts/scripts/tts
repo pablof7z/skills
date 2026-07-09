@@ -7,24 +7,58 @@ if [ -f "$ENV_FILE" ]; then
   source "$ENV_FILE"
 fi
 
+NO_PLAY=0
+POSITIONAL=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --no-play)
+      NO_PLAY=1
+      ;;
+    -h|--help)
+      echo "Usage: ./scripts/tts [--no-play] 'Your text here' [voice]"
+      echo "Example: ./scripts/tts --no-play 'Hello world' af_bella"
+      exit 0
+      ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        POSITIONAL+=( "$1" )
+        shift
+      done
+      break
+      ;;
+    *)
+      POSITIONAL+=( "$1" )
+      ;;
+  esac
+  shift
+done
+
+if [ -z "${POSITIONAL[0]:-}" ]; then
+  echo "Usage: ./scripts/tts [--no-play] 'Your text here' [voice]" >&2
+  echo "Example: ./scripts/tts --no-play 'Hello world' af_bella" >&2
+  exit 1
+fi
+
+if [ "${#POSITIONAL[@]}" -gt 2 ]; then
+  echo "Error: too many arguments." >&2
+  echo "Usage: ./scripts/tts [--no-play] 'Your text here' [voice]" >&2
+  exit 1
+fi
+
+TEXT="${POSITIONAL[0]}"
+VOICE="${POSITIONAL[1]:-${KOKORO_DEFAULT_VOICE:-af_bella}}"
+OUTPUT_FILE="/tmp/tts_${RANDOM}.mp3"
+TMP_ERR="/tmp/tts_error_${RANDOM}.log"
+
+TEXT=$(printf '%s' "$TEXT" | tr -s '[:space:]' ' ')
+
 if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
   echo "Error: KOKORO_API_ENDPOINT is not set." >&2
   echo "No KOKORO_API_ENDPOINT env var is set. Read references/setup.md for instructions on how to set it up." >&2
   exit 1
 fi
-
-if [ -z "${1:-}" ]; then
-  echo "Usage: ./scripts/tts 'Your text here' [voice]" >&2
-  echo "Example: ./scripts/tts 'Hello world' af_bella" >&2
-  exit 1
-fi
-
-TEXT="$1"
-VOICE="${2:-${KOKORO_DEFAULT_VOICE:-af_bella}}"
-OUTPUT_FILE="/tmp/tts_${RANDOM}.mp3"
-TMP_ERR="/tmp/tts_error_${RANDOM}.log"
-
-TEXT=$(printf '%s' "$TEXT" | tr -s '[:space:]' ' ')
 
 API_URL="$KOKORO_API_ENDPOINT"
 if [[ "$API_URL" != */v1/audio/speech ]]; then
@@ -80,6 +114,11 @@ if [ ! -s "$OUTPUT_FILE" ]; then
   echo "Error: Empty response from TTS server" >&2
   rm -f "$OUTPUT_FILE"
   exit 1
+fi
+
+if [ "$NO_PLAY" -eq 1 ]; then
+  echo "$OUTPUT_FILE"
+  exit 0
 fi
 
 echo "✓ Generated: $OUTPUT_FILE"
