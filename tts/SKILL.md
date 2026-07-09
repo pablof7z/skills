@@ -22,14 +22,15 @@ American English (default): `af_bella`, `af_heart`, `af_kore`, `af_nova`, `af_sa
 
 Other languages & accents available: British English, Japanese, Mandarin, French, Italian, Portuguese.
 
-## Playback control
+## Playback behavior
+
+On macOS, `scripts/tts` checks scriptable media apps before generation and again before playback. If Music or Spotify is already playing, it pauses them and resumes them a few seconds after playback ends.
+
+- Use `--no-play` to generate the MP3 without playing it.
+- Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
+- Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
+- Use `TTS_MEDIA_APPS="Music,Spotify"` to customize the checked apps.
 
 By default, `scripts/tts` generates an MP3 and plays it automatically with the local audio player when available.
 
-Use `--no-play` when the user wants the generated MP3 path returned instead of autoplayed:
-
-```bash
-./scripts/tts --no-play "Hello world" af_bella
-```
-
-With `--no-play`, stdout is the MP3 file path.
+`./scripts/tts --no-play "Hello world" af_bella` will skip playback.

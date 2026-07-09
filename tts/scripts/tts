@@ -7,17 +7,36 @@ if [ -f "$ENV_FILE" ]; then
   source "$ENV_FILE"
 fi
 
+usage() {
+  echo "Usage: ./scripts/tts [--no-play] [--no-media-pause] [--resume-delay seconds] 'Your text here' [voice]" >&2
+  echo "Example: ./scripts/tts 'Hello world' af_bella" >&2
+}
+
 NO_PLAY=0
+MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
+RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
 POSITIONAL=()
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-play)
       NO_PLAY=1
+      shift
       ;;
-    -h|--help)
-      echo "Usage: ./scripts/tts [--no-play] 'Your text here' [voice]"
-      echo "Example: ./scripts/tts --no-play 'Hello world' af_bella"
+    --no-media-pause)
+      MEDIA_CONTROL=0
+      shift
+      ;;
+    --resume-delay)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --resume-delay requires a value in seconds." >&2
+        exit 1
+      fi
+      RESUME_DELAY="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
       exit 0
       ;;
     --)
@@ -28,22 +47,26 @@ while [ "$#" -gt 0 ]; do
       done
       break
       ;;
+    -*)
+      echo "Error: unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
     *)
       POSITIONAL+=( "$1" )
+      shift
       ;;
   esac
-  shift
 done
-
-if [ -z "${POSITIONAL[0]:-}" ]; then
-  echo "Usage: ./scripts/tts [--no-play] 'Your text here' [voice]" >&2
-  echo "Example: ./scripts/tts --no-play 'Hello world' af_bella" >&2
-  exit 1
-fi
 
 if [ "${#POSITIONAL[@]}" -gt 2 ]; then
   echo "Error: too many arguments." >&2
-  echo "Usage: ./scripts/tts [--no-play] 'Your text here' [voice]" >&2
+  usage
+  exit 1
+fi
+
+if [ -z "${POSITIONAL[0]:-}" ]; then
+  usage
   exit 1
 fi
 
@@ -51,9 +74,9 @@ TEXT="${POSITIONAL[0]}"
 VOICE="${POSITIONAL[1]:-${KOKORO_DEFAULT_VOICE:-af_bella}}"
 OUTPUT_FILE="/tmp/tts_${RANDOM}.mp3"
 TMP_ERR="/tmp/tts_error_${RANDOM}.log"
+PAUSED_MEDIA_APPS=()
 
 TEXT=$(printf '%s' "$TEXT" | tr -s '[:space:]' ' ')
-
 if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
   echo "Error: KOKORO_API_ENDPOINT is not set." >&2
   echo "No KOKORO_API_ENDPOINT env var is set. Read references/setup.md for instructions on how to set it up." >&2
@@ -64,6 +87,93 @@ API_URL="$KOKORO_API_ENDPOINT"
 if [[ "$API_URL" != */v1/audio/speech ]]; then
   API_URL="${API_URL%/}/v1/audio/speech"
 fi
+
+media_control_enabled() {
+  case "$MEDIA_CONTROL" in
+    0|false|False|FALSE|no|No|NO|off|Off|OFF)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+app_is_running() {
+  local app="$1"
+  pgrep -x "$app" >/dev/null 2>&1
+}
+
+scriptable_player_state() {
+  local app="$1"
+  osascript -e "tell application \"$app\" to player state as string" 2>/dev/null || true
+}
+
+scriptable_player_command() {
+  local app="$1"
+  local command="$2"
+  osascript -e "tell application \"$app\" to $command" >/dev/null 2>&1
+}
+
+pause_media_if_playing() {
+  if ! media_control_enabled || ! command -v osascript >/dev/null 2>&1 || ! command -v pgrep >/dev/null 2>&1; then
+    return
+  fi
+
+  local app state
+  local paused_now=()
+  local media_apps="${TTS_MEDIA_APPS:-Music,Spotify}"
+  local old_ifs="$IFS"
+  IFS=','
+  # shellcheck disable=SC2206
+  local apps=($media_apps)
+  IFS="$old_ifs"
+
+  for app in "${apps[@]}"; do
+    app=$(printf '%s' "$app" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -z "$app" ] || ! app_is_running "$app"; then
+      continue
+    fi
+
+    state="$(scriptable_player_state "$app")"
+    if [ "$state" = "playing" ]; then
+      if scriptable_player_command "$app" "pause"; then
+        PAUSED_MEDIA_APPS+=("$app")
+        paused_now+=("$app")
+      fi
+    fi
+  done
+
+  if [ "${#paused_now[@]}" -gt 0 ]; then
+    echo "Paused media: ${paused_now[*]}" >&2
+  fi
+}
+
+resume_paused_media() {
+  if [ "${#PAUSED_MEDIA_APPS[@]}" -eq 0 ]; then
+    return
+  fi
+
+  sleep "$RESUME_DELAY" 2>/dev/null || true
+
+  local app
+  for app in "${PAUSED_MEDIA_APPS[@]}"; do
+    if app_is_running "$app"; then
+      scriptable_player_command "$app" "play" || true
+    fi
+  done
+}
+
+cleanup() {
+  local exit_code=$?
+  trap - EXIT
+  set +e
+  rm -f "$TMP_ERR"
+  resume_paused_media
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
 
 if command -v python3 >/dev/null 2>&1; then
   PAYLOAD=$(python3 - "$TEXT" "$VOICE" <<'PY'
@@ -93,8 +203,12 @@ fi
 
 CURL_OPTS+=( "$API_URL" )
 
+pause_media_if_playing
+
+set +e
 HTTP_CODE=$("${CURL_OPTS[@]}" -w "%{http_code}" -o "$OUTPUT_FILE" 2>"$TMP_ERR")
 CURL_STATUS=$?
+set -e
 
 if [ "$CURL_STATUS" -ne 0 ]; then
   echo "Error: failed to call TTS endpoint" >&2
@@ -122,7 +236,15 @@ if [ "$NO_PLAY" -eq 1 ]; then
 fi
 
 echo "✓ Generated: $OUTPUT_FILE"
-if command -v afplay >/dev/null 2>&1; then
+if [ "$NO_PLAY" -eq 1 ]; then
+  echo "Playback skipped (--no-play)."
+else
+  pause_media_if_playing
+fi
+
+if [ "$NO_PLAY" -eq 1 ]; then
+  :
+elif command -v afplay >/dev/null 2>&1; then
   afplay "$OUTPUT_FILE"
 elif command -v xdg-open >/dev/null 2>&1; then
   xdg-open "$OUTPUT_FILE" >/dev/null 2>&1 || true
