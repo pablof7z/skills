@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,11 +45,9 @@ MUTATING_GIT_COMMANDS = {
     "cherry-pick",
     "clean",
     "commit",
-    "fetch",
     "merge",
     "mv",
     "pull",
-    "push",
     "rebase",
     "reset",
     "restore",
@@ -115,6 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local WorktreeGuard-lite setup")
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    denials_parser = subparsers.add_parser("denials", help="Inspect denied action log")
+    denials_parser.add_argument("--tail", type=int, default=20)
+    denials_parser.add_argument("--repo")
+    denials_parser.add_argument("--session")
+    denials_parser.add_argument("--json", action="store_true")
+    denials_parser.set_defaults(func=cmd_denials)
 
     hook_parser = subparsers.add_parser("hook", help="Run a harness hook")
     hook_subparsers = hook_parser.add_subparsers(dest="harness", required=True)
@@ -231,6 +237,48 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"- {repo.get('base_path')}")
     print(f"active grants: {len(grants)}")
     return 0 if git_path else 1
+
+
+def cmd_denials(args: argparse.Namespace) -> int:
+    records = read_denial_records()
+    if args.repo:
+        repo = str(resolve_path(args.repo))
+        records = [record for record in records if record.get("base_path") == repo]
+    if args.session:
+        records = [record for record in records if record.get("session_id") == args.session]
+
+    tail_count = max(0, args.tail)
+    tail_records = records[-tail_count:] if tail_count else []
+    if args.json:
+        emit(
+            {
+                "log": str(deny_log_path()),
+                "total": len(records),
+                "by_repo": dict(Counter(str(record.get("base_path") or "") for record in records)),
+                "by_session": dict(Counter(str(record.get("session_id") or "") for record in records)),
+                "by_command": dict(Counter(str(record.get("command") or "") for record in records)),
+                "tail": tail_records,
+            }
+        )
+        return 0
+
+    print(f"deny log: {deny_log_path()}")
+    print(f"total denials: {len(records)}")
+    print("by repo:")
+    for repo, count in Counter(str(record.get("base_path") or "") for record in records).most_common():
+        print(f"  {count:>4}  {repo}")
+    print("by command:")
+    for command, count in Counter(str(record.get("command") or "") for record in records).most_common(10):
+        print(f"  {count:>4}  {command}")
+    print(f"tail ({len(tail_records)}):")
+    for record in tail_records:
+        timestamp = record.get("timestamp", "")
+        base_path = record.get("base_path", "")
+        effective_cwd = record.get("effective_cwd", "")
+        session_id = record.get("session_id", "")
+        command = record.get("command", "")
+        print(f"  {timestamp} repo={base_path} cwd={effective_cwd} session={session_id} cmd={command}")
+    return 0
 
 
 def cmd_hook_codex(args: argparse.Namespace) -> int:
@@ -822,7 +870,7 @@ def denial_message(base_path: Path) -> str:
         "You are in the protected base checkout:\n"
         f"{base_path}\n\n"
         "This session may read this checkout, but may not edit files, switch "
-        "branches, or mutate Git state here.\n\n"
+        "branches, or mutate the protected checkout state here.\n\n"
         "Continue from a Git worktree instead. Use the repository's normal "
         "worktree workflow; WorktreeGuard will allow mutations outside this "
         "protected base checkout.\n\n"
@@ -841,6 +889,9 @@ def log_denied_action(
     cwd: Path,
     operation: dict[str, Any],
 ) -> None:
+    tool_input = operation.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event": event,
@@ -856,7 +907,10 @@ def log_denied_action(
         "turn_id": payload_string(payload, "turn_id", "turnId"),
         "transcript_path": payload_string(payload, "transcript_path", "transcriptPath"),
         "base_path": str(base_path),
+        "payload_cwd": str(resolve_path(str(payload.get("cwd") or ""))) if payload.get("cwd") else "",
         "effective_cwd": str(cwd),
+        "operation_workdir": operation_workdir(tool_input),
+        "tool_input_keys": sorted(str(key) for key in tool_input.keys()),
         "tool_name": str(operation.get("tool_name") or ""),
         "command": str(operation.get("command") or ""),
         "reason": "protected_base_mutation",
@@ -870,12 +924,41 @@ def log_denied_action(
         return
 
 
+def operation_workdir(tool_input: dict[str, Any]) -> str:
+    for key in ("workdir", "cwd", "working_directory", "directory"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def payload_string(payload: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = payload.get(key)
         if value is not None:
             return str(value)
     return ""
+
+
+def read_denial_records() -> list[dict[str, Any]]:
+    path = deny_log_path()
+    if not path.is_file():
+        return []
+    records: list[dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
 
 
 def load_hook_payload(stdin: bytes) -> dict[str, Any]:
