@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" session-start",
+            "command": "WTG_HOOK=\"$HOME/.local/bin/wtg-hook-codex\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" session-start; else \"${PLUGIN_ROOT}/bin/wtg-hook-codex\" session-start; fi",
             "timeout": 5,
             "statusMessage": "Registering WorktreeGuard session"
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" pre-tool-use",
+            "command": "WTG_HOOK=\"$HOME/.local/bin/wtg-hook-codex\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" pre-tool-use; else \"${PLUGIN_ROOT}/bin/wtg-hook-codex\" pre-tool-use; fi",
             "timeout": 5,
             "statusMessage": "Checking WorktreeGuard policy"
           }
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" permission-request",
+            "command": "WTG_HOOK=\"$HOME/.local/bin/wtg-hook-codex\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" permission-request; else \"${PLUGIN_ROOT}/bin/wtg-hook-codex\" permission-request; fi",
             "timeout": 10,
             "statusMessage": "Checking WorktreeGuard approval"
           }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" post-tool-use",
+            "command": "WTG_HOOK=\"$HOME/.local/bin/wtg-hook-codex\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" post-tool-use; else \"${PLUGIN_ROOT}/bin/wtg-hook-codex\" post-tool-use; fi",
             "timeout": 5,
             "statusMessage": "Recording WorktreeGuard tool result"
           }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" stop",
+            "command": "WTG_HOOK=\"$HOME/.local/bin/wtg-hook-codex\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" stop; else \"${PLUGIN_ROOT}/bin/wtg-hook-codex\" stop; fi",
             "timeout": 5,
             "statusMessage": "Saving WorktreeGuard session state"
           }

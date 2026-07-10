@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Codex hook entrypoint for WorktreeGuard.
 
-Prefer a real `wtg` binary when one is installed. Otherwise use the bundled
-WorktreeGuard-lite command shipped inside this plugin package so the plugin is
-testable immediately after installation.
+Use the bundled WorktreeGuard-lite command shipped inside this plugin package
+by default so cache fallback hooks are self-contained. Set `WTG_BIN` to route
+hook events to a different WorktreeGuard command.
 """
 
 from __future__ import annotations
@@ -41,12 +41,16 @@ def select_wtg_binary() -> Path:
     if override:
         return Path(override).expanduser().resolve(strict=False)
 
+    plugin_root = Path(__file__).resolve().parents[1]
+    bundled = plugin_root / "bin" / "wtg"
+    if bundled.is_file():
+        return bundled
+
     external = shutil.which("wtg")
     if external:
         return Path(external).resolve(strict=False)
 
-    plugin_root = Path(__file__).resolve().parents[1]
-    return plugin_root / "bin" / "wtg"
+    return bundled
 
 
 if __name__ == "__main__":
