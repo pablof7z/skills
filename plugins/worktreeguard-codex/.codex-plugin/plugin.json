@@ -1,7 +1,7 @@
 {
   "name": "worktreeguard-codex",
-  "version": "0.1.0+codex.20260710083000",
-  "description": "Codex hooks and a bundled local command for WorktreeGuard-managed Git worktrees.",
+  "version": "0.1.0+codex.20260710090900",
+  "description": "Codex hooks and a bundled local command for WorktreeGuard-protected Git worktrees.",
   "author": {
     "name": "Pablo Fernandez",
     "url": "https://github.com/pablof7z"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "WorktreeGuard Codex",
     "shortDescription": "Keep Codex writes out of protected base checkouts.",
-    "longDescription": "Installs Codex lifecycle hooks plus a bundled local WorktreeGuard command so protected base checkouts deny mutating tool calls, guide agents to use native Git worktrees, and honor human-approved base access grants.",
+    "longDescription": "Installs Codex lifecycle hooks plus a bundled local WorktreeGuard command so Git main worktrees are protected by default, linked worktrees remain writable, and human-approved base access grants are honored.",
     "developerName": "Pablo Fernandez",
     "category": "Productivity",
     "capabilities": [
