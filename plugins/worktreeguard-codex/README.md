@@ -15,6 +15,7 @@ directories are ignored.
 <plugin-root>/bin/wtg status --repo <repo>
 <plugin-root>/bin/wtg request-base-access --repo <repo> --reason "<reason>"
 <plugin-root>/bin/wtg denials --tail 50
+<plugin-root>/bin/wtg denials -f --color always
 ```
 
 The full WorktreeGuard CLI and daemon should eventually own durable policy,
@@ -49,6 +50,8 @@ Start a new Codex session after installation so the hook package is loaded.
 - Denied actions are logged to `~/worktreeguard-denied-actions.jsonl` by
   default. Set `WTG_DENY_LOG_FILE` to use a different JSONL file.
 - Use `wtg denials --tail 50` to summarize and inspect recent denials.
+- Use `wtg denials -f` to follow new denials live. Human output is colorized
+  automatically on terminals; use `--color always` or `--no-color` to override.
 
 ## Hook Coverage
 
