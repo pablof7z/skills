@@ -2,7 +2,7 @@
 
 Turn recurring agent workflows into named skills you can invoke instead of re-explaining the job.
 
-This catalog is for people who use coding agents often enough that the same high-value instructions keep coming back: repo launch work, design exploration, high-level explanation, speech generation, and Nostr Cashu wallet implementation guidance.
+This catalog is for people who use coding agents often enough that the same high-value instructions keep coming back: repo launch work, design exploration, high-level explanation, speech generation, Nostr Cashu wallet implementation guidance, and local Codex plugin guardrails.
 
 Instead of pasting a long prompt every time, install the relevant skill once and invoke it by name. The agent gets a focused workflow, the right reference material, and clearer boundaries for what it should produce.
 
@@ -40,6 +40,12 @@ Expected result: the agent loads `repo-marketing`, builds a marketing brief, and
 | [`tts`](tts/) | The useful output is spoken audio, not another text reply. | Text-to-speech guidance plus a local helper that sends text to a Kokoro-compatible endpoint and returns MP3 audio. |
 | [`nip60`](nip60/) | You are implementing Cashu wallets or nutzaps on Nostr with NDK. | Event kind references, wallet flows, token operations, nutzap monitoring, mint discovery, and security notes. |
 
+## Plugins
+
+| Plugin | Use it when | What it gives you |
+|---|---|---|
+| [`worktreeguard-codex`](plugins/worktreeguard-codex/) | Codex should respect WorktreeGuard-protected base checkouts and do mutating work in Git worktrees. | Codex lifecycle hooks that delegate policy decisions to `wtg` and return actionable worktree instructions on denied base-checkout mutations. |
+
 ## Skills By Job
 
 ### Make A Repo Easier To Try
@@ -74,6 +80,7 @@ Most skills here are instruction and reference material. A few touch local files
 - `design-exploration-capture` may write local notes when it is actively used for design exploration.
 - `tts` reads `~/.env.tts` by default, calls your configured Kokoro-compatible endpoint, writes MP3 files under `/tmp`, and may pause/resume Music or Spotify on macOS unless disabled.
 - `nip60` is wallet implementation guidance. Real use can involve Nostr keys, encrypted events, public nutzap events, relays, mints, and signed wallet operations.
+- `worktreeguard-codex` installs Codex hooks that call the local `wtg` binary during session and tool events. Full enforcement depends on the WorktreeGuard CLI and daemon being installed and trusted.
 
 For `tts`, configure the endpoint before use:
 

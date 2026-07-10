@@ -1,0 +1,20 @@
+{
+  "name": "skills-local",
+  "interface": {
+    "displayName": "Skills Local"
+  },
+  "plugins": [
+    {
+      "name": "worktreeguard-codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/worktreeguard-codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

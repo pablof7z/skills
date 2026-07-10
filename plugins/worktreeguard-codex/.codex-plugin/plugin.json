@@ -1,0 +1,33 @@
+{
+  "name": "worktreeguard-codex",
+  "version": "0.1.0",
+  "description": "Codex hook adapter for WorktreeGuard-managed Git worktrees.",
+  "author": {
+    "name": "Pablo Fernandez",
+    "url": "https://github.com/pablof7z"
+  },
+  "repository": "https://github.com/pablof7z/skills",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "git",
+    "worktree",
+    "hooks",
+    "guardrails"
+  ],
+  "interface": {
+    "displayName": "WorktreeGuard Codex",
+    "shortDescription": "Route Codex mutations through WorktreeGuard.",
+    "longDescription": "Installs Codex lifecycle hooks that delegate tool-use decisions to the WorktreeGuard CLI, guiding agents away from protected base checkouts and into managed Git worktrees.",
+    "developerName": "Pablo Fernandez",
+    "category": "Productivity",
+    "capabilities": [
+      "Hooks",
+      "Git",
+      "Policy"
+    ],
+    "defaultPrompt": [
+      "Use WorktreeGuard before editing this repo."
+    ]
+  }
+}

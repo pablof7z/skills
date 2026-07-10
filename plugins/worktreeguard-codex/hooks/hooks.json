@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" session-start",
+            "timeout": 5,
+            "statusMessage": "Registering WorktreeGuard session"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" pre-tool-use",
+            "timeout": 5,
+            "statusMessage": "Checking WorktreeGuard policy"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" permission-request",
+            "timeout": 10,
+            "statusMessage": "Checking WorktreeGuard approval"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" post-tool-use",
+            "timeout": 5,
+            "statusMessage": "Recording WorktreeGuard tool result"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/bin/wtg-hook-codex\" stop",
+            "timeout": 5,
+            "statusMessage": "Saving WorktreeGuard session state"
+          }
+        ]
+      }
+    ]
+  }
+}
