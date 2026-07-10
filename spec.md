@@ -245,13 +245,18 @@ Read-only repo inspection:
 
 WorktreeGuard control commands:
   wtg status
-  wtg create-worktree
   wtg request-base-access
   wtg current
   wtg doctor
+
+Native worktree creation:
+  git worktree add commands whose target path is outside the protected base checkout
 ```
 
-Do not allow raw `git worktree add` by default. Force worktree creation through `wtg create-worktree` so path layout, branch naming, env copying, audit logging, and policy state stay consistent.
+Do not replace Git's worktree interface. Allow `git worktree add` when it creates
+a linked worktree outside the protected base checkout. WorktreeGuard should
+discover linked worktrees through Git instead of forcing agents through a
+product-specific wrapper.
 
 ---
 
@@ -323,8 +328,7 @@ or mutate Git state here.
 
 Create a worktree and continue there:
 
-  wtg create-worktree --name <short-task-name>
-  cd <printed-worktree-path>
+  Use the repository's normal Git worktree workflow.
 
 Base access requires a human-approved reason:
 
@@ -335,22 +339,18 @@ Base access requires a human-approved reason:
 
 ## 6.4 Agent creates worktree
 
-```bash
-wtg create-worktree --name fix-login
-```
-
-Output:
-
-```text
-/Users/pablo/dev/.worktrees/myrepo/fix-login-7f3a
-```
-
-The path should be the final stdout line to make it easy for agents to parse.
+Use the repository's normal Git worktree workflow.
 
 Then:
 
 ```bash
-cd /Users/pablo/dev/.worktrees/myrepo/fix-login-7f3a
+cd ../myrepo-fix-login
+```
+
+WorktreeGuard should discover the linked worktree from Git:
+
+```bash
+git worktree list --porcelain
 ```
 
 Writes are allowed there.
@@ -392,7 +392,7 @@ If denied:
 
 ```text
 Denied. Create a worktree instead:
-  wtg create-worktree --name <task>
+  Use the repository's normal Git worktree workflow.
 ```
 
 The agent must not be able to approve its own request. Do not provide a normal `wtg approve` shell command.
@@ -454,7 +454,6 @@ allow = [
 allow = [
   "wtg status",
   "wtg current",
-  "wtg create-worktree",
   "wtg request-base-access",
   "wtg doctor"
 ]
@@ -628,7 +627,7 @@ Internal decision:
   "repo_id": "sha256:...",
   "severity": "blocking",
   "suggested_commands": [
-    "wtg create-worktree --name <short-task-name>",
+    "Use the repository's normal Git worktree workflow.",
     "wtg request-base-access --reason \"...\" --scope session"
   ]
 }
@@ -753,7 +752,7 @@ Shell:
   Bash, Shell, terminal commands
 
 Worktree control:
-  wtg create-worktree
+  git worktree add
   wtg request-base-access
   wtg status
 ```
@@ -779,7 +778,7 @@ Allowed in base:
   git diff -- src/foo.ts
   rg "login" src
   cat package.json
-  wtg create-worktree --name login-fix
+  git worktree add with a target outside the protected base checkout
 
 Denied in base:
   npm test
@@ -833,10 +832,12 @@ git commit
 git tag
 git update-index
 git update-ref
-git worktree add/remove/move/repair/prune
+git worktree remove/move/repair/prune
 ```
 
-In v1, only allow `git worktree list` directly. Route create/remove through `wtg`.
+In v1, allow `git worktree add` directly when the target path is outside the
+protected base checkout. Continue to block worktree remove/move/repair/prune in
+the protected base checkout unless a human grant exists.
 
 ---
 
@@ -1229,45 +1230,25 @@ Allow adopted dirty baseline by storing hashes and restoring to that baseline.
 
 # 17. Worktree creation spec
 
-Command:
+Agents should use the repository's normal Git worktree workflow. WorktreeGuard
+should only verify that mutating work is happening outside the protected base
+checkout.
 
-```bash
-wtg create-worktree --name fix-login
-```
-
-Defaults:
+Policy:
 
 ```text
-Root:
-  ~/dev/.worktrees/<repo-name>/
-
-Path:
-  ~/dev/.worktrees/<repo-name>/<task>-<short-session>
-
-Branch:
-  agent/<task>-<short-session>
-
-Base ref:
-  origin/main if available, otherwise current protected HEAD
-```
-
-Implementation:
-
-```bash
-git fetch --quiet --prune origin    # optional, configurable
-git worktree add -b "$BRANCH" "$PATH" "$BASE_REF"
+WorktreeGuard does not pick the branch name, base ref, path layout, or setup
+commands for the agent. Those are repository and agent workflow concerns.
+WorktreeGuard only verifies that the resulting linked worktree is outside the
+protected base checkout.
 ```
 
 Requirements:
 
 ```text
 - Worktree path must not be inside the protected base checkout.
-- Branch name must be unique.
-- Path must be unique.
-- Record worktree in SQLite.
-- Copy ignored files only from approved include list.
-- Run setup commands only if configured.
-- Print final worktree path as final stdout line.
+- Discover linked worktrees from Git state.
+- Do not require a WorktreeGuard wrapper command for creation.
 ```
 
 Support `.worktreeinclude` semantics:
@@ -1538,12 +1519,9 @@ PermissionRequest deny:
 
 ## Codex worktree handling
 
-Codex worktrees are documented for Codex in the ChatGPT desktop app, and the docs say worktrees are available only in Codex in the ChatGPT desktop app. ([OpenAI Developers][6]) Therefore the Codex adapter should not assume every Codex surface can create/enter a native Codex worktree. It should guide the agent to:
+Codex worktrees are documented for Codex in the ChatGPT desktop app, and the docs say worktrees are available only in Codex in the ChatGPT desktop app. ([OpenAI Developers][6]) Therefore the Codex adapter should not assume every Codex surface can create/enter a native Codex worktree. It should guide the agent to normal Git:
 
-```bash
-wtg create-worktree --name <task>
-cd <printed-path>
-```
+Use the repository's normal Git worktree workflow.
 
 For Codex Desktop users who use native Handoff into Local, WorktreeGuard should require a temporary handoff lease. Otherwise the watcher may interpret the Local mutation as unauthorized base drift.
 
@@ -1625,13 +1603,6 @@ wtg protect [--repo PATH]
 wtg unprotect [--repo PATH]
 wtg status [--repo PATH]
 wtg current
-
-wtg create-worktree \
-  [--repo PATH] \
-  --name NAME \
-  [--base-ref REF] \
-  [--branch BRANCH] \
-  [--print-env]
 
 wtg list-worktrees [--repo PATH]
 wtg remove-worktree PATH [--force]
@@ -1746,8 +1717,7 @@ or mutate Git state here.
 
 Create a worktree and continue there:
 
-  wtg create-worktree --name <short-task-name>
-  cd <printed-worktree-path>
+  Use the repository's normal Git worktree workflow.
 
 If base access is truly required, request a human grant with a specific reason:
 
@@ -1766,8 +1736,7 @@ Do not switch branches in the protected base checkout:
 
 Use a worktree for branch-specific work:
 
-  wtg create-worktree --name <branch-or-task-name> --base-ref {current_ref}
-  cd <printed-worktree-path>
+  Use the repository's normal Git worktree workflow.
 ```
 
 ## Watcher rollback notice
@@ -1781,7 +1750,7 @@ Reverted paths:
 
 Continue in a worktree instead:
 
-  wtg create-worktree --name <short-task-name>
+  Use the repository's normal Git worktree workflow.
 ```
 
 ---
@@ -1844,7 +1813,6 @@ Deliver:
 - wtg status
 - wtg init
 - wtg protect
-- wtg create-worktree
 - wtg hook generic with JSON input/output
 ```
 
@@ -1896,7 +1864,7 @@ Acceptance:
 ```text
 - Codex apply_patch in base denied
 - Codex Bash git switch in base denied
-- Codex can run wtg create-worktree
+- Codex can run git worktree add outside the protected base
 - worktree writes allowed
 ```
 
@@ -2004,7 +1972,7 @@ Command classifier:
   - git switch denied
   - echo > file denied in base
   - python -c unknown denied in base
-  - wtg create-worktree allowed
+  - git worktree add outside protected base allowed
 
 Grant matcher:
   - operation grant matches same operation
@@ -2077,7 +2045,7 @@ unknown shell in base:
   deny
 
 raw git worktree add:
-  deny; tell agent to use wtg create-worktree
+  allow when the target path is outside the protected base checkout
 
 grant TTL:
   30 minutes
@@ -2108,9 +2076,12 @@ approval:
 
 # 28. Key product decisions
 
-## Decision 1: Make worktree creation your own primitive
+## Decision 1: Do not replace Git worktree creation
 
-Even though Claude Code and Codex have worktree features, WorktreeGuard should own `wtg create-worktree`. This keeps behavior consistent across harnesses, and it lets you standardize setup, ignored-file copying, branch names, cleanup, and audit logs.
+WorktreeGuard should not replace Git's worktree interface. Agents should use
+normal Git worktree workflows. WorktreeGuard can still inspect linked worktree
+state and enforce that mutating work happens outside the protected base
+checkout.
 
 ## Decision 2: Fail closed for unknown shell in base
 

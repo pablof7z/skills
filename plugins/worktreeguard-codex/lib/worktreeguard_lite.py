@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import random
-import re
 import shlex
 import shutil
 import subprocess
@@ -21,7 +18,6 @@ READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS"}
 WRITE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 READ_ONLY_COMMANDS = {"cat", "grep", "head", "ls", "pwd", "rg", "tail"}
 WTG_CONTROL_COMMANDS = {
-    "create-worktree",
     "current",
     "doctor",
     "hook",
@@ -29,6 +25,7 @@ WTG_CONTROL_COMMANDS = {
     "request-base-access",
     "status",
 }
+DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 SHELL_META = ("\n", "&&", "||", ";", "|", ">", "<", "`", "$(")
 
 
@@ -62,21 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
     current_parser.add_argument("--repo", default=".")
     current_parser.set_defaults(func=cmd_current)
 
-    create_parser = subparsers.add_parser("create-worktree", help="Create an agent worktree")
-    create_parser.add_argument("--repo", default=".")
-    create_parser.add_argument("--name", required=True)
-    create_parser.add_argument("--base-ref")
-    create_parser.add_argument("--branch")
-    create_parser.add_argument("--print-env", action="store_true")
-    create_parser.set_defaults(func=cmd_create_worktree)
-
     request_parser = subparsers.add_parser(
         "request-base-access",
-        help="Explain why protected base access is needed",
+        help="Ask the local human for temporary protected-base access",
     )
     request_parser.add_argument("--repo", default=".")
     request_parser.add_argument("--reason", required=True)
-    request_parser.add_argument("--scope", default="session")
+    request_parser.add_argument("--scope", default="session", choices=["once", "operation", "session"])
+    request_parser.add_argument("--ttl-seconds", type=int, default=DEFAULT_GRANT_TTL_SECONDS)
     request_parser.add_argument("--wait", action="store_true")
     request_parser.add_argument("--timeout", type=int, default=0)
     request_parser.set_defaults(func=cmd_request_base_access)
@@ -120,7 +110,6 @@ def cmd_protect(args: argparse.Namespace) -> int:
         "common_git_dir": str(repo.common_git_dir),
         "branch": repo.branch,
         "head": repo.head,
-        "worktree_root": str(default_worktree_root(repo.base_path)),
         "protected_at": int(time.time()),
     }
     save_state(state)
@@ -137,7 +126,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Protected: {protected['base_path']}")
     print(f"Branch: {protected.get('branch', repo.branch)}")
     print(f"HEAD: {protected.get('head', repo.head)}")
-    print(f"Worktree root: {protected.get('worktree_root')}")
     return 0
 
 
@@ -155,53 +143,38 @@ def cmd_current(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_create_worktree(args: argparse.Namespace) -> int:
-    cwd = resolve_path(args.repo)
-    protected = protected_repo_for_path(cwd)
+def cmd_request_base_access(args: argparse.Namespace) -> int:
+    repo = discover_repo(Path(args.repo))
+    protected = protected_repo_for_path(repo.base_path)
     if protected is None:
-        repo = discover_repo(cwd)
         raise WorktreeGuardError(
-            "No protected base checkout found for this repo.\n\n"
-            f"Protect the base checkout first:\n  {command_name()} protect --repo {shlex.quote(str(repo.base_path))}"
+            "This repo is not protected by WorktreeGuard.\n\n"
+            f"Protect a clean base checkout first:\n  {command_name()} protect --repo {shlex.quote(str(repo.base_path))}"
         )
 
     base_path = Path(protected["base_path"])
-    repo = discover_repo(base_path)
-    task = slugify(args.name)
-    suffix = short_suffix()
-    branch = args.branch or f"agent/{task}-{suffix}"
-    path = unique_worktree_path(Path(protected["worktree_root"]), task, suffix)
-    base_ref = args.base_ref or default_base_ref(repo)
-
-    git(base_path, "worktree", "add", "-b", branch, str(path), base_ref)
-
-    state = load_state()
-    worktrees = state.setdefault("worktrees", {})
-    worktrees[str(path)] = {
-        "base_path": str(base_path),
-        "branch": branch,
-        "base_ref": base_ref,
-        "created_at": int(time.time()),
-    }
-    save_state(state)
-
-    if args.print_env:
-        print(f"export WTG_BASE_PATH={shlex.quote(str(base_path))}")
-        print(f"export WTG_WORKTREE_PATH={shlex.quote(str(path))}")
-    print(path)
-    return 0
-
-
-def cmd_request_base_access(args: argparse.Namespace) -> int:
-    repo = discover_repo(Path(args.repo))
-    print(
-        "No human approval UI is bundled with WorktreeGuard-lite.\n\n"
-        "Continue in a worktree instead:\n"
-        f"  {command_name()} create-worktree --repo {shlex.quote(str(repo.base_path))} --name <short-task-name>\n\n"
-        f"Recorded reason: {args.reason}",
-        file=sys.stderr,
+    decision = request_human_approval(
+        repo=repo,
+        reason=args.reason,
+        requested_scope=args.scope,
+        timeout=args.timeout,
     )
-    return 1
+    if decision is None:
+        print(
+            "Denied. Continue from a Git worktree instead.",
+            file=sys.stderr,
+        )
+        return 1
+
+    grant = create_grant(
+        base_path=base_path,
+        scope=decision,
+        reason=args.reason,
+        ttl_seconds=args.ttl_seconds,
+    )
+    print(f"Approved until {time.strftime('%Y-%m-%dT%H:%M:%S%z', time.localtime(grant['expires_at']))}.")
+    print("Retry the previous operation.")
+    return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -210,9 +183,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"state: {state_path()}")
     state = load_state()
     repos = state.get("repos", {})
+    grants = active_grants(state)
     print(f"protected repos: {len(repos)}")
     for repo in repos.values():
         print(f"- {repo.get('base_path')}")
+    print(f"active grants: {len(grants)}")
     return 0 if git_path else 1
 
 
@@ -238,7 +213,10 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
         return 0
 
     operation = extract_operation(payload)
-    if operation_is_allowed(operation):
+    if operation_is_allowed(operation, cwd):
+        return 0
+
+    if has_valid_grant(base_path):
         return 0
 
     message = denial_message(base_path)
@@ -279,8 +257,7 @@ def emit_session_context(payload: dict[str, Any]) -> int:
         context = (
             "WorktreeGuard Codex is active for this protected base checkout:\n"
             f"{base_path}\n\n"
-            "Use a worktree for mutating work:\n"
-            f"  {command} create-worktree --repo {shlex.quote(str(base_path))} --name <short-task-name>"
+            "Do mutating work from a Git worktree, not this protected base checkout."
         )
     emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
     return 0
@@ -294,7 +271,6 @@ def protected_repo_for_path(path: Path) -> dict[str, Any] | None:
         if path_contains(base, path):
             return {
                 "base_path": str(base),
-                "worktree_root": str(default_worktree_root(base)),
             }
 
     env_worktree = os.environ.get("WTG_WORKTREE_PATH")
@@ -318,7 +294,6 @@ def protected_repo_for_path(path: Path) -> dict[str, Any] | None:
             "common_git_dir": str(repo.common_git_dir),
             "branch": repo.branch,
             "head": repo.head,
-            "worktree_root": str(default_worktree_root(repo.base_path)),
         }
     return None
 
@@ -344,7 +319,7 @@ def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
     return {"tool_name": str(tool_name), "command": str(command), "tool_input": tool_input}
 
 
-def operation_is_allowed(operation: dict[str, Any]) -> bool:
+def operation_is_allowed(operation: dict[str, Any], cwd: Path) -> bool:
     tool_name = operation["tool_name"]
     command = operation["command"]
     if tool_name in READ_ONLY_TOOLS:
@@ -355,11 +330,11 @@ def operation_is_allowed(operation: dict[str, Any]) -> bool:
         lowered = tool_name.lower()
         return any(token in lowered for token in ("read", "list", "search", "grep", "glob"))
     if tool_name in {"Bash", "Shell"} or command:
-        return shell_command_is_read_only_or_control(command)
+        return shell_command_is_read_only_or_control(command, cwd)
     return False
 
 
-def shell_command_is_read_only_or_control(command: str) -> bool:
+def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
     stripped = command.strip()
     if not stripped:
         return True
@@ -375,13 +350,13 @@ def shell_command_is_read_only_or_control(command: str) -> bool:
     if executable == "wtg" or parts[0] == command_name():
         return len(parts) >= 2 and parts[1] in WTG_CONTROL_COMMANDS
     if executable == "git":
-        return git_command_is_read_only(parts[1:])
+        return git_command_is_allowed_in_base(parts[1:], cwd)
     if executable == "find":
         return find_command_is_read_only(parts[1:])
     return executable in READ_ONLY_COMMANDS
 
 
-def git_command_is_read_only(args: list[str]) -> bool:
+def git_command_is_allowed_in_base(args: list[str], cwd: Path) -> bool:
     if not args:
         return False
     subcommand = args[0]
@@ -395,8 +370,47 @@ def git_command_is_read_only(args: list[str]) -> bool:
     if subcommand == "remote":
         return rest == ["-v"]
     if subcommand == "worktree":
-        return bool(rest) and rest[0] == "list"
+        return git_worktree_command_is_allowed(rest, cwd)
     return False
+
+
+def git_worktree_command_is_allowed(args: list[str], cwd: Path) -> bool:
+    if not args:
+        return False
+    action = args[0]
+    if action == "list":
+        return True
+    if action != "add":
+        return False
+    target = git_worktree_add_path(args[1:])
+    if target is None:
+        return False
+    protected = protected_repo_for_path(cwd)
+    if protected is None:
+        return True
+    base_path = Path(protected["base_path"])
+    target_path = target if target.is_absolute() else cwd / target
+    return not path_contains(base_path, resolve_path(target_path))
+
+
+def git_worktree_add_path(args: list[str]) -> Path | None:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in {"-b", "-B", "--reason"}:
+            index += 2
+            continue
+        if arg.startswith(("-b", "-B")) and len(arg) > 2:
+            index += 1
+            continue
+        if arg.startswith("--reason="):
+            index += 1
+            continue
+        if arg.startswith("-") and arg != "-":
+            index += 1
+            continue
+        return Path(arg)
+    return None
 
 
 def find_command_is_read_only(args: list[str]) -> bool:
@@ -412,11 +426,10 @@ def denial_message(base_path: Path) -> str:
         f"{base_path}\n\n"
         "This session may read this checkout, but may not edit files, switch "
         "branches, or mutate Git state here.\n\n"
-        "Create a worktree and continue there:\n\n"
-        f"  {command} create-worktree --repo {shlex.quote(str(base_path))} --name <short-task-name>\n"
-        "  cd <printed-worktree-path>\n\n"
-        "If base access is truly required, request a human grant with a "
-        "specific reason:\n\n"
+        "Continue from a Git worktree instead. Use the repository's normal "
+        "worktree workflow; WorktreeGuard will allow mutations outside this "
+        "protected base checkout.\n\n"
+        "If base access is truly required, ask for a human approval:\n\n"
         f"  {command} request-base-access --repo {shlex.quote(str(base_path))} \\\n"
         "    --reason \"<why this cannot be done in a worktree>\" \\\n"
         "    --scope session"
@@ -436,16 +449,17 @@ def load_hook_payload(stdin: bytes) -> dict[str, Any]:
 def load_state() -> dict[str, Any]:
     path = state_path()
     if not path.is_file():
-        return {"version": 1, "repos": {}, "worktrees": {}}
+        return {"version": 1, "repos": {}, "worktrees": {}, "grants": []}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": 1, "repos": {}, "worktrees": {}}
+        return {"version": 1, "repos": {}, "worktrees": {}, "grants": []}
     if not isinstance(payload, dict):
-        return {"version": 1, "repos": {}, "worktrees": {}}
+        return {"version": 1, "repos": {}, "worktrees": {}, "grants": []}
     payload.setdefault("version", 1)
     payload.setdefault("repos", {})
     payload.setdefault("worktrees", {})
+    payload.setdefault("grants", [])
     return payload
 
 
@@ -453,6 +467,143 @@ def save_state(state: dict[str, Any]) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def request_human_approval(
+    *,
+    repo: "Repo",
+    reason: str,
+    requested_scope: str,
+    timeout: int,
+) -> str | None:
+    override = os.environ.get("WTG_APPROVAL_RESPONSE")
+    if override:
+        normalized = override.strip().lower()
+        if normalized in {"allow", "approve", "session"}:
+            return "session" if requested_scope == "session" else "once"
+        if normalized in {"once", "operation"}:
+            return "once"
+        return None
+
+    if sys.platform != "darwin":
+        raise WorktreeGuardError(
+            "No approval UI is available on this platform in WorktreeGuard-lite."
+        )
+
+    prompt = (
+        "Codex is requesting protected base checkout access.\n\n"
+        f"Repo: {repo.base_path}\n"
+        f"Branch: {repo.branch}\n"
+        f"Scope requested: {requested_scope}\n\n"
+        f"Reason:\n{reason}"
+    )
+    script = [
+        "display dialog "
+        + apple_string(prompt)
+        + ' buttons {"Deny", "Allow once", "Allow session"} '
+        + 'default button "Deny" cancel button "Deny" with icon caution',
+        "button returned of result",
+    ]
+    args = ["osascript"]
+    for expression in script:
+        args.extend(["-e", expression])
+
+    try:
+        result = subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout if timeout > 0 else None,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    if result.returncode != 0:
+        return None
+    button = result.stdout.strip()
+    if button == "Allow session":
+        return "session"
+    if button == "Allow once":
+        return "once"
+    return None
+
+
+def create_grant(
+    *,
+    base_path: Path,
+    scope: str,
+    reason: str,
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    now = int(time.time())
+    grant = {
+        "id": f"grant-{now}-{os.getpid()}",
+        "base_path": str(base_path),
+        "scope": scope,
+        "reason": reason,
+        "created_at": now,
+        "expires_at": now + max(1, ttl_seconds),
+    }
+    state = load_state()
+    grants = state.setdefault("grants", [])
+    if not isinstance(grants, list):
+        grants = []
+        state["grants"] = grants
+    grants.append(grant)
+    save_state(state)
+    return grant
+
+
+def has_valid_grant(base_path: Path) -> bool:
+    state = load_state()
+    now = int(time.time())
+    changed = False
+    for grant in state.get("grants", []):
+        if not isinstance(grant, dict):
+            continue
+        if grant.get("base_path") != str(base_path):
+            continue
+        if int(grant.get("expires_at", 0)) <= now:
+            continue
+        if grant.get("revoked_at") is not None:
+            continue
+        scope = grant.get("scope")
+        if scope == "session":
+            return True
+        if scope in {"once", "operation"} and grant.get("used_at") is None:
+            grant["used_at"] = now
+            changed = True
+            save_state(state)
+            return True
+    if changed:
+        save_state(state)
+    return False
+
+
+def active_grants(state: dict[str, Any]) -> list[dict[str, Any]]:
+    now = int(time.time())
+    result = []
+    for grant in state.get("grants", []):
+        if not isinstance(grant, dict):
+            continue
+        if int(grant.get("expires_at", 0)) <= now:
+            continue
+        if grant.get("revoked_at") is not None:
+            continue
+        if grant.get("scope") in {"once", "operation"} and grant.get("used_at") is not None:
+            continue
+        result.append(grant)
+    return result
+
+
+def apple_string(value: str) -> str:
+    lines = value.splitlines() or [""]
+    quoted_lines = [
+        '"' + line.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        for line in lines
+    ]
+    return " & return & ".join(quoted_lines)
 
 
 def state_path() -> Path:
@@ -515,37 +666,6 @@ def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     if result.returncode != 0:
         raise WorktreeGuardError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result
-
-
-def default_base_ref(repo: "Repo") -> str:
-    result = subprocess.run(
-        ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"],
-        cwd=str(repo.base_path),
-        check=False,
-    )
-    return "origin/main" if result.returncode == 0 else repo.head
-
-
-def default_worktree_root(base_path: Path) -> Path:
-    return base_path.parent / ".worktrees" / base_path.name
-
-
-def unique_worktree_path(root: Path, task: str, suffix: str) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    candidate = root / f"{task}-{suffix}"
-    while candidate.exists():
-        suffix = short_suffix()
-        candidate = root / f"{task}-{suffix}"
-    return candidate
-
-
-def slugify(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
-    return slug[:40] or "task"
-
-
-def short_suffix() -> str:
-    return hashlib.sha1(str(random.random()).encode("utf-8")).hexdigest()[:4]
 
 
 def resolve_path(raw_path: str | Path) -> Path:
