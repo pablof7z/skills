@@ -199,10 +199,19 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
     if event == "session-start":
         return emit_session_context(payload)
 
+    if event == "post-tool-use":
+        record_session_cwd(payload)
+        return 0
+
+    if event == "stop":
+        clear_session_cwd(payload)
+        return 0
+
     if event not in {"pre-tool-use", "permission-request"}:
         return 0
 
-    session_cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+    payload_cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+    session_cwd = stored_session_cwd(payload) or payload_cwd
     operation = extract_operation(payload)
     cwd = effective_operation_cwd(operation, session_cwd)
     protected = protected_repo_for_path(cwd)
@@ -348,6 +357,117 @@ def effective_operation_cwd(operation: dict[str, Any], fallback: Path) -> Path:
 
     command_cwd = git_command_cwd(operation.get("command", ""), cwd)
     return command_cwd or cwd
+
+
+def record_session_cwd(payload: dict[str, Any]) -> None:
+    session_id = session_id_from_payload(payload)
+    if not session_id:
+        return
+    payload_cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+    previous_cwd = stored_session_cwd(payload) or payload_cwd
+    operation = extract_operation(payload)
+    next_cwd = cwd_from_pwd_response(operation, payload)
+    if next_cwd is None:
+        next_cwd = cwd_from_git_worktree_add(operation, previous_cwd)
+    if next_cwd is None:
+        return
+
+    state = load_state()
+    sessions = state.setdefault("sessions", {})
+    if not isinstance(sessions, dict):
+        sessions = {}
+        state["sessions"] = sessions
+    sessions[session_id] = {
+        "cwd": str(next_cwd),
+        "updated_at": int(time.time()),
+    }
+    save_state(state)
+
+
+def clear_session_cwd(payload: dict[str, Any]) -> None:
+    session_id = session_id_from_payload(payload)
+    if not session_id:
+        return
+    state = load_state()
+    sessions = state.get("sessions")
+    if not isinstance(sessions, dict) or session_id not in sessions:
+        return
+    del sessions[session_id]
+    save_state(state)
+
+
+def stored_session_cwd(payload: dict[str, Any]) -> Path | None:
+    session_id = session_id_from_payload(payload)
+    if not session_id:
+        return None
+    state = load_state()
+    sessions = state.get("sessions")
+    if not isinstance(sessions, dict):
+        return None
+    session = sessions.get(session_id)
+    if not isinstance(session, dict):
+        return None
+    raw_cwd = session.get("cwd")
+    if not isinstance(raw_cwd, str) or not raw_cwd:
+        return None
+    return resolve_path(raw_cwd)
+
+
+def session_id_from_payload(payload: dict[str, Any]) -> str:
+    raw_session_id = (
+        payload.get("session_id")
+        or payload.get("sessionId")
+        or payload.get("conversation_id")
+        or payload.get("conversationId")
+        or payload.get("thread_id")
+        or payload.get("threadId")
+    )
+    return str(raw_session_id) if raw_session_id else ""
+
+
+def cwd_from_pwd_response(operation: dict[str, Any], payload: dict[str, Any]) -> Path | None:
+    command = operation.get("command")
+    if not isinstance(command, str):
+        return None
+    try:
+        parts = shlex.split(command.strip())
+    except ValueError:
+        return None
+    if parts != ["pwd"]:
+        return None
+    response = payload.get("tool_response")
+    if not isinstance(response, str):
+        return None
+    lines = [line.strip() for line in response.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None
+    path = resolve_path(lines[0])
+    return path if path.is_dir() else None
+
+
+def cwd_from_git_worktree_add(operation: dict[str, Any], fallback: Path) -> Path | None:
+    command = operation.get("command")
+    if not isinstance(command, str):
+        return None
+    try:
+        parts = shlex.split(command.strip())
+    except ValueError:
+        return None
+    if not parts or Path(parts[0]).name != "git":
+        return None
+    git_cwd, git_args = git_effective_cwd(parts[1:], fallback)
+    if len(git_args) < 2 or git_args[0] != "worktree" or git_args[1] != "add":
+        return None
+    target = git_worktree_add_path(git_args[2:])
+    if target is None:
+        return None
+    target_path = resolve_path(target if target.is_absolute() else git_cwd / target)
+    if not target_path.is_dir():
+        return None
+    protected = protected_repo_for_path(git_cwd)
+    if protected is not None and path_contains(Path(protected["base_path"]), target_path):
+        return None
+    return target_path
 
 
 def git_command_cwd(command: Any, cwd: Path) -> Path | None:
@@ -556,17 +676,18 @@ def load_hook_payload(stdin: bytes) -> dict[str, Any]:
 def load_state() -> dict[str, Any]:
     path = state_path()
     if not path.is_file():
-        return {"version": 1, "repos": {}, "worktrees": {}, "grants": []}
+        return {"version": 1, "repos": {}, "worktrees": {}, "grants": [], "sessions": {}}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": 1, "repos": {}, "worktrees": {}, "grants": []}
+        return {"version": 1, "repos": {}, "worktrees": {}, "grants": [], "sessions": {}}
     if not isinstance(payload, dict):
-        return {"version": 1, "repos": {}, "worktrees": {}, "grants": []}
+        return {"version": 1, "repos": {}, "worktrees": {}, "grants": [], "sessions": {}}
     payload.setdefault("version", 1)
     payload.setdefault("repos", {})
     payload.setdefault("worktrees", {})
     payload.setdefault("grants", [])
+    payload.setdefault("sessions", {})
     return payload
 
 
