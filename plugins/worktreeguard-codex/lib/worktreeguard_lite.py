@@ -58,6 +58,7 @@ MUTATING_GIT_COMMANDS = {
 }
 WTG_CONTROL_COMMANDS = {
     "current",
+    "denials",
     "doctor",
     "hook",
     "protect",
@@ -68,6 +69,15 @@ DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
 SHELL_CONTROL_TOKENS = {"&&", "||", ";", "|"}
 SHELL_WRITE_REDIRECT_TOKENS = {">", ">>", ">|", "&>", "&>>", "<>"}
+ANSI_RESET = "\033[0m"
+ANSI_BOLD = "\033[1m"
+ANSI_DIM = "\033[2m"
+ANSI_RED = "\033[31m"
+ANSI_GREEN = "\033[32m"
+ANSI_YELLOW = "\033[33m"
+ANSI_BLUE = "\033[34m"
+ANSI_MAGENTA = "\033[35m"
+ANSI_CYAN = "\033[36m"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -117,8 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     denials_parser = subparsers.add_parser("denials", help="Inspect denied action log")
     denials_parser.add_argument("--tail", type=int, default=20)
+    denials_parser.add_argument("-f", "--follow", action="store_true", help="Follow new denials")
     denials_parser.add_argument("--repo")
     denials_parser.add_argument("--session")
+    denials_parser.add_argument("--color", choices=["auto", "always", "never"], default="auto")
+    denials_parser.add_argument("--no-color", action="store_true")
     denials_parser.add_argument("--json", action="store_true")
     denials_parser.set_defaults(func=cmd_denials)
 
@@ -240,12 +253,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_denials(args: argparse.Namespace) -> int:
-    records = read_denial_records()
-    if args.repo:
-        repo = str(resolve_path(args.repo))
-        records = [record for record in records if record.get("base_path") == repo]
-    if args.session:
-        records = [record for record in records if record.get("session_id") == args.session]
+    if args.follow and args.json:
+        raise WorktreeGuardError("`wtg denials --json` cannot be combined with `--follow`.")
+
+    repo_filter = str(resolve_path(args.repo)) if args.repo else ""
+    session_filter = str(args.session or "")
+    records = filter_denial_records(read_denial_records(), repo_filter, session_filter)
 
     tail_count = max(0, args.tail)
     tail_records = records[-tail_count:] if tail_count else []
@@ -262,23 +275,115 @@ def cmd_denials(args: argparse.Namespace) -> int:
         )
         return 0
 
-    print(f"deny log: {deny_log_path()}")
-    print(f"total denials: {len(records)}")
-    print("by repo:")
-    for repo, count in Counter(str(record.get("base_path") or "") for record in records).most_common():
-        print(f"  {count:>4}  {repo}")
-    print("by command:")
-    for command, count in Counter(str(record.get("command") or "") for record in records).most_common(10):
-        print(f"  {count:>4}  {command}")
-    print(f"tail ({len(tail_records)}):")
-    for record in tail_records:
-        timestamp = record.get("timestamp", "")
-        base_path = record.get("base_path", "")
-        effective_cwd = record.get("effective_cwd", "")
-        session_id = record.get("session_id", "")
-        command = record.get("command", "")
-        print(f"  {timestamp} repo={base_path} cwd={effective_cwd} session={session_id} cmd={command}")
+    use_color = color_enabled(args)
+    print_denial_summary(records, tail_records, use_color=use_color)
+    if args.follow:
+        follow_denials(repo_filter=repo_filter, session_filter=session_filter, use_color=use_color)
     return 0
+
+
+def filter_denial_records(
+    records: list[dict[str, Any]],
+    repo_filter: str,
+    session_filter: str,
+) -> list[dict[str, Any]]:
+    result = records
+    if repo_filter:
+        result = [record for record in result if record.get("base_path") == repo_filter]
+    if session_filter:
+        result = [record for record in result if record.get("session_id") == session_filter]
+    return result
+
+
+def color_enabled(args: argparse.Namespace) -> bool:
+    if args.no_color or args.color == "never":
+        return False
+    if args.color == "always":
+        return True
+    return sys.stdout.isatty()
+
+
+def print_denial_summary(
+    records: list[dict[str, Any]],
+    tail_records: list[dict[str, Any]],
+    *,
+    use_color: bool,
+) -> None:
+    print(f"{paint('deny log:', ANSI_BOLD, use_color)} {paint(str(deny_log_path()), ANSI_CYAN, use_color)}")
+    print(f"{paint('total denials:', ANSI_BOLD, use_color)} {paint(str(len(records)), ANSI_RED, use_color)}")
+    print(paint("by repo:", ANSI_BOLD, use_color))
+    for repo, count in Counter(str(record.get("base_path") or "") for record in records).most_common():
+        print(f"  {paint(f'{count:>4}', ANSI_RED, use_color)}  {paint(repo, ANSI_CYAN, use_color)}")
+    print(paint("by command:", ANSI_BOLD, use_color))
+    for command, count in Counter(str(record.get("command") or "") for record in records).most_common(10):
+        print(f"  {paint(f'{count:>4}', ANSI_RED, use_color)}  {paint(command, ANSI_YELLOW, use_color)}")
+    print(paint(f"tail ({len(tail_records)}):", ANSI_BOLD, use_color))
+    for record in tail_records:
+        print(format_denial_record(record, use_color=use_color))
+
+
+def follow_denials(*, repo_filter: str, session_filter: str, use_color: bool) -> None:
+    path = deny_log_path()
+    print(paint("following new denials; press Ctrl-C to stop", ANSI_DIM, use_color), flush=True)
+    position = path.stat().st_size if path.is_file() else 0
+    try:
+        while True:
+            if not path.is_file():
+                time.sleep(0.25)
+                continue
+            size = path.stat().st_size
+            if size < position:
+                position = 0
+            if size == position:
+                time.sleep(0.25)
+                continue
+            with path.open("r", encoding="utf-8") as handle:
+                handle.seek(position)
+                for line in handle:
+                    record = denial_record_from_line(line)
+                    if record is not None and denial_record_matches(record, repo_filter, session_filter):
+                        print(format_denial_record(record, use_color=use_color), flush=True)
+                position = handle.tell()
+    except KeyboardInterrupt:
+        print(paint("stopped", ANSI_DIM, use_color))
+
+
+def denial_record_from_line(line: str) -> dict[str, Any] | None:
+    if not line.strip():
+        return None
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def denial_record_matches(record: dict[str, Any], repo_filter: str, session_filter: str) -> bool:
+    if repo_filter and record.get("base_path") != repo_filter:
+        return False
+    if session_filter and record.get("session_id") != session_filter:
+        return False
+    return True
+
+
+def format_denial_record(record: dict[str, Any], *, use_color: bool) -> str:
+    timestamp = str(record.get("timestamp") or "")
+    base_path = str(record.get("base_path") or "")
+    effective_cwd = str(record.get("effective_cwd") or "")
+    session_id = str(record.get("session_id") or "")
+    command = str(record.get("command") or "")
+    return (
+        f"  {paint('DENY', ANSI_RED + ANSI_BOLD, use_color)} "
+        f"{paint(timestamp, ANSI_DIM, use_color)} "
+        f"repo={paint(base_path, ANSI_CYAN, use_color)} "
+        f"cwd={paint(effective_cwd, ANSI_BLUE, use_color)} "
+        f"session={paint(session_id, ANSI_MAGENTA, use_color)} "
+        f"cmd={paint(command, ANSI_YELLOW, use_color)}"
+    )
+
+
+def paint(value: str, color: str, enabled: bool) -> str:
+    return f"{color}{value}{ANSI_RESET}" if enabled and value else value
 
 
 def cmd_hook_codex(args: argparse.Namespace) -> int:
