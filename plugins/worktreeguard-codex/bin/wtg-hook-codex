@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""Codex hook adapter for WorktreeGuard.
+
+The real policy owner is the `wtg` CLI. This adapter delegates to it when the
+binary is available and keeps a narrow local fallback for explicit protected
+base markers so the plugin can fail closed during early installation tests.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+READ_ONLY_TOOLS = {
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
+}
+
+WRITE_TOOLS = {
+    "apply_patch",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+}
+
+READ_ONLY_COMMANDS = {
+    "cat",
+    "grep",
+    "head",
+    "ls",
+    "pwd",
+    "rg",
+    "tail",
+}
+
+WTG_CONTROL_COMMANDS = {
+    "create-worktree",
+    "current",
+    "doctor",
+    "request-base-access",
+    "status",
+}
+
+SHELL_META = (
+    "\n",
+    "&&",
+    "||",
+    ";",
+    "|",
+    ">",
+    "<",
+    "`",
+    "$(",
+)
+
+
+def main() -> int:
+    event = sys.argv[1] if len(sys.argv) > 1 else "hook"
+    stdin = sys.stdin.buffer.read()
+
+    wtg_bin = os.environ.get("WTG_BIN") or shutil.which("wtg")
+    if wtg_bin:
+        return delegate_to_wtg(wtg_bin, event, stdin)
+
+    payload = load_payload(stdin)
+    return run_local_fallback(event, payload)
+
+
+def delegate_to_wtg(wtg_bin: str, event: str, stdin: bytes) -> int:
+    result = subprocess.run(
+        [wtg_bin, "hook", "codex", event],
+        input=stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    sys.stdout.buffer.write(result.stdout)
+    sys.stderr.buffer.write(result.stderr)
+    return result.returncode
+
+
+def load_payload(stdin: bytes) -> dict[str, Any]:
+    if not stdin.strip():
+        return {}
+    try:
+        payload = json.loads(stdin.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def run_local_fallback(event: str, payload: dict[str, Any]) -> int:
+    if event == "session-start":
+        emit(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": (
+                        "WorktreeGuard Codex hooks are installed, but `wtg` is not "
+                        "available on PATH. Protected checkouts are enforced only "
+                        "when the WorktreeGuard CLI is installed or an explicit "
+                        "protected-base marker is present."
+                    ),
+                }
+            }
+        )
+        return 0
+
+    if event not in {"pre-tool-use", "permission-request"}:
+        return 0
+
+    base_path = protected_base_path(payload)
+    if base_path is None:
+        return 0
+
+    operation = extract_operation(payload)
+    if operation_is_allowed(operation):
+        return 0
+
+    message = denial_message(base_path)
+    if event == "permission-request":
+        emit(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {
+                        "behavior": "deny",
+                        "message": message,
+                    },
+                }
+            }
+        )
+    else:
+        emit(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": message,
+                }
+            }
+        )
+    return 0
+
+
+def protected_base_path(payload: dict[str, Any]) -> Path | None:
+    cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+
+    env_base = os.environ.get("WTG_PROTECTED_BASE") or os.environ.get("WTG_BASE_PATH")
+    if env_base:
+        base = resolve_path(env_base)
+        return base if path_contains(base, cwd) else None
+
+    env_worktree = os.environ.get("WTG_WORKTREE_PATH")
+    if env_worktree and path_contains(resolve_path(env_worktree), cwd):
+        return None
+
+    main_worktree = git_main_worktree(cwd)
+    if main_worktree is None or not path_contains(main_worktree, cwd):
+        return None
+
+    marker = main_worktree / ".wtg.toml"
+    return main_worktree if marker.is_file() else None
+
+
+def git_main_worktree(cwd: Path) -> Path | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
+    result = subprocess.run(
+        [git, "worktree", "list", "--porcelain"],
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            return resolve_path(line.removeprefix("worktree "))
+    return None
+
+
+def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    tool = payload.get("tool") if isinstance(payload.get("tool"), dict) else {}
+
+    tool_name = (
+        payload.get("tool_name")
+        or event.get("tool_name")
+        or tool.get("name")
+        or payload.get("tool")
+        or ""
+    )
+
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = event.get("tool_input")
+    if not isinstance(tool_input, dict):
+        tool_input = tool.get("input")
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+
+    command = (
+        tool_input.get("command")
+        or tool_input.get("cmd")
+        or payload.get("command")
+        or ""
+    )
+
+    return {
+        "tool_name": str(tool_name),
+        "command": str(command),
+        "tool_input": tool_input,
+    }
+
+
+def operation_is_allowed(operation: dict[str, Any]) -> bool:
+    tool_name = operation["tool_name"]
+    command = operation["command"]
+
+    if tool_name in READ_ONLY_TOOLS:
+        return True
+
+    if tool_name in WRITE_TOOLS:
+        return False
+
+    if tool_name.startswith("mcp__"):
+        lowered = tool_name.lower()
+        return any(token in lowered for token in ("read", "list", "search", "grep", "glob"))
+
+    if tool_name in {"Bash", "Shell"} or command:
+        return shell_command_is_read_only_or_control(command)
+
+    return False
+
+
+def shell_command_is_read_only_or_control(command: str) -> bool:
+    stripped = command.strip()
+    if not stripped:
+        return True
+
+    if any(token in stripped for token in SHELL_META):
+        return False
+
+    try:
+        parts = shlex.split(stripped)
+    except ValueError:
+        return False
+
+    if not parts:
+        return True
+
+    executable = Path(parts[0]).name
+    if executable == "wtg":
+        return len(parts) >= 2 and parts[1] in WTG_CONTROL_COMMANDS
+
+    if executable == "git":
+        return git_command_is_read_only(parts[1:])
+
+    if executable == "find":
+        return find_command_is_read_only(parts[1:])
+
+    return executable in READ_ONLY_COMMANDS
+
+
+def git_command_is_read_only(args: list[str]) -> bool:
+    if not args:
+        return False
+    subcommand = args[0]
+    rest = args[1:]
+
+    if subcommand in {"status", "log", "show", "rev-parse", "ls-files"}:
+        return True
+
+    if subcommand == "diff":
+        return not any(arg == "--output" or arg.startswith("--output=") for arg in rest)
+
+    if subcommand == "branch":
+        return rest == ["--show-current"]
+
+    if subcommand == "remote":
+        return rest == ["-v"]
+
+    if subcommand == "worktree":
+        return bool(rest) and rest[0] == "list"
+
+    return False
+
+
+def find_command_is_read_only(args: list[str]) -> bool:
+    mutating_flags = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
+    return not any(arg in mutating_flags for arg in args)
+
+
+def denial_message(base_path: Path) -> str:
+    return (
+        "Denied by WorktreeGuard.\n\n"
+        "You are in the protected base checkout:\n"
+        f"{base_path}\n\n"
+        "This session may read this checkout, but may not edit files, switch "
+        "branches, or mutate Git state here.\n\n"
+        "Create a worktree and continue there:\n\n"
+        "  wtg create-worktree --name <short-task-name>\n"
+        "  cd <printed-worktree-path>\n\n"
+        "If base access is truly required, request a human grant with a "
+        "specific reason:\n\n"
+        "  wtg request-base-access \\\n"
+        "    --reason \"<why this cannot be done in a worktree>\" \\\n"
+        "    --scope session"
+    )
+
+
+def resolve_path(raw_path: str) -> Path:
+    return Path(raw_path).expanduser().resolve(strict=False)
+
+
+def path_contains(parent: Path, child: Path) -> bool:
+    try:
+        child.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def emit(payload: dict[str, Any]) -> None:
+    json.dump(payload, sys.stdout, separators=(",", ":"))
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
