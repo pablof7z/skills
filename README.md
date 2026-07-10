@@ -44,7 +44,7 @@ Expected result: the agent loads `repo-marketing`, builds a marketing brief, and
 
 | Plugin | Use it when | What it gives you |
 |---|---|---|
-| [`worktreeguard-codex`](plugins/worktreeguard-codex/) | Codex should respect WorktreeGuard-protected base checkouts and do mutating work in Git worktrees. | Codex lifecycle hooks plus a bundled local `wtg` command for protecting clean base checkouts, denying mutations there, recognizing native Git worktree use, and requesting human-approved base access. |
+| [`worktreeguard-codex`](plugins/worktreeguard-codex/) | Codex should respect WorktreeGuard-protected base checkouts and do mutating work in Git worktrees. | Codex lifecycle hooks plus a bundled local `wtg` command for protecting Git main worktrees by default, denying mutations there, recognizing native Git worktree use, and requesting human-approved base access. |
 
 ## Skills By Job
 
@@ -80,7 +80,7 @@ Most skills here are instruction and reference material. A few touch local files
 - `design-exploration-capture` may write local notes when it is actively used for design exploration.
 - `tts` reads `~/.env.tts` by default, calls your configured Kokoro-compatible endpoint, writes MP3 files under `/tmp`, and may pause/resume Music or Spotify on macOS unless disabled.
 - `nip60` is wallet implementation guidance. Real use can involve Nostr keys, encrypted events, public nutzap events, relays, mints, and signed wallet operations.
-- `worktreeguard-codex` installs Codex hooks and a bundled local `wtg` command. The bundled command can protect clean repos for testing, request macOS approval for temporary base access, and honor those grants in hooks; agents should still use normal Git worktree workflows for worktree creation. Watcher rollback requires the future full WorktreeGuard daemon.
+- `worktreeguard-codex` installs Codex hooks and a bundled local `wtg` command. The bundled command treats Git main worktrees as protected by default, requests macOS approval for temporary base access, and honors those grants in hooks; agents should still use normal Git worktree workflows for worktree creation. Non-Git directories are out of scope. Watcher rollback requires the future full WorktreeGuard daemon.
 
 For `tts`, configure the endpoint before use:
 

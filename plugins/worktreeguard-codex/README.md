@@ -7,18 +7,21 @@ This package installs Codex lifecycle hooks and a bundled local `wtg` command
 for protection, status, hook handling, and base-access approval requests.
 When a real WorktreeGuard CLI is available on `PATH`, the hook delegates to it.
 Otherwise, the bundled WorktreeGuard-lite command provides enough behavior to
-test the base-checkout guardrail immediately:
+test the base-checkout guardrail immediately. Git main worktrees are protected
+by default; linked Git worktrees are allowed mutation targets, and non-Git
+directories are ignored.
 
 ```bash
-<plugin-root>/bin/wtg protect --repo <repo>
+<plugin-root>/bin/wtg status --repo <repo>
 <plugin-root>/bin/wtg request-base-access --repo <repo> --reason "<reason>"
 ```
 
 The full WorktreeGuard CLI and daemon should eventually own durable policy,
 grants, audit logs, and rollback behavior. The bundled command covers the first
-testable Codex workflow: protect a clean base checkout, deny mutating Codex tool
-calls there, allow read-only inspection, recognize normal Git worktree use, and
-show a macOS approval prompt for temporary base checkout access.
+testable Codex workflow: protect Git main worktrees by default, deny mutating
+Codex tool calls there, allow read-only inspection, recognize normal Git
+worktree use, and show a macOS approval prompt for temporary base checkout
+access.
 
 ## Install From This Repo
 
@@ -34,7 +37,9 @@ Start a new Codex session after installation so the hook package is loaded.
 ## Requirements
 
 - `git` must be available.
-- A base checkout must be clean before `protect` will register it.
+- Git main worktrees are protected by default.
+- `protect` is still available when you want to record explicit local state; it
+  requires a clean base checkout.
 - The bundled command stores local state in
   `~/.local/state/worktreeguard/lite-state.json`.
 

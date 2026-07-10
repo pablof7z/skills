@@ -148,8 +148,7 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
     protected = protected_repo_for_path(repo.base_path)
     if protected is None:
         raise WorktreeGuardError(
-            "This repo is not protected by WorktreeGuard.\n\n"
-            f"Protect a clean base checkout first:\n  {command_name()} protect --repo {shlex.quote(str(repo.base_path))}"
+            "Base access grants only apply to Git main worktrees."
         )
 
     base_path = Path(protected["base_path"])
@@ -203,7 +202,9 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
     if event not in {"pre-tool-use", "permission-request"}:
         return 0
 
-    cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+    session_cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+    operation = extract_operation(payload)
+    cwd = effective_operation_cwd(operation, session_cwd)
     protected = protected_repo_for_path(cwd)
     if protected is None:
         return 0
@@ -212,7 +213,6 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
     if not path_contains(base_path, cwd):
         return 0
 
-    operation = extract_operation(payload)
     if operation_is_allowed(operation, cwd):
         return 0
 
@@ -245,30 +245,35 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
 def emit_session_context(payload: dict[str, Any]) -> int:
     cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
     protected = protected_repo_for_path(cwd)
-    command = command_name()
-    if protected is None:
-        context = (
-            "WorktreeGuard Codex is installed. This repo is not protected yet.\n\n"
-            "To test it, protect a clean base checkout:\n"
-            f"  {command} protect --repo {shlex.quote(str(cwd))}"
-        )
-    else:
+    if protected is not None:
         base_path = Path(protected["base_path"])
         context = (
             "WorktreeGuard Codex is active for this protected base checkout:\n"
             f"{base_path}\n\n"
             "Do mutating work from a Git worktree, not this protected base checkout."
         )
+    else:
+        try:
+            repo = discover_repo(cwd)
+        except WorktreeGuardError:
+            context = "WorktreeGuard Codex is installed. This directory is not in a Git repo."
+        else:
+            context = (
+                "WorktreeGuard Codex is active. This directory is a Git worktree for "
+                "the protected base checkout:\n"
+                f"{repo.base_path}\n\n"
+                "Mutating work is allowed in this worktree."
+            )
     emit({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}})
     return 0
 
 
 def protected_repo_for_path(path: Path) -> dict[str, Any] | None:
     path = resolve_path(path)
-    env_base = os.environ.get("WTG_PROTECTED_BASE") or os.environ.get("WTG_BASE_PATH")
+    env_base = os.environ.get("WTG_PROTECTED_BASE")
     if env_base:
         base = resolve_path(env_base)
-        if path_contains(base, path):
+        if path_contains(base, path) and git_main_worktree_matches(base, path):
             return {
                 "base_path": str(base),
             }
@@ -279,9 +284,9 @@ def protected_repo_for_path(path: Path) -> dict[str, Any] | None:
 
     state = load_state()
     for repo in state.get("repos", {}).values():
-        base_path = resolve_path(repo.get("base_path", ""))
-        if path_contains(base_path, path):
-            return repo
+        protected = validated_protected_repo(repo, path)
+        if protected is not None:
+            return protected
 
     try:
         repo = discover_repo(path)
@@ -294,6 +299,14 @@ def protected_repo_for_path(path: Path) -> dict[str, Any] | None:
             "common_git_dir": str(repo.common_git_dir),
             "branch": repo.branch,
             "head": repo.head,
+        }
+    if path_contains(repo.base_path, path):
+        return {
+            "base_path": str(repo.base_path),
+            "common_git_dir": str(repo.common_git_dir),
+            "branch": repo.branch,
+            "head": repo.head,
+            "default_protected": True,
         }
     return None
 
@@ -319,12 +332,50 @@ def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
     return {"tool_name": str(tool_name), "command": str(command), "tool_input": tool_input}
 
 
+def effective_operation_cwd(operation: dict[str, Any], fallback: Path) -> Path:
+    cwd = fallback
+    tool_input = operation.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("workdir", "cwd", "working_directory", "directory"):
+            raw_value = tool_input.get(key)
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                continue
+            candidate = Path(raw_value).expanduser()
+            if not candidate.is_absolute():
+                candidate = fallback / candidate
+            cwd = resolve_path(candidate)
+            break
+
+    command_cwd = git_command_cwd(operation.get("command", ""), cwd)
+    return command_cwd or cwd
+
+
+def git_command_cwd(command: Any, cwd: Path) -> Path | None:
+    if not isinstance(command, str) or not command.strip():
+        return None
+    try:
+        parts = shlex.split(command.strip())
+    except ValueError:
+        return None
+    if not parts or Path(parts[0]).name != "git":
+        return None
+    git_cwd, _ = git_effective_cwd(parts[1:], cwd)
+    return git_cwd
+
+
 def operation_is_allowed(operation: dict[str, Any], cwd: Path) -> bool:
     tool_name = operation["tool_name"]
     command = operation["command"]
-    if tool_name in READ_ONLY_TOOLS:
+    normalized_tool_name = normalize_tool_name(tool_name)
+    if tool_name in READ_ONLY_TOOLS or normalized_tool_name in {"read", "glob", "grep", "ls", "list"}:
         return True
-    if tool_name in WRITE_TOOLS:
+    if tool_name in WRITE_TOOLS or normalized_tool_name in {
+        "applypatch",
+        "edit",
+        "write",
+        "multiedit",
+        "notebookedit",
+    }:
         return False
     if tool_name.startswith("mcp__"):
         lowered = tool_name.lower()
@@ -350,7 +401,8 @@ def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
     if executable == "wtg" or parts[0] == command_name():
         return len(parts) >= 2 and parts[1] in WTG_CONTROL_COMMANDS
     if executable == "git":
-        return git_command_is_allowed_in_base(parts[1:], cwd)
+        git_cwd, git_args = git_effective_cwd(parts[1:], cwd)
+        return git_command_is_allowed_in_base(git_args, git_cwd)
     if executable == "find":
         return find_command_is_read_only(parts[1:])
     return executable in READ_ONLY_COMMANDS
@@ -372,6 +424,35 @@ def git_command_is_allowed_in_base(args: list[str], cwd: Path) -> bool:
     if subcommand == "worktree":
         return git_worktree_command_is_allowed(rest, cwd)
     return False
+
+
+def git_effective_cwd(args: list[str], cwd: Path) -> tuple[Path, list[str]]:
+    remaining = list(args)
+    effective_cwd = cwd
+    while remaining:
+        arg = remaining[0]
+        if arg == "-C":
+            if len(remaining) < 2:
+                return effective_cwd, remaining
+            raw_path = Path(remaining[1]).expanduser()
+            effective_cwd = resolve_path(raw_path if raw_path.is_absolute() else effective_cwd / raw_path)
+            remaining = remaining[2:]
+            continue
+        if arg.startswith("-C") and len(arg) > 2:
+            raw_path = Path(arg[2:]).expanduser()
+            effective_cwd = resolve_path(raw_path if raw_path.is_absolute() else effective_cwd / raw_path)
+            remaining = remaining[1:]
+            continue
+        if arg in {"-c", "--config-env", "--exec-path", "--git-dir", "--work-tree", "--namespace"}:
+            if len(remaining) < 2:
+                return effective_cwd, remaining
+            remaining = remaining[2:]
+            continue
+        if arg in {"--no-pager", "--paginate", "--bare", "--version", "--help"}:
+            remaining = remaining[1:]
+            continue
+        break
+    return effective_cwd, remaining
 
 
 def git_worktree_command_is_allowed(args: list[str], cwd: Path) -> bool:
@@ -411,6 +492,32 @@ def git_worktree_add_path(args: list[str]) -> Path | None:
             continue
         return Path(arg)
     return None
+
+
+def normalize_tool_name(tool_name: str) -> str:
+    return tool_name.replace("_", "").replace("-", "").lower()
+
+
+def validated_protected_repo(repo: Any, path: Path) -> dict[str, Any] | None:
+    if not isinstance(repo, dict):
+        return None
+    raw_base_path = repo.get("base_path")
+    if not isinstance(raw_base_path, str) or not raw_base_path:
+        return None
+    base_path = resolve_path(raw_base_path)
+    if not path_contains(base_path, path):
+        return None
+    if not git_main_worktree_matches(base_path, path):
+        return None
+    return repo
+
+
+def git_main_worktree_matches(base_path: Path, path: Path) -> bool:
+    try:
+        repo = discover_repo(path)
+    except WorktreeGuardError:
+        return False
+    return repo.base_path == base_path
 
 
 def find_command_is_read_only(args: list[str]) -> bool:

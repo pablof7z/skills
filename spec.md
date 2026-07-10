@@ -37,7 +37,7 @@ Claude Code already exposes hook events including `PreToolUse`, `WorktreeCreate`
 
 ## Primary goals
 
-1. **Protect the base checkout by default.** Agents must not modify files, Git index state, branch state, or base working-tree contents in the protected checkout.
+1. **Protect Git main worktrees by default.** Agents must not modify files, Git index state, branch state, or base working-tree contents in a repository's main worktree.
 
 2. **Force agent work into worktrees.** Agents should receive clear, actionable denial messages that tell them how to create or enter a worktree.
 
@@ -290,7 +290,8 @@ wtg init
 wtg protect
 ```
 
-`wtg protect` should refuse dirty base checkouts by default:
+Git main worktrees are protected by default. `wtg protect` should still refuse
+dirty base checkouts when recording explicit local protection state:
 
 ```text
 Cannot protect this repo yet.
@@ -1588,7 +1589,7 @@ wtg run --agent some-agent --repo ~/dev/myrepo -- some-agent-cli
 1. Resolve protected repo.
 2. Create or select a worktree.
 3. cd into worktree.
-4. Export WTG_SESSION_ID, WTG_HARNESS, WTG_BASE_PATH, WTG_WORKTREE_PATH.
+4. Export WTG_SESSION_ID, WTG_HARNESS, WTG_PROTECTED_BASE, WTG_WORKTREE_PATH.
 5. Optionally sandbox base checkout as read-only.
 6. Exec the agent process.
 ```
