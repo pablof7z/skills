@@ -57,6 +57,7 @@ MUTATING_GIT_COMMANDS = {
     "switch",
 }
 WTG_CONTROL_COMMANDS = {
+    "actions",
     "current",
     "denials",
     "doctor",
@@ -66,6 +67,7 @@ WTG_CONTROL_COMMANDS = {
     "status",
 }
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
+DEFAULT_ACTION_LOG_FILE = "worktreeguard-actions.jsonl"
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
 SHELL_CONTROL_TOKENS = {"&&", "||", ";", "|"}
 SHELL_WRITE_REDIRECT_TOKENS = {">", ">>", ">|", "&>", "&>>", "<>"}
@@ -124,6 +126,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local WorktreeGuard-lite setup")
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    actions_parser = subparsers.add_parser("actions", help="Inspect full WorktreeGuard action log")
+    actions_parser.add_argument("--tail", type=int, default=20)
+    actions_parser.add_argument("-f", "--follow", action="store_true", help="Follow new actions")
+    actions_parser.add_argument("--repo")
+    actions_parser.add_argument("--session")
+    actions_parser.add_argument("--decision", choices=["allow", "deny", "repair", "repair_failed"])
+    actions_parser.add_argument("--color", choices=["auto", "always", "never"], default="auto")
+    actions_parser.add_argument("--no-color", action="store_true")
+    actions_parser.add_argument("--json", action="store_true")
+    actions_parser.set_defaults(func=cmd_actions)
 
     denials_parser = subparsers.add_parser("denials", help="Inspect denied action log")
     denials_parser.add_argument("--tail", type=int, default=20)
@@ -197,7 +210,7 @@ def cmd_current(args: argparse.Namespace) -> int:
     payload = {
         "cwd": str(path),
         "repo": str(repo.base_path),
-        "protected": protected is not None and path_contains(Path(protected["base_path"]), path),
+        "protected": protected is not None and path_contains(resolve_path(str(protected["base_path"])), path),
         "worktree": not path_contains(repo.base_path, path),
     }
     print(json.dumps(payload, indent=2))
@@ -212,7 +225,7 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
             "Base access grants only apply to Git main worktrees."
         )
 
-    base_path = Path(protected["base_path"])
+    base_path = resolve_path(str(protected["base_path"]))
     decision = request_human_approval(
         repo=repo,
         reason=args.reason,
@@ -242,6 +255,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     hook_shim = stable_hook_shim_path()
     print(f"git: {git_path or 'missing'}")
     print(f"state: {state_path()}")
+    print(f"action log: {action_log_path()}")
     print(f"deny log: {deny_log_path()}")
     print(f"hook shim: {hook_shim} ({'executable' if os.access(hook_shim, os.X_OK) else 'missing'})")
     state = load_state()
@@ -252,6 +266,49 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"- {repo.get('base_path')}")
     print(f"active grants: {len(grants)}")
     return 0 if git_path else 1
+
+
+def cmd_actions(args: argparse.Namespace) -> int:
+    if args.follow and args.json:
+        raise WorktreeGuardError("`wtg actions --json` cannot be combined with `--follow`.")
+
+    repo_filter = str(resolve_path(args.repo)) if args.repo else ""
+    session_filter = str(args.session or "")
+    decision_filter = str(args.decision or "")
+    records = filter_action_records(
+        read_action_records(),
+        repo_filter=repo_filter,
+        session_filter=session_filter,
+        decision_filter=decision_filter,
+    )
+
+    tail_count = max(0, args.tail)
+    tail_records = records[-tail_count:] if tail_count else []
+    if args.json:
+        emit(
+            {
+                "log": str(action_log_path()),
+                "total": len(records),
+                "by_decision": dict(Counter(str(record.get("decision") or "") for record in records)),
+                "by_reason": dict(Counter(str(record.get("reason") or "") for record in records)),
+                "by_repo": dict(Counter(str(record.get("base_path") or "") for record in records)),
+                "by_session": dict(Counter(str(record.get("session_id") or "") for record in records)),
+                "by_command": dict(Counter(str(record.get("command") or "") for record in records)),
+                "tail": tail_records,
+            }
+        )
+        return 0
+
+    use_color = color_enabled(args)
+    print_action_summary(records, tail_records, use_color=use_color)
+    if args.follow:
+        follow_actions(
+            repo_filter=repo_filter,
+            session_filter=session_filter,
+            decision_filter=decision_filter,
+            use_color=use_color,
+        )
+    return 0
 
 
 def cmd_denials(args: argparse.Namespace) -> int:
@@ -284,6 +341,23 @@ def cmd_denials(args: argparse.Namespace) -> int:
     return 0
 
 
+def filter_action_records(
+    records: list[dict[str, Any]],
+    *,
+    repo_filter: str,
+    session_filter: str,
+    decision_filter: str,
+) -> list[dict[str, Any]]:
+    result = records
+    if repo_filter:
+        result = [record for record in result if record.get("base_path") == repo_filter]
+    if session_filter:
+        result = [record for record in result if record.get("session_id") == session_filter]
+    if decision_filter:
+        result = [record for record in result if record.get("decision") == decision_filter]
+    return result
+
+
 def filter_denial_records(
     records: list[dict[str, Any]],
     repo_filter: str,
@@ -305,6 +379,29 @@ def color_enabled(args: argparse.Namespace) -> bool:
     return sys.stdout.isatty()
 
 
+def print_action_summary(
+    records: list[dict[str, Any]],
+    tail_records: list[dict[str, Any]],
+    *,
+    use_color: bool,
+) -> None:
+    print(f"{paint('action log:', ANSI_BOLD, use_color)} {paint(str(action_log_path()), ANSI_CYAN, use_color)}")
+    print(f"{paint('total actions:', ANSI_BOLD, use_color)} {paint(str(len(records)), ANSI_BLUE, use_color)}")
+    print(paint("by decision:", ANSI_BOLD, use_color))
+    for decision, count in Counter(str(record.get("decision") or "") for record in records).most_common():
+        color = action_decision_color(decision)
+        print(f"  {paint(f'{count:>4}', color, use_color)}  {paint(decision, color, use_color)}")
+    print(paint("by reason:", ANSI_BOLD, use_color))
+    for reason, count in Counter(str(record.get("reason") or "") for record in records).most_common(10):
+        print(f"  {paint(f'{count:>4}', ANSI_BLUE, use_color)}  {paint(reason, ANSI_YELLOW, use_color)}")
+    print(paint("by command:", ANSI_BOLD, use_color))
+    for command, count in Counter(action_record_command(record) for record in records).most_common(10):
+        print(f"  {paint(f'{count:>4}', ANSI_BLUE, use_color)}  {paint(command, ANSI_YELLOW, use_color)}")
+    print(paint(f"tail ({len(tail_records)}):", ANSI_BOLD, use_color))
+    for record in tail_records:
+        print(format_action_record(record, use_color=use_color))
+
+
 def print_denial_summary(
     records: list[dict[str, Any]],
     tail_records: list[dict[str, Any]],
@@ -322,6 +419,43 @@ def print_denial_summary(
     print(paint(f"tail ({len(tail_records)}):", ANSI_BOLD, use_color))
     for record in tail_records:
         print(format_denial_record(record, use_color=use_color))
+
+
+def follow_actions(
+    *,
+    repo_filter: str,
+    session_filter: str,
+    decision_filter: str,
+    use_color: bool,
+) -> None:
+    path = action_log_path()
+    print(paint("following new actions; press Ctrl-C to stop", ANSI_DIM, use_color), flush=True)
+    position = path.stat().st_size if path.is_file() else 0
+    try:
+        while True:
+            if not path.is_file():
+                time.sleep(0.25)
+                continue
+            size = path.stat().st_size
+            if size < position:
+                position = 0
+            if size == position:
+                time.sleep(0.25)
+                continue
+            with path.open("r", encoding="utf-8") as handle:
+                handle.seek(position)
+                for line in handle:
+                    record = record_from_line(line)
+                    if record is not None and action_record_matches(
+                        record,
+                        repo_filter=repo_filter,
+                        session_filter=session_filter,
+                        decision_filter=decision_filter,
+                    ):
+                        print(format_action_record(record, use_color=use_color), flush=True)
+                position = handle.tell()
+    except KeyboardInterrupt:
+        print(paint("stopped", ANSI_DIM, use_color))
 
 
 def follow_denials(*, repo_filter: str, session_filter: str, use_color: bool) -> None:
@@ -350,7 +484,27 @@ def follow_denials(*, repo_filter: str, session_filter: str, use_color: bool) ->
         print(paint("stopped", ANSI_DIM, use_color))
 
 
+def action_record_matches(
+    record: dict[str, Any],
+    *,
+    repo_filter: str,
+    session_filter: str,
+    decision_filter: str,
+) -> bool:
+    if repo_filter and record.get("base_path") != repo_filter:
+        return False
+    if session_filter and record.get("session_id") != session_filter:
+        return False
+    if decision_filter and record.get("decision") != decision_filter:
+        return False
+    return True
+
+
 def denial_record_from_line(line: str) -> dict[str, Any] | None:
+    return record_from_line(line)
+
+
+def record_from_line(line: str) -> dict[str, Any] | None:
     if not line.strip():
         return None
     try:
@@ -384,6 +538,46 @@ def format_denial_record(record: dict[str, Any], *, use_color: bool) -> str:
     )
 
 
+def format_action_record(record: dict[str, Any], *, use_color: bool) -> str:
+    timestamp = str(record.get("timestamp") or "")
+    decision = str(record.get("decision") or "").upper()
+    reason = str(record.get("reason") or "")
+    base_path = str(record.get("base_path") or "")
+    effective_cwd = str(record.get("effective_cwd") or "")
+    session_id = str(record.get("session_id") or "")
+    command = action_record_command(record)
+    color = action_decision_color(decision.lower())
+    return (
+        f"  {paint(decision or 'ACTION', color + ANSI_BOLD, use_color)} "
+        f"{paint(timestamp, ANSI_DIM, use_color)} "
+        f"reason={paint(reason, ANSI_YELLOW, use_color)} "
+        f"repo={paint(base_path, ANSI_CYAN, use_color)} "
+        f"cwd={paint(effective_cwd, ANSI_BLUE, use_color)} "
+        f"session={paint(session_id, ANSI_MAGENTA, use_color)} "
+        f"cmd={paint(command, ANSI_YELLOW, use_color)}"
+    )
+
+
+def action_decision_color(decision: str) -> str:
+    if decision == "allow":
+        return ANSI_GREEN
+    if decision == "deny":
+        return ANSI_RED
+    if decision == "repair":
+        return ANSI_CYAN
+    if decision == "repair_failed":
+        return ANSI_YELLOW
+    return ANSI_BLUE
+
+
+def action_record_command(record: dict[str, Any]) -> str:
+    command = str(record.get("command") or "")
+    if command:
+        return command
+    tool_name = str(record.get("tool_name") or "")
+    return f"tool:{tool_name}" if tool_name else ""
+
+
 def paint(value: str, color: str, enabled: bool) -> str:
     return f"{color}{value}{ANSI_RESET}" if enabled and value else value
 
@@ -412,28 +606,73 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
     session_cwd = stored_session_cwd(payload) or payload_cwd
     operation = extract_operation(payload)
     cwd = effective_operation_cwd(operation, session_cwd)
+    repair_protected_base_branches(event=event, payload=payload, operation=operation, cwd=cwd)
     protected = protected_repo_for_path(cwd)
     if protected is None:
+        log_action(
+            event=event,
+            payload=payload,
+            base_path=None,
+            cwd=cwd,
+            operation=operation,
+            decision="allow",
+            reason="unprotected",
+        )
         return 0
 
-    base_path = Path(protected["base_path"])
+    base_path = resolve_path(str(protected["base_path"]))
     if not path_contains(base_path, cwd):
+        log_action(
+            event=event,
+            payload=payload,
+            base_path=base_path,
+            cwd=cwd,
+            operation=operation,
+            decision="allow",
+            reason="worktree_allowed",
+            protected=protected,
+        )
         return 0
 
     if operation_is_allowed(operation, cwd):
+        log_action(
+            event=event,
+            payload=payload,
+            base_path=base_path,
+            cwd=cwd,
+            operation=operation,
+            decision="allow",
+            reason="policy_allowed",
+            protected=protected,
+        )
         return 0
 
     if has_valid_grant(base_path):
+        log_action(
+            event=event,
+            payload=payload,
+            base_path=base_path,
+            cwd=cwd,
+            operation=operation,
+            decision="allow",
+            reason="grant_allowed",
+            protected=protected,
+        )
         return 0
 
     message = denial_message(base_path)
-    log_denied_action(
+    record = action_record(
         event=event,
         payload=payload,
         base_path=base_path,
         cwd=cwd,
         operation=operation,
+        decision="deny",
+        reason="protected_base_mutation",
+        protected=protected,
     )
+    write_action_log(record)
+    write_denial_log(record)
     if event == "permission-request":
         emit(
             {
@@ -460,7 +699,7 @@ def emit_session_context(payload: dict[str, Any]) -> int:
     cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
     protected = protected_repo_for_path(cwd)
     if protected is not None:
-        base_path = Path(protected["base_path"])
+        base_path = resolve_path(str(protected["base_path"]))
         context = (
             "WorktreeGuard Codex is active for this protected base checkout:\n"
             f"{base_path}\n\n"
@@ -670,7 +909,7 @@ def cwd_from_git_worktree_add(operation: dict[str, Any], fallback: Path) -> Path
     if not target_path.is_dir():
         return None
     protected = protected_repo_for_path(git_cwd)
-    if protected is not None and path_contains(Path(protected["base_path"]), target_path):
+    if protected is not None and path_contains(resolve_path(str(protected["base_path"])), target_path):
         return None
     return target_path
 
@@ -914,7 +1153,7 @@ def git_worktree_command_is_allowed(args: list[str], cwd: Path) -> bool:
     protected = protected_repo_for_path(cwd)
     if protected is None:
         return True
-    base_path = Path(protected["base_path"])
+    base_path = resolve_path(str(protected["base_path"]))
     target_path = target if target.is_absolute() else cwd / target
     return not path_contains(base_path, resolve_path(target_path))
 
@@ -954,7 +1193,9 @@ def validated_protected_repo(repo: Any, path: Path) -> dict[str, Any] | None:
         return None
     if not git_main_worktree_matches(base_path, path):
         return None
-    return repo
+    protected = dict(repo)
+    protected["base_path"] = str(base_path)
+    return protected
 
 
 def git_main_worktree_matches(base_path: Path, path: Path) -> bool:
@@ -968,6 +1209,220 @@ def git_main_worktree_matches(base_path: Path, path: Path) -> bool:
 def find_command_is_read_only(args: list[str]) -> bool:
     mutating_flags = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
     return not any(arg in mutating_flags for arg in args)
+
+
+def repair_protected_base_branches(
+    *,
+    event: str,
+    payload: dict[str, Any],
+    operation: dict[str, Any],
+    cwd: Path,
+) -> None:
+    seen: set[Path] = set()
+    state = load_state()
+    for repo in state.get("repos", {}).values():
+        if not isinstance(repo, dict):
+            continue
+        raw_base_path = repo.get("base_path")
+        if not isinstance(raw_base_path, str) or not raw_base_path:
+            continue
+        base_path = resolve_path(raw_base_path)
+        if base_path in seen:
+            continue
+        seen.add(base_path)
+        repair_protected_base_branch(
+            event=event,
+            payload=payload,
+            operation=operation,
+            base_path=base_path,
+            protected=repo,
+        )
+
+    protected = protected_repo_for_path(cwd)
+    if protected is None:
+        return
+    raw_base_path = protected.get("base_path")
+    if not isinstance(raw_base_path, str) or not raw_base_path:
+        return
+    base_path = resolve_path(raw_base_path)
+    if base_path in seen:
+        return
+    repair_protected_base_branch(
+        event=event,
+        payload=payload,
+        operation=operation,
+        base_path=base_path,
+        protected=protected,
+    )
+
+
+def repair_protected_base_branch(
+    *,
+    event: str,
+    payload: dict[str, Any],
+    operation: dict[str, Any],
+    base_path: Path,
+    protected: dict[str, Any],
+) -> None:
+    if not base_path.is_dir():
+        return
+
+    target_branch = default_branch_for_base(base_path, protected)
+    current_branch = git_output_optional(base_path, "branch", "--show-current")
+    if target_branch is None:
+        log_branch_repair(
+            event=event,
+            payload=payload,
+            operation=operation,
+            base_path=base_path,
+            protected=protected,
+            decision="repair_failed",
+            reason="base_branch_default_unknown",
+            current_branch=current_branch,
+            target_branch="",
+        )
+        return
+    if current_branch == target_branch:
+        return
+    if not git_status_is_clean(base_path):
+        log_branch_repair(
+            event=event,
+            payload=payload,
+            operation=operation,
+            base_path=base_path,
+            protected=protected,
+            decision="repair_failed",
+            reason="base_branch_dirty",
+            current_branch=current_branch,
+            target_branch=target_branch,
+        )
+        return
+
+    result = subprocess.run(
+        ["git", "switch", target_branch],
+        cwd=str(base_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        log_branch_repair(
+            event=event,
+            payload=payload,
+            operation=operation,
+            base_path=base_path,
+            protected=protected,
+            decision="repair",
+            reason="base_branch_restored",
+            current_branch=current_branch,
+            target_branch=target_branch,
+        )
+        return
+
+    log_branch_repair(
+        event=event,
+        payload=payload,
+        operation=operation,
+        base_path=base_path,
+        protected=protected,
+        decision="repair_failed",
+        reason="base_branch_switch_failed",
+        current_branch=current_branch,
+        target_branch=target_branch,
+        error=(result.stderr.strip() or result.stdout.strip()),
+    )
+
+
+def default_branch_for_base(base_path: Path, protected: dict[str, Any]) -> str | None:
+    remotes = ["origin"]
+    remote_output = git_output_optional(base_path, "remote")
+    for remote in remote_output.splitlines():
+        remote = remote.strip()
+        if remote and remote not in remotes:
+            remotes.append(remote)
+    for remote in remotes:
+        raw = git_output_optional(base_path, "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
+        prefix = f"{remote}/"
+        if raw.startswith(prefix):
+            return raw.removeprefix(prefix)
+
+    protected_branch = str(protected.get("branch") or "")
+    if protected_branch and protected_branch != "HEAD":
+        return protected_branch
+
+    for branch in ("main", "master"):
+        if local_branch_exists(base_path, branch):
+            return branch
+    return None
+
+
+def local_branch_exists(base_path: Path, branch: str) -> bool:
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=str(base_path),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def git_status_is_clean(base_path: Path) -> bool:
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z"],
+        cwd=str(base_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=False,
+        check=False,
+    )
+    return result.returncode == 0 and result.stdout == b""
+
+
+def git_output_optional(base_path: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(base_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def log_branch_repair(
+    *,
+    event: str,
+    payload: dict[str, Any],
+    operation: dict[str, Any],
+    base_path: Path,
+    protected: dict[str, Any],
+    decision: str,
+    reason: str,
+    current_branch: str,
+    target_branch: str,
+    error: str = "",
+) -> None:
+    write_action_log(
+        action_record(
+            event=event,
+            payload=payload,
+            base_path=base_path,
+            cwd=base_path,
+            operation=operation,
+            decision=decision,
+            reason=reason,
+            protected=protected,
+            extra={
+                "current_branch": current_branch,
+                "target_branch": target_branch,
+                "error": error,
+            },
+        )
+    )
 
 
 def denial_message(base_path: Path) -> str:
@@ -988,18 +1443,47 @@ def denial_message(base_path: Path) -> str:
     )
 
 
-def log_denied_action(
+def log_action(
     *,
     event: str,
     payload: dict[str, Any],
-    base_path: Path,
+    base_path: Path | None,
     cwd: Path,
     operation: dict[str, Any],
+    decision: str,
+    reason: str,
+    protected: dict[str, Any] | None = None,
 ) -> None:
+    write_action_log(
+        action_record(
+            event=event,
+            payload=payload,
+            base_path=base_path,
+            cwd=cwd,
+            operation=operation,
+            decision=decision,
+            reason=reason,
+            protected=protected,
+        )
+    )
+
+
+def action_record(
+    *,
+    event: str,
+    payload: dict[str, Any],
+    base_path: Path | None,
+    cwd: Path,
+    operation: dict[str, Any],
+    decision: str,
+    reason: str,
+    protected: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     tool_input = operation.get("tool_input")
     if not isinstance(tool_input, dict):
         tool_input = {}
-    record = {
+    record: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event": event,
         "session_id": payload_string(
@@ -1013,17 +1497,39 @@ def log_denied_action(
         ),
         "turn_id": payload_string(payload, "turn_id", "turnId"),
         "transcript_path": payload_string(payload, "transcript_path", "transcriptPath"),
-        "base_path": str(base_path),
+        "base_path": str(base_path or ""),
         "payload_cwd": str(resolve_path(str(payload.get("cwd") or ""))) if payload.get("cwd") else "",
         "effective_cwd": str(cwd),
         "operation_workdir": operation_workdir(tool_input),
         "tool_input_keys": sorted(str(key) for key in tool_input.keys()),
         "tool_name": str(operation.get("tool_name") or ""),
         "command": str(operation.get("command") or ""),
-        "reason": "protected_base_mutation",
+        "decision": decision,
+        "reason": reason,
     }
+    if protected:
+        record["protected"] = True
+        record["default_protected"] = bool(protected.get("default_protected"))
+        record["protected_branch"] = str(protected.get("branch") or "")
+    else:
+        record["protected"] = False
+        record["default_protected"] = False
+        record["protected_branch"] = ""
+    if extra:
+        record.update(extra)
+    return record
+
+
+def write_action_log(record: dict[str, Any]) -> None:
+    write_jsonl_record(action_log_path(), record)
+
+
+def write_denial_log(record: dict[str, Any]) -> None:
+    write_jsonl_record(deny_log_path(), record)
+
+
+def write_jsonl_record(path: Path, record: dict[str, Any]) -> None:
     try:
-        path = deny_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
@@ -1047,8 +1553,15 @@ def payload_string(payload: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def read_action_records() -> list[dict[str, Any]]:
+    return read_jsonl_records(action_log_path())
+
+
 def read_denial_records() -> list[dict[str, Any]]:
-    path = deny_log_path()
+    return read_jsonl_records(deny_log_path())
+
+
+def read_jsonl_records(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     records: list[dict[str, Any]] = []
@@ -1244,6 +1757,13 @@ def state_path() -> Path:
     if override:
         return resolve_path(override)
     return Path.home() / ".local" / "state" / "worktreeguard" / "lite-state.json"
+
+
+def action_log_path() -> Path:
+    override = os.environ.get("WTG_ACTION_LOG_FILE")
+    if override:
+        return resolve_path(override)
+    return Path.home() / DEFAULT_ACTION_LOG_FILE
 
 
 def deny_log_path() -> Path:
