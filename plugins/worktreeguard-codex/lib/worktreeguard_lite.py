@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ WTG_CONTROL_COMMANDS = {
     "status",
 }
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
+DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
 SHELL_META = ("\n", "&&", "||", ";", "|", ">", "<", "`", "$(")
 
 
@@ -180,6 +182,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     git_path = shutil.which("git")
     print(f"git: {git_path or 'missing'}")
     print(f"state: {state_path()}")
+    print(f"deny log: {deny_log_path()}")
     state = load_state()
     repos = state.get("repos", {})
     grants = active_grants(state)
@@ -229,6 +232,13 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
         return 0
 
     message = denial_message(base_path)
+    log_denied_action(
+        event=event,
+        payload=payload,
+        base_path=base_path,
+        cwd=cwd,
+        operation=operation,
+    )
     if event == "permission-request":
         emit(
             {
@@ -663,6 +673,51 @@ def denial_message(base_path: Path) -> str:
     )
 
 
+def log_denied_action(
+    *,
+    event: str,
+    payload: dict[str, Any],
+    base_path: Path,
+    cwd: Path,
+    operation: dict[str, Any],
+) -> None:
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "session_id": payload_string(
+            payload,
+            "session_id",
+            "sessionId",
+            "conversation_id",
+            "conversationId",
+            "thread_id",
+            "threadId",
+        ),
+        "turn_id": payload_string(payload, "turn_id", "turnId"),
+        "transcript_path": payload_string(payload, "transcript_path", "transcriptPath"),
+        "base_path": str(base_path),
+        "effective_cwd": str(cwd),
+        "tool_name": str(operation.get("tool_name") or ""),
+        "command": str(operation.get("command") or ""),
+        "reason": "protected_base_mutation",
+    }
+    try:
+        path = deny_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def payload_string(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return str(value)
+    return ""
+
+
 def load_hook_payload(stdin: bytes) -> dict[str, Any]:
     if not stdin.strip():
         return {}
@@ -839,6 +894,13 @@ def state_path() -> Path:
     if override:
         return resolve_path(override)
     return Path.home() / ".local" / "state" / "worktreeguard" / "lite-state.json"
+
+
+def deny_log_path() -> Path:
+    override = os.environ.get("WTG_DENY_LOG_FILE")
+    if override:
+        return resolve_path(override)
+    return Path.home() / DEFAULT_DENY_LOG_FILE
 
 
 def discover_repo(path: Path) -> "Repo":

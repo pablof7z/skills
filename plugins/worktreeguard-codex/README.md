@@ -21,7 +21,8 @@ grants, audit logs, and rollback behavior. The bundled command covers the first
 testable Codex workflow: protect Git main worktrees by default, deny mutating
 Codex tool calls there, allow read-only inspection, recognize normal Git
 worktree use, track Codex's effective session cwd after worktree entry, and show
-a macOS approval prompt for temporary base checkout access.
+a macOS approval prompt for temporary base checkout access. Denied actions are
+appended to `~/worktreeguard-denied-actions.jsonl`.
 
 ## Install From This Repo
 
@@ -42,6 +43,8 @@ Start a new Codex session after installation so the hook package is loaded.
   requires a clean base checkout.
 - The bundled command stores local state in
   `~/.local/state/worktreeguard/lite-state.json`.
+- Denied actions are logged to `~/worktreeguard-denied-actions.jsonl` by
+  default. Set `WTG_DENY_LOG_FILE` to use a different JSONL file.
 
 ## Hook Coverage
 
