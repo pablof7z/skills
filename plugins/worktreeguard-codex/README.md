@@ -26,10 +26,15 @@ grants, audit logs, and rollback behavior. The bundled command covers the first
 testable Codex workflow: protect Git main worktrees by default, deny direct
 Codex write tools there, allow non-Git shell commands by default, and deny only
 explicitly dangerous Git subcommands such as `reset`, `checkout`, `switch`,
-`clean`, `restore`, `merge`, and `rebase`. Normal Git worktree workflows are
-allowed. The hook tracks Codex's effective session cwd after worktree entry and
-shows a macOS approval prompt for temporary base checkout access. Denied
-actions are appended to `~/worktreeguard-denied-actions.jsonl`.
+`clean`, `restore`, and `rebase`. Normal Git commands, including `worktree`,
+`fetch`, `pull`, `merge`, `add`, and `commit`, are allowed by default. The hook
+tracks Codex's effective session cwd after worktree entry, honors simple shell
+`cd <path> && git ...` cwd changes, and shows a macOS approval prompt for
+temporary base checkout access. Denied actions are appended to
+`~/worktreeguard-denied-actions.jsonl`.
+Codex write tools are path-based: known targets outside protected main
+worktrees are allowed even when the session cwd is protected, while known
+targets inside a protected main worktree are denied.
 
 ## Install From This Repo
 
