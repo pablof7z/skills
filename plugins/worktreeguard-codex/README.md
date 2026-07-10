@@ -23,10 +23,10 @@ non-Git directories are ignored.
 
 The full WorktreeGuard CLI and daemon should eventually own durable policy,
 grants, audit logs, and rollback behavior. The bundled command covers the first
-testable Codex workflow: protect Git main worktrees by default, deny mutating
-Codex tool calls there, allow shell commands by default unless they match known
-mutating commands or write redirection, allow Git commands by default unless
-they mutate the protected checkout/index/local branch state, recognize normal
+testable Codex workflow: protect Git main worktrees by default, deny direct
+Codex write tools there, allow shell commands by default unless the command is
+a direct harmful-command blacklist hit, allow Git commands by default unless
+they are dangerous checkout/index/local-branch state changes, recognize normal
 Git worktree use, track Codex's effective session cwd after worktree entry, and
 show a macOS approval prompt for temporary base checkout access. Denied actions
 are appended to `~/worktreeguard-denied-actions.jsonl`.

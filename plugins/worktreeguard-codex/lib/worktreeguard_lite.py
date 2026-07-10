@@ -18,7 +18,7 @@ from typing import Any
 
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS"}
 WRITE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
-MUTATING_COMMANDS = {
+HARMFUL_SHELL_COMMANDS = {
     "chmod",
     "chown",
     "chgrp",
@@ -36,7 +36,7 @@ MUTATING_COMMANDS = {
     "touch",
     "truncate",
 }
-MUTATING_GIT_COMMANDS = {
+DANGEROUS_GIT_COMMANDS = {
     "add",
     "am",
     "apply",
@@ -53,9 +53,9 @@ MUTATING_GIT_COMMANDS = {
     "restore",
     "revert",
     "rm",
-    "stash",
     "switch",
 }
+READ_ONLY_GIT_STASH_COMMANDS = {"list", "show"}
 WTG_CONTROL_COMMANDS = {
     "actions",
     "current",
@@ -70,7 +70,6 @@ DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_ACTION_LOG_FILE = "worktreeguard-actions.jsonl"
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
 SHELL_CONTROL_TOKENS = {"&&", "||", ";", "|"}
-SHELL_WRITE_REDIRECT_TOKENS = {">", ">>", ">|", "&>", "&>>", "<>"}
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
 ANSI_DIM = "\033[2m"
@@ -959,8 +958,6 @@ def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
         return False
     if not parts:
         return True
-    if any(token in SHELL_WRITE_REDIRECT_TOKENS for token in parts):
-        return False
     for segment in shell_segments(parts):
         if shell_segment_is_mutating(segment, cwd):
             return False
@@ -1006,10 +1003,10 @@ def shell_segment_is_mutating(parts: list[str], cwd: Path) -> bool:
         git_cwd, git_args = git_effective_cwd(parts[1:], cwd)
         return not git_command_is_allowed_in_base(git_args, git_cwd)
     if executable == "find":
-        return not find_command_is_read_only(parts[1:])
+        return find_command_is_harmful(parts[1:], cwd)
     if executable == "sed":
         return sed_command_is_mutating(parts[1:])
-    if executable in MUTATING_COMMANDS:
+    if executable in HARMFUL_SHELL_COMMANDS:
         return True
     return False
 
@@ -1053,14 +1050,20 @@ def git_command_is_allowed_in_base(args: list[str], cwd: Path) -> bool:
         return git_remote_command_is_read_only(rest)
     if subcommand == "tag":
         return git_tag_command_is_read_only(rest)
+    if subcommand == "stash":
+        return len(rest) > 0 and rest[0] in READ_ONLY_GIT_STASH_COMMANDS
     if subcommand == "worktree":
         return git_worktree_command_is_allowed(rest, cwd)
-    return subcommand not in MUTATING_GIT_COMMANDS
+    return subcommand not in DANGEROUS_GIT_COMMANDS
 
 
 def git_branch_command_is_read_only(args: list[str]) -> bool:
     if not args:
         return True
+    if any(arg in {"-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy"} for arg in args):
+        return False
+    if not args[0].startswith("-"):
+        return False
     read_only_flags = {
         "-a",
         "--all",
@@ -1077,7 +1080,12 @@ def git_branch_command_is_read_only(args: list[str]) -> bool:
         "--no-contains",
         "--points-at",
     }
-    return all(arg in read_only_flags or arg.startswith(("--format=", "--sort=", "--column")) for arg in args)
+    return all(
+        arg in read_only_flags
+        or arg.startswith(("--format=", "--sort=", "--column"))
+        or not arg.startswith("-")
+        for arg in args
+    )
 
 
 def git_config_command_is_read_only(args: list[str]) -> bool:
@@ -1107,7 +1115,9 @@ def git_remote_command_is_read_only(args: list[str]) -> bool:
 def git_tag_command_is_read_only(args: list[str]) -> bool:
     if not args:
         return True
-    return args[0] in {"-l", "--list", "-n"} or args[0].startswith("-n")
+    if any(arg in {"-d", "--delete", "-f", "--force", "-a", "-s", "-u", "-m", "-F"} for arg in args):
+        return False
+    return args[0] in {"-l", "--list", "-n"} or args[0].startswith("-n") or not args[0].startswith("-")
 
 
 def git_effective_cwd(args: list[str], cwd: Path) -> tuple[Path, list[str]]:
@@ -1206,9 +1216,32 @@ def git_main_worktree_matches(base_path: Path, path: Path) -> bool:
     return repo.base_path == base_path
 
 
-def find_command_is_read_only(args: list[str]) -> bool:
-    mutating_flags = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
-    return not any(arg in mutating_flags for arg in args)
+def find_command_is_harmful(args: list[str], cwd: Path) -> bool:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "-delete":
+            return True
+        if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
+            payload, next_index = find_exec_payload(args, index + 1)
+            if payload and shell_segment_is_mutating(payload, cwd):
+                return True
+            index = next_index
+            continue
+        index += 1
+    return False
+
+
+def find_exec_payload(args: list[str], start: int) -> tuple[list[str], int]:
+    payload: list[str] = []
+    index = start
+    while index < len(args):
+        arg = args[index]
+        if arg in {";", r"\;", "+"}:
+            return payload, index + 1
+        payload.append(arg)
+        index += 1
+    return payload, index
 
 
 def repair_protected_base_branches(
