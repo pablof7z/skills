@@ -17,7 +17,46 @@ from typing import Any
 
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS"}
 WRITE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
-READ_ONLY_COMMANDS = {"cat", "grep", "head", "ls", "pwd", "rg", "tail"}
+MUTATING_COMMANDS = {
+    "chmod",
+    "chown",
+    "chgrp",
+    "cp",
+    "dd",
+    "install",
+    "ln",
+    "mkdir",
+    "mv",
+    "patch",
+    "rm",
+    "rmdir",
+    "rsync",
+    "tee",
+    "touch",
+    "truncate",
+}
+MUTATING_GIT_COMMANDS = {
+    "add",
+    "am",
+    "apply",
+    "bisect",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "commit",
+    "fetch",
+    "merge",
+    "mv",
+    "pull",
+    "push",
+    "rebase",
+    "reset",
+    "restore",
+    "revert",
+    "rm",
+    "stash",
+    "switch",
+}
 WTG_CONTROL_COMMANDS = {
     "current",
     "doctor",
@@ -28,7 +67,8 @@ WTG_CONTROL_COMMANDS = {
 }
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
-SHELL_META = ("\n", "&&", "||", ";", "|", ">", "<", "`", "$(")
+SHELL_CONTROL_TOKENS = {"&&", "||", ";", "|"}
+SHELL_WRITE_REDIRECT_TOKENS = {">", ">>", ">|", "&>", "&>>", "<>"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -519,41 +559,161 @@ def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
     stripped = command.strip()
     if not stripped:
         return True
-    if any(token in stripped for token in SHELL_META):
-        return False
     try:
-        parts = shlex.split(stripped)
+        parts = shell_tokens(stripped)
     except ValueError:
         return False
     if not parts:
         return True
+    if any(token in SHELL_WRITE_REDIRECT_TOKENS for token in parts):
+        return False
+    for segment in shell_segments(parts):
+        if shell_segment_is_mutating(segment, cwd):
+            return False
+    return True
+
+
+def shell_tokens(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def shell_segments(parts: list[str]) -> list[list[str]]:
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for part in parts:
+        if part in SHELL_CONTROL_TOKENS:
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(part)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def shell_segment_is_mutating(parts: list[str], cwd: Path) -> bool:
+    while parts and shell_assignment_is_prefix(parts[0]):
+        parts = parts[1:]
+    if not parts:
+        return False
     executable = Path(parts[0]).name
+    if executable in {"command", "builtin"}:
+        if len(parts) >= 2 and parts[1] == "-v":
+            return False
+        return shell_segment_is_mutating(parts[1:], cwd)
+    if executable in {"env", "sudo", "time"}:
+        return shell_segment_is_mutating(shell_wrapper_payload(parts[1:]), cwd)
     if executable == "wtg" or parts[0] == command_name():
-        return len(parts) >= 2 and parts[1] in WTG_CONTROL_COMMANDS
+        return len(parts) < 2 or parts[1] not in WTG_CONTROL_COMMANDS
     if executable == "git":
         git_cwd, git_args = git_effective_cwd(parts[1:], cwd)
-        return git_command_is_allowed_in_base(git_args, git_cwd)
+        return not git_command_is_allowed_in_base(git_args, git_cwd)
     if executable == "find":
-        return find_command_is_read_only(parts[1:])
-    return executable in READ_ONLY_COMMANDS
+        return not find_command_is_read_only(parts[1:])
+    if executable == "sed":
+        return sed_command_is_mutating(parts[1:])
+    if executable in MUTATING_COMMANDS:
+        return True
+    return False
+
+
+def shell_assignment_is_prefix(part: str) -> bool:
+    if "=" not in part:
+        return False
+    name, _, _ = part.partition("=")
+    return bool(name) and (name[0].isalpha() or name[0] == "_") and all(
+        character.isalnum() or character == "_" for character in name
+    )
+
+
+def shell_wrapper_payload(args: list[str]) -> list[str]:
+    remaining = list(args)
+    while remaining and shell_assignment_is_prefix(remaining[0]):
+        remaining = remaining[1:]
+    while remaining and remaining[0].startswith("-"):
+        remaining = remaining[1:]
+    while remaining and shell_assignment_is_prefix(remaining[0]):
+        remaining = remaining[1:]
+    return remaining
+
+
+def sed_command_is_mutating(args: list[str]) -> bool:
+    return any(arg in {"-i", "--in-place"} or arg.startswith(("-i", "--in-place=")) for arg in args)
 
 
 def git_command_is_allowed_in_base(args: list[str], cwd: Path) -> bool:
     if not args:
-        return False
+        return True
     subcommand = args[0]
     rest = args[1:]
-    if subcommand in {"status", "log", "show", "rev-parse", "ls-files"}:
-        return True
     if subcommand == "diff":
         return not any(arg == "--output" or arg.startswith("--output=") for arg in rest)
     if subcommand == "branch":
-        return rest == ["--show-current"]
+        return git_branch_command_is_read_only(rest)
+    if subcommand == "config":
+        return git_config_command_is_read_only(rest)
     if subcommand == "remote":
-        return rest == ["-v"]
+        return git_remote_command_is_read_only(rest)
+    if subcommand == "tag":
+        return git_tag_command_is_read_only(rest)
     if subcommand == "worktree":
         return git_worktree_command_is_allowed(rest, cwd)
-    return False
+    return subcommand not in MUTATING_GIT_COMMANDS
+
+
+def git_branch_command_is_read_only(args: list[str]) -> bool:
+    if not args:
+        return True
+    read_only_flags = {
+        "-a",
+        "--all",
+        "-r",
+        "--remotes",
+        "-v",
+        "-vv",
+        "--verbose",
+        "--show-current",
+        "--list",
+        "--merged",
+        "--no-merged",
+        "--contains",
+        "--no-contains",
+        "--points-at",
+    }
+    return all(arg in read_only_flags or arg.startswith(("--format=", "--sort=", "--column")) for arg in args)
+
+
+def git_config_command_is_read_only(args: list[str]) -> bool:
+    mutating_flags = {
+        "--add",
+        "--edit",
+        "--remove-section",
+        "--rename-section",
+        "--replace-all",
+        "--unset",
+        "--unset-all",
+    }
+    if any(arg in mutating_flags for arg in args):
+        return False
+    read_flags = {"--get", "--get-all", "--get-regexp", "--list", "-l", "--name-only", "--show-origin", "--show-scope"}
+    if any(arg in read_flags for arg in args):
+        return True
+    return len(args) <= 1
+
+
+def git_remote_command_is_read_only(args: list[str]) -> bool:
+    if not args:
+        return True
+    return args[0] in {"-v", "--verbose", "show", "get-url"}
+
+
+def git_tag_command_is_read_only(args: list[str]) -> bool:
+    if not args:
+        return True
+    return args[0] in {"-l", "--list", "-n"} or args[0].startswith("-n")
 
 
 def git_effective_cwd(args: list[str], cwd: Path) -> tuple[Path, list[str]]:
