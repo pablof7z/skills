@@ -37,7 +37,6 @@ DANGEROUS_GIT_COMMANDS = {
     "rm",
     "switch",
 }
-READ_ONLY_GIT_STASH_COMMANDS = {"list", "show"}
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_ACTION_LOG_FILE = "worktreeguard-actions.jsonl"
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
@@ -998,86 +997,7 @@ def shell_wrapper_payload(args: list[str]) -> list[str]:
 def git_command_is_allowed_in_base(args: list[str], cwd: Path) -> bool:
     if not args:
         return True
-    subcommand = args[0]
-    rest = args[1:]
-    if subcommand == "diff":
-        return not any(arg == "--output" or arg.startswith("--output=") for arg in rest)
-    if subcommand == "branch":
-        return git_branch_command_is_read_only(rest)
-    if subcommand == "config":
-        return git_config_command_is_read_only(rest)
-    if subcommand == "remote":
-        return git_remote_command_is_read_only(rest)
-    if subcommand == "tag":
-        return git_tag_command_is_read_only(rest)
-    if subcommand == "stash":
-        return len(rest) > 0 and rest[0] in READ_ONLY_GIT_STASH_COMMANDS
-    if subcommand == "worktree":
-        return git_worktree_command_is_allowed(rest, cwd)
-    return subcommand not in DANGEROUS_GIT_COMMANDS
-
-
-def git_branch_command_is_read_only(args: list[str]) -> bool:
-    if not args:
-        return True
-    if any(arg in {"-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy"} for arg in args):
-        return False
-    if not args[0].startswith("-"):
-        return False
-    read_only_flags = {
-        "-a",
-        "--all",
-        "-r",
-        "--remotes",
-        "-v",
-        "-vv",
-        "--verbose",
-        "--show-current",
-        "--list",
-        "--merged",
-        "--no-merged",
-        "--contains",
-        "--no-contains",
-        "--points-at",
-    }
-    return all(
-        arg in read_only_flags
-        or arg.startswith(("--format=", "--sort=", "--column"))
-        or not arg.startswith("-")
-        for arg in args
-    )
-
-
-def git_config_command_is_read_only(args: list[str]) -> bool:
-    mutating_flags = {
-        "--add",
-        "--edit",
-        "--remove-section",
-        "--rename-section",
-        "--replace-all",
-        "--unset",
-        "--unset-all",
-    }
-    if any(arg in mutating_flags for arg in args):
-        return False
-    read_flags = {"--get", "--get-all", "--get-regexp", "--list", "-l", "--name-only", "--show-origin", "--show-scope"}
-    if any(arg in read_flags for arg in args):
-        return True
-    return len(args) <= 1
-
-
-def git_remote_command_is_read_only(args: list[str]) -> bool:
-    if not args:
-        return True
-    return args[0] in {"-v", "--verbose", "show", "get-url"}
-
-
-def git_tag_command_is_read_only(args: list[str]) -> bool:
-    if not args:
-        return True
-    if any(arg in {"-d", "--delete", "-f", "--force", "-a", "-s", "-u", "-m", "-F"} for arg in args):
-        return False
-    return args[0] in {"-l", "--list", "-n"} or args[0].startswith("-n") or not args[0].startswith("-")
+    return args[0] not in DANGEROUS_GIT_COMMANDS
 
 
 def git_effective_cwd(args: list[str], cwd: Path) -> tuple[Path, list[str]]:
@@ -1107,25 +1027,6 @@ def git_effective_cwd(args: list[str], cwd: Path) -> tuple[Path, list[str]]:
             continue
         break
     return effective_cwd, remaining
-
-
-def git_worktree_command_is_allowed(args: list[str], cwd: Path) -> bool:
-    if not args:
-        return False
-    action = args[0]
-    if action == "list":
-        return True
-    if action != "add":
-        return False
-    target = git_worktree_add_path(args[1:])
-    if target is None:
-        return False
-    protected = protected_repo_for_path(cwd)
-    if protected is None:
-        return True
-    base_path = resolve_path(str(protected["base_path"]))
-    target_path = target if target.is_absolute() else cwd / target
-    return not path_contains(base_path, resolve_path(target_path))
 
 
 def git_worktree_add_path(args: list[str]) -> Path | None:
