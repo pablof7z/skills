@@ -18,24 +18,6 @@ from typing import Any
 
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS"}
 WRITE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
-HARMFUL_SHELL_COMMANDS = {
-    "chmod",
-    "chown",
-    "chgrp",
-    "cp",
-    "dd",
-    "install",
-    "ln",
-    "mkdir",
-    "mv",
-    "patch",
-    "rm",
-    "rmdir",
-    "rsync",
-    "tee",
-    "touch",
-    "truncate",
-}
 DANGEROUS_GIT_COMMANDS = {
     "add",
     "am",
@@ -56,16 +38,6 @@ DANGEROUS_GIT_COMMANDS = {
     "switch",
 }
 READ_ONLY_GIT_STASH_COMMANDS = {"list", "show"}
-WTG_CONTROL_COMMANDS = {
-    "actions",
-    "current",
-    "denials",
-    "doctor",
-    "hook",
-    "protect",
-    "request-base-access",
-    "status",
-}
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_ACTION_LOG_FILE = "worktreeguard-actions.jsonl"
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
@@ -959,7 +931,7 @@ def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
     if not parts:
         return True
     for segment in shell_segments(parts):
-        if shell_segment_is_mutating(segment, cwd):
+        if shell_segment_has_dangerous_git(segment, cwd):
             return False
     return True
 
@@ -985,7 +957,7 @@ def shell_segments(parts: list[str]) -> list[list[str]]:
     return segments
 
 
-def shell_segment_is_mutating(parts: list[str], cwd: Path) -> bool:
+def shell_segment_has_dangerous_git(parts: list[str], cwd: Path) -> bool:
     while parts and shell_assignment_is_prefix(parts[0]):
         parts = parts[1:]
     if not parts:
@@ -994,20 +966,12 @@ def shell_segment_is_mutating(parts: list[str], cwd: Path) -> bool:
     if executable in {"command", "builtin"}:
         if len(parts) >= 2 and parts[1] == "-v":
             return False
-        return shell_segment_is_mutating(parts[1:], cwd)
+        return shell_segment_has_dangerous_git(parts[1:], cwd)
     if executable in {"env", "sudo", "time"}:
-        return shell_segment_is_mutating(shell_wrapper_payload(parts[1:]), cwd)
-    if executable == "wtg" or parts[0] == command_name():
-        return len(parts) < 2 or parts[1] not in WTG_CONTROL_COMMANDS
+        return shell_segment_has_dangerous_git(shell_wrapper_payload(parts[1:]), cwd)
     if executable == "git":
         git_cwd, git_args = git_effective_cwd(parts[1:], cwd)
         return not git_command_is_allowed_in_base(git_args, git_cwd)
-    if executable == "find":
-        return find_command_is_harmful(parts[1:], cwd)
-    if executable == "sed":
-        return sed_command_is_mutating(parts[1:])
-    if executable in HARMFUL_SHELL_COMMANDS:
-        return True
     return False
 
 
@@ -1029,10 +993,6 @@ def shell_wrapper_payload(args: list[str]) -> list[str]:
     while remaining and shell_assignment_is_prefix(remaining[0]):
         remaining = remaining[1:]
     return remaining
-
-
-def sed_command_is_mutating(args: list[str]) -> bool:
-    return any(arg in {"-i", "--in-place"} or arg.startswith(("-i", "--in-place=")) for arg in args)
 
 
 def git_command_is_allowed_in_base(args: list[str], cwd: Path) -> bool:
@@ -1214,34 +1174,6 @@ def git_main_worktree_matches(base_path: Path, path: Path) -> bool:
     except WorktreeGuardError:
         return False
     return repo.base_path == base_path
-
-
-def find_command_is_harmful(args: list[str], cwd: Path) -> bool:
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        if arg == "-delete":
-            return True
-        if arg in {"-exec", "-execdir", "-ok", "-okdir"}:
-            payload, next_index = find_exec_payload(args, index + 1)
-            if payload and shell_segment_is_mutating(payload, cwd):
-                return True
-            index = next_index
-            continue
-        index += 1
-    return False
-
-
-def find_exec_payload(args: list[str], start: int) -> tuple[list[str], int]:
-    payload: list[str] = []
-    index = start
-    while index < len(args):
-        arg = args[index]
-        if arg in {";", r"\;", "+"}:
-            return payload, index + 1
-        payload.append(arg)
-        index += 1
-    return payload, index
 
 
 def repair_protected_base_branches(
