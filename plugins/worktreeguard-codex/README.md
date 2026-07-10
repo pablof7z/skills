@@ -20,8 +20,8 @@ The full WorktreeGuard CLI and daemon should eventually own durable policy,
 grants, audit logs, and rollback behavior. The bundled command covers the first
 testable Codex workflow: protect Git main worktrees by default, deny mutating
 Codex tool calls there, allow read-only inspection, recognize normal Git
-worktree use, and show a macOS approval prompt for temporary base checkout
-access.
+worktree use, track Codex's effective session cwd after worktree entry, and show
+a macOS approval prompt for temporary base checkout access.
 
 ## Install From This Repo
 
@@ -50,8 +50,9 @@ Start a new Codex session after installation so the hook package is loaded.
 - `PreToolUse`: checks Bash, shell, patch, write, edit, and MCP tool attempts.
 - `PermissionRequest`: allows a valid local grant or denies protected-base
   mutations with Git-native worktree guidance.
-- `PostToolUse`: reserved for the full WorktreeGuard daemon.
-- `Stop`: reserved for the full WorktreeGuard daemon.
+- `PostToolUse`: records effective session cwd evidence from `pwd` and
+  successful native `git worktree add` commands.
+- `Stop`: clears tracked session cwd state.
 
 ## Current Scope
 

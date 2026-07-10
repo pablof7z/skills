@@ -770,6 +770,10 @@ If cwd is protected base checkout:
 ```
 
 This means tests and package managers should run in worktrees. That is intentional.
+For Codex, the adapter must prefer the effective session cwd learned from
+PostToolUse evidence over a stale startup cwd in later PreToolUse payloads.
+Codex can report the base checkout as `cwd` while its runtime is executing from
+a linked worktree after native worktree entry.
 
 Examples:
 
