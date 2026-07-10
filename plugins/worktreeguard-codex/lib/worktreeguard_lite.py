@@ -19,22 +19,11 @@ from typing import Any
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS"}
 WRITE_TOOLS = {"apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 DANGEROUS_GIT_COMMANDS = {
-    "add",
-    "am",
-    "apply",
-    "bisect",
     "checkout",
-    "cherry-pick",
     "clean",
-    "commit",
-    "merge",
-    "mv",
-    "pull",
     "rebase",
     "reset",
     "restore",
-    "revert",
-    "rm",
     "switch",
 }
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
@@ -716,14 +705,14 @@ def protected_repo_for_path(path: Path) -> dict[str, Any] | None:
     except WorktreeGuardError:
         return None
     marker = repo.base_path / ".wtg.toml"
-    if marker.is_file() and path_contains(repo.base_path, path):
+    if marker.is_file() and repo.worktree_path == repo.base_path and path_contains(repo.base_path, path):
         return {
             "base_path": str(repo.base_path),
             "common_git_dir": str(repo.common_git_dir),
             "branch": repo.branch,
             "head": repo.head,
         }
-    if path_contains(repo.base_path, path):
+    if repo.worktree_path == repo.base_path and path_contains(repo.base_path, path):
         return {
             "base_path": str(repo.base_path),
             "common_git_dir": str(repo.common_git_dir),
@@ -910,13 +899,84 @@ def operation_is_allowed(operation: dict[str, Any], cwd: Path) -> bool:
         "multiedit",
         "notebookedit",
     }:
-        return False
+        return write_operation_targets_allowed(operation, cwd)
     if tool_name.startswith("mcp__"):
         lowered = tool_name.lower()
         return any(token in lowered for token in ("read", "list", "search", "grep", "glob"))
     if tool_name in {"Bash", "Shell"} or command:
         return shell_command_is_read_only_or_control(command, cwd)
     return False
+
+
+def write_operation_targets_allowed(operation: dict[str, Any], cwd: Path) -> bool:
+    targets = write_operation_target_paths(operation, cwd)
+    if not targets:
+        return False
+    return not any(path_is_protected_main_worktree_target(target) for target in targets)
+
+
+def write_operation_target_paths(operation: dict[str, Any], cwd: Path) -> list[Path]:
+    targets: list[Path] = []
+    tool_input = operation.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("file_path", "filepath", "path", "filename", "notebook_path"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value.strip():
+                targets.append(resolve_operation_path(value, cwd))
+    command = operation.get("command")
+    if isinstance(command, str):
+        targets.extend(apply_patch_target_paths(command, cwd))
+    return unique_paths(targets)
+
+
+def apply_patch_target_paths(command: str, cwd: Path) -> list[Path]:
+    prefixes = (
+        "*** Add File: ",
+        "*** Delete File: ",
+        "*** Update File: ",
+        "*** Move to: ",
+    )
+    targets: list[Path] = []
+    for line in command.splitlines():
+        for prefix in prefixes:
+            if line.startswith(prefix):
+                raw_path = line.removeprefix(prefix).strip()
+                if raw_path:
+                    targets.append(resolve_operation_path(raw_path, cwd))
+                break
+    return targets
+
+
+def resolve_operation_path(value: str, cwd: Path) -> Path:
+    raw_path = Path(os.path.expandvars(value)).expanduser()
+    return resolve_path(raw_path if raw_path.is_absolute() else cwd / raw_path)
+
+
+def unique_paths(paths: list[Path]) -> list[Path]:
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        result.append(path)
+    return result
+
+
+def path_is_protected_main_worktree_target(path: Path) -> bool:
+    context = existing_context_dir(path)
+    protected = protected_repo_for_path(context)
+    if protected is None:
+        return False
+    base_path = resolve_path(str(protected["base_path"]))
+    return path_contains(base_path, path) and git_main_worktree_matches(base_path, context)
+
+
+def existing_context_dir(path: Path) -> Path:
+    candidate = path if path.is_dir() else path.parent
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
 
 
 def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
@@ -929,9 +989,13 @@ def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
         return False
     if not parts:
         return True
+    current_cwd = cwd
     for segment in shell_segments(parts):
-        if shell_segment_has_dangerous_git(segment, cwd):
+        if shell_segment_has_dangerous_git(segment, current_cwd):
             return False
+        next_cwd = shell_segment_cd_cwd(segment, current_cwd)
+        if next_cwd is not None:
+            current_cwd = next_cwd
     return True
 
 
@@ -970,8 +1034,36 @@ def shell_segment_has_dangerous_git(parts: list[str], cwd: Path) -> bool:
         return shell_segment_has_dangerous_git(shell_wrapper_payload(parts[1:]), cwd)
     if executable == "git":
         git_cwd, git_args = git_effective_cwd(parts[1:], cwd)
+        protected = protected_repo_for_path(git_cwd)
+        if protected is None:
+            return False
+        base_path = resolve_path(str(protected["base_path"]))
+        if not path_contains(base_path, git_cwd) or not git_main_worktree_matches(base_path, git_cwd):
+            return False
         return not git_command_is_allowed_in_base(git_args, git_cwd)
     return False
+
+
+def shell_segment_cd_cwd(parts: list[str], cwd: Path) -> Path | None:
+    while parts and shell_assignment_is_prefix(parts[0]):
+        parts = parts[1:]
+    if not parts:
+        return None
+    executable = Path(parts[0]).name
+    offset = 1
+    if executable == "builtin" and len(parts) >= 2 and parts[1] == "cd":
+        offset = 2
+    elif executable != "cd":
+        return None
+    if len(parts) <= offset:
+        return Path.home()
+    target = parts[offset]
+    if target == "-":
+        return None
+    raw_path = Path(os.path.expandvars(target)).expanduser()
+    candidate = raw_path if raw_path.is_absolute() else cwd / raw_path
+    resolved = resolve_path(candidate)
+    return resolved if resolved.is_dir() else None
 
 
 def shell_assignment_is_prefix(part: str) -> bool:
@@ -1074,7 +1166,7 @@ def git_main_worktree_matches(base_path: Path, path: Path) -> bool:
         repo = discover_repo(path)
     except WorktreeGuardError:
         return False
-    return repo.base_path == base_path
+    return repo.base_path == base_path and repo.worktree_path == base_path
 
 
 def repair_protected_base_branches(
@@ -1645,7 +1737,7 @@ def stable_hook_shim_path() -> Path:
 
 def discover_repo(path: Path) -> "Repo":
     path = resolve_path(path)
-    top = git(path, "rev-parse", "--show-toplevel").stdout.strip()
+    worktree_path = resolve_path(git(path, "rev-parse", "--show-toplevel").stdout.strip())
     raw_common_git_dir = Path(git(path, "rev-parse", "--git-common-dir").stdout.strip())
     common_git_dir = raw_common_git_dir if raw_common_git_dir.is_absolute() else path / raw_common_git_dir
     branch_result = subprocess.run(
@@ -1658,9 +1750,10 @@ def discover_repo(path: Path) -> "Repo":
     )
     branch = branch_result.stdout.strip() or "HEAD"
     head = git(path, "rev-parse", "HEAD").stdout.strip()
-    main_worktree = git_main_worktree(path) or resolve_path(top)
+    main_worktree = git_main_worktree(path) or worktree_path
     return Repo(
         base_path=main_worktree,
+        worktree_path=worktree_path,
         common_git_dir=resolve_path(common_git_dir),
         branch=branch,
         head=head,
@@ -1727,8 +1820,17 @@ class WorktreeGuardError(RuntimeError):
 
 
 class Repo:
-    def __init__(self, *, base_path: Path, common_git_dir: Path, branch: str, head: str) -> None:
+    def __init__(
+        self,
+        *,
+        base_path: Path,
+        worktree_path: Path,
+        common_git_dir: Path,
+        branch: str,
+        head: str,
+    ) -> None:
         self.base_path = base_path
+        self.worktree_path = worktree_path
         self.common_git_dir = common_git_dir
         self.branch = branch
         self.head = head
