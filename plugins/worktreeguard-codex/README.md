@@ -15,6 +15,8 @@ non-Git directories are ignored.
 ```bash
 <plugin-root>/bin/wtg status --repo <repo>
 <plugin-root>/bin/wtg request-base-access --repo <repo> --reason "<reason>"
+<plugin-root>/bin/wtg actions --tail 50
+<plugin-root>/bin/wtg actions -f --color always
 <plugin-root>/bin/wtg denials --tail 50
 <plugin-root>/bin/wtg denials -f --color always
 ```
@@ -48,6 +50,10 @@ Start a new Codex session after installation so the hook package is loaded.
   requires a clean base checkout.
 - The bundled command stores local state in
   `~/.local/state/worktreeguard/lite-state.json`.
+- All checked `PreToolUse` and `PermissionRequest` decisions are logged to
+  `~/worktreeguard-actions.jsonl` by default, including allowed commands,
+  denials, grant-based allows, and branch repair attempts. Set
+  `WTG_ACTION_LOG_FILE` to use a different JSONL file.
 - Denied actions are logged to `~/worktreeguard-denied-actions.jsonl` by
   default. Set `WTG_DENY_LOG_FILE` to use a different JSONL file. Hook process
   crashes, including shell `127` command-not-found failures before `wtg` starts,
@@ -56,6 +62,8 @@ Start a new Codex session after installation so the hook package is loaded.
   executable. That shim keeps active Codex sessions from depending on an old
   plugin-cache path after reinstalling or bumping the local plugin version.
 - Use `wtg denials --tail 50` to summarize and inspect recent denials.
+- Use `wtg actions --tail 50` to summarize and inspect recent checked actions.
+- Use `wtg actions -f` to follow allowed, denied, and repair decisions live.
 - Use `wtg denials -f` to follow new denials live. Human output is colorized
   automatically on terminals; use `--color always` or `--no-color` to override.
 
@@ -74,3 +82,7 @@ Start a new Codex session after installation so the hook package is loaded.
 
 This is still not the full WorktreeGuard Rust workspace. The full product still
 needs `wtgd`, the Rust policy engine, SQLite state, and watcher rollback.
+The bundled hook does include watcher-lite branch repair for protected base
+checkouts: on each hook check, it restores a clean protected base checkout to
+the repository default branch if the base drifted to another branch. It logs
+repair failures instead of force-switching over dirty state.
