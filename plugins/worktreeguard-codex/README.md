@@ -19,6 +19,7 @@ non-Git directories are ignored.
 <plugin-root>/bin/wtg actions -f --color always
 <plugin-root>/bin/wtg denials --tail 50
 <plugin-root>/bin/wtg denials -f --color always
+python3 <plugin-root>/scripts/probe_worktreeguard_lite.py
 ```
 
 The full WorktreeGuard CLI and daemon should eventually own durable policy,
@@ -71,6 +72,9 @@ Start a new Codex session after installation so the hook package is loaded.
 - Use `wtg actions -f` to follow allowed, denied, and repair decisions live.
 - Use `wtg denials -f` to follow new denials live. Human output is colorized
   automatically on terminals; use `--color always` or `--no-color` to override.
+- Run `python3 scripts/probe_worktreeguard_lite.py` before reinstalling or
+  changing the hook. It creates temporary Git repos and linked worktrees, calls
+  the Codex hook JSON surface directly, and verifies broad allow/deny behavior.
 
 ## Hook Coverage
 
