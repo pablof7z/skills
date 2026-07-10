@@ -239,9 +239,11 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     git_path = shutil.which("git")
+    hook_shim = stable_hook_shim_path()
     print(f"git: {git_path or 'missing'}")
     print(f"state: {state_path()}")
     print(f"deny log: {deny_log_path()}")
+    print(f"hook shim: {hook_shim} ({'executable' if os.access(hook_shim, os.X_OK) else 'missing'})")
     state = load_state()
     repos = state.get("repos", {})
     grants = active_grants(state)
@@ -1249,6 +1251,10 @@ def deny_log_path() -> Path:
     if override:
         return resolve_path(override)
     return Path.home() / DEFAULT_DENY_LOG_FILE
+
+
+def stable_hook_shim_path() -> Path:
+    return Path.home() / ".local" / "bin" / "wtg-hook-codex"
 
 
 def discover_repo(path: Path) -> "Repo":

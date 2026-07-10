@@ -4,12 +4,13 @@ Codex plugin package for the WorktreeGuard product spec that prompted this
 repository addition.
 
 This package installs Codex lifecycle hooks and a bundled local `wtg` command
-for protection, status, hook handling, and base-access approval requests.
-When a real WorktreeGuard CLI is available on `PATH`, the hook delegates to it.
-Otherwise, the bundled WorktreeGuard-lite command provides enough behavior to
-test the base-checkout guardrail immediately. Git main worktrees are protected
-by default; linked Git worktrees are allowed mutation targets, and non-Git
-directories are ignored.
+for protection, status, hook handling, and base-access approval requests. Hooks
+prefer the stable `~/.local/bin/wtg-hook-codex` entrypoint when it exists, then
+fall back to the hook bundled in the installed plugin cache. The bundled hook
+uses the bundled WorktreeGuard-lite command by default; set `WTG_BIN` to
+delegate hook events to another WorktreeGuard command. Git main worktrees are
+protected by default; linked Git worktrees are allowed mutation targets, and
+non-Git directories are ignored.
 
 ```bash
 <plugin-root>/bin/wtg status --repo <repo>
@@ -48,7 +49,12 @@ Start a new Codex session after installation so the hook package is loaded.
 - The bundled command stores local state in
   `~/.local/state/worktreeguard/lite-state.json`.
 - Denied actions are logged to `~/worktreeguard-denied-actions.jsonl` by
-  default. Set `WTG_DENY_LOG_FILE` to use a different JSONL file.
+  default. Set `WTG_DENY_LOG_FILE` to use a different JSONL file. Hook process
+  crashes, including shell `127` command-not-found failures before `wtg` starts,
+  are not policy denials and will not appear in this log.
+- `wtg doctor` reports whether the stable `~/.local/bin/wtg-hook-codex` shim is
+  executable. That shim keeps active Codex sessions from depending on an old
+  plugin-cache path after reinstalling or bumping the local plugin version.
 - Use `wtg denials --tail 50` to summarize and inspect recent denials.
 - Use `wtg denials -f` to follow new denials live. Human output is colorized
   automatically on terminals; use `--color always` or `--no-color` to override.
