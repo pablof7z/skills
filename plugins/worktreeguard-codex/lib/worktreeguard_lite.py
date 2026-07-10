@@ -566,6 +566,31 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
     operation = extract_operation(payload)
     cwd = effective_operation_cwd(operation, session_cwd)
     repair_protected_base_branches(event=event, payload=payload, operation=operation, cwd=cwd)
+
+    write_target = protected_write_target(operation, cwd)
+    if write_target is not None:
+        base_path, protected = write_target
+        if has_valid_grant(base_path):
+            log_action(
+                event=event,
+                payload=payload,
+                base_path=base_path,
+                cwd=cwd,
+                operation=operation,
+                decision="allow",
+                reason="grant_allowed",
+                protected=protected,
+            )
+            return 0
+        return deny_operation(
+            event=event,
+            payload=payload,
+            base_path=base_path,
+            cwd=cwd,
+            operation=operation,
+            protected=protected,
+        )
+
     protected = protected_repo_for_path(cwd)
     if protected is None:
         log_action(
@@ -619,6 +644,25 @@ def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
         )
         return 0
 
+    return deny_operation(
+        event=event,
+        payload=payload,
+        base_path=base_path,
+        cwd=cwd,
+        operation=operation,
+        protected=protected,
+    )
+
+
+def deny_operation(
+    *,
+    event: str,
+    payload: dict[str, Any],
+    base_path: Path,
+    cwd: Path,
+    operation: dict[str, Any],
+    protected: dict[str, Any] | None,
+) -> int:
     message = denial_message(base_path)
     record = action_record(
         event=event,
@@ -892,13 +936,7 @@ def operation_is_allowed(operation: dict[str, Any], cwd: Path) -> bool:
     normalized_tool_name = normalize_tool_name(tool_name)
     if tool_name in READ_ONLY_TOOLS or normalized_tool_name in {"read", "glob", "grep", "ls", "list"}:
         return True
-    if tool_name in WRITE_TOOLS or normalized_tool_name in {
-        "applypatch",
-        "edit",
-        "write",
-        "multiedit",
-        "notebookedit",
-    }:
+    if operation_is_write_tool(operation):
         return write_operation_targets_allowed(operation, cwd)
     if tool_name.startswith("mcp__"):
         lowered = tool_name.lower()
@@ -906,6 +944,32 @@ def operation_is_allowed(operation: dict[str, Any], cwd: Path) -> bool:
     if tool_name in {"Bash", "Shell"} or command:
         return shell_command_is_read_only_or_control(command, cwd)
     return False
+
+
+def operation_is_write_tool(operation: dict[str, Any]) -> bool:
+    tool_name = operation["tool_name"]
+    normalized_tool_name = normalize_tool_name(tool_name)
+    return tool_name in WRITE_TOOLS or normalized_tool_name in {
+        "applypatch",
+        "edit",
+        "write",
+        "multiedit",
+        "notebookedit",
+    }
+
+
+def protected_write_target(operation: dict[str, Any], cwd: Path) -> tuple[Path, dict[str, Any]] | None:
+    if not operation_is_write_tool(operation):
+        return None
+    for target in write_operation_target_paths(operation, cwd):
+        context = existing_context_dir(target)
+        protected = protected_repo_for_path(context)
+        if protected is None:
+            continue
+        base_path = resolve_path(str(protected["base_path"]))
+        if path_contains(base_path, target) and git_main_worktree_matches(base_path, context):
+            return base_path, protected
+    return None
 
 
 def write_operation_targets_allowed(operation: dict[str, Any], cwd: Path) -> bool:
@@ -990,11 +1054,11 @@ def shell_command_is_read_only_or_control(command: str, cwd: Path) -> bool:
     if not parts:
         return True
     current_cwd = cwd
-    for segment in shell_segments(parts):
+    for segment, separator in shell_segments(parts):
         if shell_segment_has_dangerous_git(segment, current_cwd):
             return False
         next_cwd = shell_segment_cd_cwd(segment, current_cwd)
-        if next_cwd is not None:
+        if next_cwd is not None and separator in {None, ";", "&&"}:
             current_cwd = next_cwd
     return True
 
@@ -1005,18 +1069,18 @@ def shell_tokens(command: str) -> list[str]:
     return list(lexer)
 
 
-def shell_segments(parts: list[str]) -> list[list[str]]:
-    segments: list[list[str]] = []
+def shell_segments(parts: list[str]) -> list[tuple[list[str], str | None]]:
+    segments: list[tuple[list[str], str | None]] = []
     current: list[str] = []
     for part in parts:
         if part in SHELL_CONTROL_TOKENS:
             if current:
-                segments.append(current)
+                segments.append((current, part))
                 current = []
             continue
         current.append(part)
     if current:
-        segments.append(current)
+        segments.append((current, None))
     return segments
 
 
@@ -1032,6 +1096,11 @@ def shell_segment_has_dangerous_git(parts: list[str], cwd: Path) -> bool:
         return shell_segment_has_dangerous_git(parts[1:], cwd)
     if executable in {"env", "sudo", "time"}:
         return shell_segment_has_dangerous_git(shell_wrapper_payload(parts[1:]), cwd)
+    if executable in {"bash", "sh", "zsh"}:
+        payload = shell_interpreter_payload(parts[1:])
+        if payload is None:
+            return False
+        return not shell_command_is_read_only_or_control(payload, cwd)
     if executable == "git":
         git_cwd, git_args = git_effective_cwd(parts[1:], cwd)
         protected = protected_repo_for_path(git_cwd)
@@ -1042,6 +1111,25 @@ def shell_segment_has_dangerous_git(parts: list[str], cwd: Path) -> bool:
             return False
         return not git_command_is_allowed_in_base(git_args, git_cwd)
     return False
+
+
+def shell_interpreter_payload(args: list[str]) -> str | None:
+    remaining = list(args)
+    while remaining and shell_assignment_is_prefix(remaining[0]):
+        remaining = remaining[1:]
+    index = 0
+    while index < len(remaining):
+        arg = remaining[index]
+        if arg == "--":
+            index += 1
+            continue
+        if arg == "-c" or (arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]):
+            return remaining[index + 1] if index + 1 < len(remaining) else ""
+        if arg.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
 
 
 def shell_segment_cd_cwd(parts: list[str], cwd: Path) -> Path | None:
@@ -1109,12 +1197,27 @@ def git_effective_cwd(args: list[str], cwd: Path) -> tuple[Path, list[str]]:
             effective_cwd = resolve_path(raw_path if raw_path.is_absolute() else effective_cwd / raw_path)
             remaining = remaining[1:]
             continue
-        if arg in {"-c", "--config-env", "--exec-path", "--git-dir", "--work-tree", "--namespace"}:
+        if arg == "--work-tree":
+            if len(remaining) < 2:
+                return effective_cwd, remaining
+            raw_path = Path(remaining[1]).expanduser()
+            effective_cwd = resolve_path(raw_path if raw_path.is_absolute() else effective_cwd / raw_path)
+            remaining = remaining[2:]
+            continue
+        if arg.startswith("--work-tree="):
+            raw_path = Path(arg.partition("=")[2]).expanduser()
+            effective_cwd = resolve_path(raw_path if raw_path.is_absolute() else effective_cwd / raw_path)
+            remaining = remaining[1:]
+            continue
+        if arg in {"-c", "--config-env", "--exec-path", "--git-dir", "--namespace"}:
             if len(remaining) < 2:
                 return effective_cwd, remaining
             remaining = remaining[2:]
             continue
-        if arg in {"--no-pager", "--paginate", "--bare", "--version", "--help"}:
+        if any(arg.startswith(f"{option}=") for option in ("--config-env", "--exec-path", "--git-dir", "--namespace")):
+            remaining = remaining[1:]
+            continue
+        if arg in {"--no-pager", "--paginate", "--bare", "--version", "--help", "--no-optional-locks"}:
             remaining = remaining[1:]
             continue
         break
