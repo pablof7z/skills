@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import Darwin
 import SwiftUI
 
 @main
@@ -19,6 +18,7 @@ struct TTSMenuBarApp {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = PlaybackController()
     private let store = QueueStore()
+    private lazy var instanceLock = MenuInstanceLock(store: store)
     private let popover = NSPopover()
     private var statusItem: NSStatusItem?
     private var controllerObservation: AnyCancellable?
@@ -102,24 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func acquireInstanceLock() -> Bool {
         do {
-            try store.prepare()
-            if FileManager.default.fileExists(atPath: store.lockDirectory.path) {
-                if let data = try? Data(contentsOf: store.processFile),
-                   let value = String(data: data, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                   let pid = Int32(value),
-                   kill(pid, 0) == 0 {
-                    return false
-                }
-                try? FileManager.default.removeItem(at: store.lockDirectory)
-                try? FileManager.default.removeItem(at: store.processFile)
-            }
-
-            try FileManager.default.createDirectory(at: store.lockDirectory, withIntermediateDirectories: false)
-            try Data("\(ProcessInfo.processInfo.processIdentifier)\n".utf8)
-                .write(to: store.processFile, options: .atomic)
-            ownsLock = true
-            return true
+            ownsLock = try instanceLock.acquire()
+            return ownsLock
         } catch {
             NSLog("Unable to acquire TTS menu lock: %@", error.localizedDescription)
             return false
@@ -128,8 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func releaseInstanceLock() {
         guard ownsLock else { return }
-        try? FileManager.default.removeItem(at: store.processFile)
-        try? FileManager.default.removeItem(at: store.lockDirectory)
+        instanceLock.release()
         ownsLock = false
     }
 }
