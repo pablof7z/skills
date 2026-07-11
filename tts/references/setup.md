@@ -11,6 +11,7 @@ Set this environment variable before running `./scripts/tts`:
 ## Optional
 
 - `KOKORO_API_KEY` for bearer-token auth
+- Swift from Xcode or the Command Line Tools for the macOS menu-bar app
 
 ## Suggested local env file
 

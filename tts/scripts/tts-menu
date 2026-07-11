@@ -1,0 +1,319 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PACKAGE_DIR="$SCRIPT_DIR/../macos"
+BINARY="$PACKAGE_DIR/.build/release/TTSMenuBar"
+APP_BUNDLE="$PACKAGE_DIR/.build/release/TTSMenuBar.app"
+APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/TTSMenuBar"
+APP_INFO="$APP_BUNDLE/Contents/Info.plist"
+
+tts_state_dir() {
+  if [ -n "${TTS_STATE_DIR:-}" ]; then
+    printf '%s\n' "$TTS_STATE_DIR"
+  elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s/tts\n' "$XDG_STATE_HOME"
+  elif [ -n "${HOME:-}" ]; then
+    printf '%s/.local/state/tts\n' "$HOME"
+  else
+    printf '/tmp/tts-state\n'
+  fi
+}
+
+STATE_DIR="$(tts_state_dir)"
+PID_FILE="$STATE_DIR/menu.pid"
+LOCK_DIR="$STATE_DIR/menu.lock"
+LOG_FILE="$STATE_DIR/menu.log"
+
+usage() {
+  echo "Usage: ./scripts/tts-menu <start|stop|restart|status> [--json]" >&2
+}
+
+process_is_alive() {
+  local pid="${1:-}"
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+}
+
+active_pid() {
+  local pid=""
+  if [ -r "$PID_FILE" ]; then
+    IFS= read -r pid < "$PID_FILE" || true
+  fi
+  if process_is_alive "$pid"; then
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  return 1
+}
+
+stage_app_bundle() {
+  mkdir -p "$APP_BUNDLE/Contents/MacOS"
+  if [ ! -x "$APP_EXECUTABLE" ] || [ "$BINARY" -nt "$APP_EXECUTABLE" ]; then
+    cp "$BINARY" "$APP_EXECUTABLE"
+    chmod +x "$APP_EXECUTABLE"
+  fi
+  cat > "$APP_INFO" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>TTSMenuBar</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.pablof7z.tts-menu</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>TTS Queue</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+PLIST
+}
+
+build_if_needed() {
+  local newer=""
+  if [ -x "$BINARY" ]; then
+    newer="$(find "$PACKAGE_DIR/Package.swift" "$PACKAGE_DIR/Sources" -type f -newer "$BINARY" -print -quit 2>/dev/null || true)"
+  fi
+
+  if [ ! -x "$BINARY" ] || [ -n "$newer" ]; then
+    if ! command -v swift >/dev/null 2>&1; then
+      echo "Error: Swift is required to build the TTS menu-bar app." >&2
+      return 1
+    fi
+
+    mkdir -p "$STATE_DIR"
+    if ! swift build --package-path "$PACKAGE_DIR" --configuration release >>"$LOG_FILE" 2>&1; then
+      echo "Error: failed to build the TTS menu-bar app. Log: $LOG_FILE" >&2
+      tail -n 30 "$LOG_FILE" >&2 || true
+      return 1
+    fi
+  fi
+
+  stage_app_bundle
+}
+
+start_menu() {
+  local pid
+  mkdir -p "$STATE_DIR/items"
+
+  if pid="$(active_pid 2>/dev/null)"; then
+    printf 'TTS menu bar is running: pid %s\n' "$pid"
+    return 0
+  fi
+
+  build_if_needed
+  rm -f "$PID_FILE"
+
+  if ! open -gj -n "$APP_BUNDLE" --args --state-dir "$STATE_DIR"; then
+    echo "Error: Launch Services could not open the TTS menu-bar app." >&2
+    return 1
+  fi
+
+  for _ in {1..60}; do
+    if pid="$(active_pid 2>/dev/null)"; then
+      printf 'TTS menu bar started: pid %s\n' "$pid"
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  echo "Error: TTS menu-bar app did not start. Log: $LOG_FILE" >&2
+  tail -n 30 "$LOG_FILE" >&2 || true
+  return 1
+}
+
+recover_interrupted_items() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$STATE_DIR" <<'PY'
+import json
+import os
+import sys
+import tempfile
+import time
+
+items_dir = os.path.join(sys.argv[1], "items")
+if not os.path.isdir(items_dir):
+    raise SystemExit(0)
+
+for name in os.listdir(items_dir):
+    if not name.endswith(".json"):
+        continue
+    path = os.path.join(items_dir, name)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            item = json.load(handle)
+    except (OSError, ValueError):
+        continue
+    if item.get("status") not in ("playing", "paused"):
+        continue
+    item["status"] = "queued" if os.path.isfile(item.get("output_file", "")) else "failed"
+    item["started_at"] = None
+    item["completed_at"] = None if item["status"] == "queued" else int(time.time())
+    item["error"] = None if item["status"] == "queued" else "Audio file is no longer available."
+    fd, temporary = tempfile.mkstemp(prefix=".tts-item-", dir=items_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(item, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+PY
+}
+
+stop_menu() {
+  local pid=""
+  if ! pid="$(active_pid 2>/dev/null)"; then
+    rm -f "$PID_FILE"
+    rm -rf "$LOCK_DIR"
+    recover_interrupted_items
+    echo "TTS menu bar is not running."
+    return 0
+  fi
+
+  kill "$pid" 2>/dev/null || true
+  for _ in {1..50}; do
+    if ! process_is_alive "$pid"; then
+      break
+    fi
+    sleep 0.1
+  done
+  if process_is_alive "$pid"; then
+    echo "Error: TTS menu-bar app did not stop." >&2
+    return 1
+  fi
+
+  rm -f "$PID_FILE"
+  rm -rf "$LOCK_DIR"
+  recover_interrupted_items
+  echo "TTS menu bar stopped."
+}
+
+print_status() {
+  local json_output="${1:-0}"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: python3 is required to read TTS queue status." >&2
+    return 1
+  fi
+
+  python3 - "$STATE_DIR" "$json_output" <<'PY'
+import json
+import os
+import sys
+
+state_dir = sys.argv[1]
+json_output = sys.argv[2] == "1"
+items_dir = os.path.join(state_dir, "items")
+
+items = []
+if os.path.isdir(items_dir):
+    for name in os.listdir(items_dir):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(items_dir, name), encoding="utf-8") as handle:
+                items.append(json.load(handle))
+        except (OSError, ValueError):
+            pass
+
+items.sort(key=lambda item: (item.get("created_at", 0), item.get("id", "")))
+queued = [item for item in items if item.get("status") == "queued"]
+recent = [item for item in items if item.get("status") in ("played", "failed")]
+recent.sort(key=lambda item: item.get("created_at", 0), reverse=True)
+
+def live_pid(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            pid = int(handle.readline().strip())
+        os.kill(pid, 0)
+        return pid
+    except (OSError, TypeError, ValueError):
+        return None
+
+menu_pid = live_pid(os.path.join(state_dir, "menu.pid"))
+legacy_owner_pid = live_pid(os.path.join(state_dir, "speech.lock", "owner"))
+recorded_current = next((item for item in items if item.get("status") in ("playing", "paused")), None)
+current = recorded_current if menu_pid else None
+interrupted = recorded_current if recorded_current and not menu_pid else None
+state = current.get("status") if current else (
+    "interrupted" if interrupted else (
+        "queued" if queued else ("playing" if legacy_owner_pid else "idle")
+    )
+)
+
+result = {
+    "state": state,
+    "current": current,
+    "interrupted": interrupted,
+    "queued": queued,
+    "recent": recent[:30],
+    "menu_pid": menu_pid,
+    "legacy_owner_pid": legacy_owner_pid,
+}
+
+if json_output:
+    print(json.dumps(result, indent=2, sort_keys=True))
+    raise SystemExit(0)
+
+print(f"state: {state}")
+if current:
+    agent = current.get("agent_name") or current.get("harness") or "Unknown agent"
+    text = " ".join(current.get("text", "").split())
+    if len(text) > 90:
+        text = text[:87] + "..."
+    print(f"current: {agent} - {text}")
+elif legacy_owner_pid:
+    print(f"current: fallback playback pid {legacy_owner_pid}")
+elif interrupted:
+    print("current: interrupted native playback")
+print(f"queued: {len(queued)}")
+print(f"recent: {len(recent)}")
+if menu_pid:
+    print(f"menu: pid {menu_pid}")
+PY
+}
+
+command="${1:-}"
+case "$command" in
+  start)
+    start_menu
+    ;;
+  stop)
+    stop_menu
+    ;;
+  restart)
+    stop_menu
+    start_menu
+    ;;
+  status)
+    if [ "${2:-}" = "--json" ]; then
+      print_status 1
+    elif [ -n "${2:-}" ]; then
+      usage
+      exit 1
+    else
+      print_status 0
+    fi
+    ;;
+  --help|-h|help)
+    usage
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
