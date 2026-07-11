@@ -2,13 +2,7 @@
 
 Installable workflows for coding agents that turn recurring work into one named instruction.
 
-<p align="center">
-  <img src="assets/tts-menu-player.png" alt="The TTS skill showing an agent update in its macOS menu-bar player, with transcript progress, session metadata, and podcast controls" width="500">
-</p>
-
-The player above comes from [`tts`](tts/): agent updates become a serialized macOS audio queue with a readable transcript, session identity, pause, seek, replay, and media-aware playback.
-
-This catalog is for people who use coding agents often enough to recognize the same work coming back. Instead of rebuilding the prompt every time, install a skill once and invoke a workflow that already knows what to inspect, what to produce, and where its trust boundaries are.
+This catalog is for people who use agents often enough to recognize the same hard jobs coming back. A skill is more than a saved prompt: it carries a point of view about the work, the evidence worth gathering, the failure modes to avoid, and what a good result should look like.
 
 ## Try One
 
@@ -27,55 +21,68 @@ Start a new agent session, then say:
 $repo-marketing rewrite this README around the shortest convincing proof and first-run path.
 ```
 
-The agent should inspect the repository, identify the audience and trust boundaries, then return or implement a sharper README instead of producing a generic documentation summary.
+The agent should inspect the repository before it writes, identify the real audience and trust boundaries, and shape the page around evidence rather than generic documentation structure.
 
-Installation only copies the selected skill folder into `~/.agents/skills`. Remove that folder to uninstall it.
+## The Skills
 
-## Skills Worth Trying
+### [TTS: Hear What Your Agents Are Doing](tts/README.md)
 
-| Skill | Use it when | What changes |
-|---|---|---|
-| [`tts`](tts/) | You want agent updates as audio without blocking the agent or letting multiple sessions talk over each other. | Generates speech through your Kokoro endpoint, queues it, and exposes a macOS player with transcript progress and session context. |
-| [`repo-marketing`](repo-marketing/) | A useful repository still does not make people want to try it. | Reworks positioning, proof, activation, trust, and launch readiness around the repository that actually exists. |
-| [`design-exploration-capture`](design-exploration-capture/) | A design discussion has real alternatives and should not collapse into premature implementation. | Keeps a named decision trail with evidence, tensions, rejected directions, and convergence state. |
-| [`high-level`](high-level/) | You need the useful mental model without an internal tour. | Explains the system from the outside in and stops at the right level. |
-| [`nip60`](nip60/) | You are building or debugging Cashu wallets and nutzaps on Nostr with NDK. | Gives the agent concrete event, token, mint, relay, and security guidance for NIP-60, NIP-61, and NIP-87 flows. |
+Agents already produce useful status updates. `tts` turns them into a shared audio queue you can follow without watching every terminal or letting concurrent sessions speak over each other.
 
-The repository also includes a WorktreeGuard plugin for keeping agent mutations out of protected Git base worktrees.
+On macOS, it becomes a menu-bar player with a readable transcript, agent and session identity, timeline scrubbing, pause, seek, and replay. Generation failures stay visible to the calling agent before playback moves into the background.
 
-## TTS: Agent Updates You Can Follow
+<p align="center">
+  <a href="tts/README.md"><img src="assets/tts-menu-player.png" alt="The TTS skill showing an agent update with transcript progress, session metadata, and podcast controls" width="240"></a>
+</p>
 
-`tts` is the most visible example of what a skill can become when the workflow owns the whole loop rather than just a prompt:
+[See the player, workflow, and first spoken update →](tts/README.md)
 
-- Speech generation stays in the foreground long enough to report endpoint failures and confirm that output exists.
-- Playback moves into the background only after generation succeeds.
-- One resident macOS process serializes updates from multiple agents.
-- The menu-bar player shows the full spoken text, approximate word progress, agent name, voice, harness, workspace, and session identifier.
-- Podcast controls provide pause, 15-second seek, timeline scrubbing, and replay.
-- Music or Spotify can be paused for speech and resumed afterward.
+### [Repo Marketing: Make the Value Visible](repo-marketing/README.md)
 
-To run it directly:
+Useful software is often buried under a README that starts where the maintainer's mind ended: architecture, setup matrices, and internal nouns. `repo-marketing` works backward from the moment a stranger decides whether this is for them.
 
-```bash
-export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
-./tts/scripts/tts \
-  --agent-name nova-summit-482 \
-  --introduction "Agent Nova here, working on the repository launch." \
-  "The README update is ready for review."
-```
+It finds the strongest honest hook, proof, first useful loop, trust boundary, and launch gap, then turns those into a front door that earns attention before asking for effort.
 
-On macOS 13 or later with Swift available, the first audible request builds and starts the menu-bar player. The command returns after the endpoint has produced the audio and the item has been accepted for playback. See [`tts/references/setup.md`](tts/references/setup.md) for endpoint configuration.
+[See how a repository becomes a product-shaped project →](repo-marketing/README.md)
+
+### [Design Exploration Capture: Preserve the Path to a Decision](design-exploration-capture/README.md)
+
+The hardest design discussions do not fail from a lack of ideas. They fail when assumptions quietly become decisions, rejected options return without context, or implementation begins before the important uncertainty is gone.
+
+`design-exploration-capture` keeps the exploration alive without letting it become vague: evidence, tensions, risks, alternatives, and decision signals stay distinct until the direction actually converges.
+
+[See how an open question becomes a defensible decision →](design-exploration-capture/README.md)
+
+### [High Level: Understand Without Drowning](high-level/README.md)
+
+Depth is not the same as understanding. `high-level` gives an agent permission to find the real shape of a codebase, protocol, document, or workflow and explain only the concepts needed to reason about it.
+
+The result is a useful mental model, not a file tour, glossary dump, or performance of comprehensiveness.
+
+[See what a good high-level explanation should accomplish →](high-level/README.md)
+
+### [NIP-60: Keep Nostr Cashu Wallet State Coherent](nip60/README.md)
+
+In a Cashu wallet, the hard part is not drawing a balance. It is keeping proofs, mints, encrypted Nostr events, pending operations, nutzaps, and recovery coherent when the network is partial and money is in motion.
+
+`nip60` gives agents a concrete implementation guide for NIP-60 wallets, NIP-61 nutzaps, NIP-87 mint discovery, and the NDK wallet APIs that connect them.
+
+[See the wallet model, flows, and safety boundary →](nip60/README.md)
+
+## Also Included
+
+The repository includes a WorktreeGuard plugin for keeping agent mutations out of protected Git base worktrees and steering implementation into isolated worktrees.
 
 ## Trust Boundaries
 
-Most folders contain agent instructions and reference material only. Skills that execute helpers or touch sensitive domains state those boundaries in their own documentation.
+Most skill folders contain instructions and reference material only. The exceptions are explicit:
 
-- `tts` sends the supplied text to the Kokoro-compatible endpoint you configure, writes generated audio under `/tmp`, stores queue state under `~/.local/state/tts`, and may control Music or Spotify on macOS unless disabled.
+- `tts` sends supplied text to the Kokoro-compatible endpoint you configure, writes generated audio under `/tmp`, stores queue state under `~/.local/state/tts`, and may control Music or Spotify on macOS unless disabled.
 - `design-exploration-capture` may create or update local exploration notes while a design session is active.
-- `nip60` covers wallet behavior involving Nostr keys, signed events, relays, mints, and token state; it is implementation guidance, not custody software.
-- `worktreeguard-codex` installs Codex hooks and writes local policy/audit state. Read its plugin README before installation.
+- `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
+- The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
 
-No shared installer or telemetry service is included. You choose which folders to install and can inspect every instruction, reference, and helper in place.
+Installation copies only the skill folders you choose into `~/.agents/skills`. Remove a copied folder to uninstall it. No shared installer or telemetry service is included.
 
 ## License
 
