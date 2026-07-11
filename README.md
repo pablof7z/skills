@@ -41,7 +41,7 @@ Installation only copies the selected skill folder into `~/.agents/skills`. Remo
 | [`high-level`](high-level/) | You need the useful mental model without an internal tour. | Explains the system from the outside in and stops at the right level. |
 | [`nip60`](nip60/) | You are building or debugging Cashu wallets and nutzaps on Nostr with NDK. | Gives the agent concrete event, token, mint, relay, and security guidance for NIP-60, NIP-61, and NIP-87 flows. |
 
-The repository also includes the [`worktreeguard-codex`](plugins/worktreeguard-codex/) plugin for keeping agent mutations out of protected Git base worktrees.
+The repository also includes a WorktreeGuard plugin for keeping agent mutations out of protected Git base worktrees.
 
 ## TTS: Agent Updates You Can Follow
 
