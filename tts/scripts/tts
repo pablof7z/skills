@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${KOKORO_ENV_FILE:-$HOME/.env.tts}"
 if [ -f "$ENV_FILE" ]; then
   # shellcheck source=/dev/null
@@ -8,7 +9,9 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 tts_state_dir() {
-  if [ -n "${XDG_STATE_HOME:-}" ]; then
+  if [ -n "${TTS_STATE_DIR:-}" ]; then
+    printf '%s\n' "$TTS_STATE_DIR"
+  elif [ -n "${XDG_STATE_HOME:-}" ]; then
     printf '%s/tts\n' "$XDG_STATE_HOME"
   elif [ -n "${HOME:-}" ]; then
     printf '%s/.local/state/tts\n' "$HOME"
@@ -26,6 +29,46 @@ truthy() {
       return 1
       ;;
   esac
+}
+
+first_environment_value() {
+  local name value
+  for name in "$@"; do
+    value="${!name:-}"
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+  return 1
+}
+
+infer_harness() {
+  local explicit
+  explicit="$(first_environment_value TTS_HARNESS WTG_HARNESS 2>/dev/null || true)"
+  if [ -n "$explicit" ]; then
+    printf '%s\n' "$explicit"
+  elif [ -n "${TENEX_EDGE_SESSION_ID:-}" ] || [ -n "${TENEX_AGENT_NAME:-}" ]; then
+    printf 'tenex-edge\n'
+  elif [ -n "${CODEX_THREAD_ID:-}" ]; then
+    printf 'codex\n'
+  elif [ -n "${CLAUDE_SESSION_ID:-}" ] || [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
+    printf 'claude\n'
+  fi
+}
+
+infer_session_id() {
+  first_environment_value \
+    TTS_SESSION_ID \
+    TENEX_EDGE_SESSION_ID \
+    CODEX_THREAD_ID \
+    CLAUDE_SESSION_ID \
+    WTG_SESSION_ID \
+    2>/dev/null || true
+}
+
+macos_menu_enabled() {
+  [ "$(uname -s)" = "Darwin" ] && truthy "${TTS_MACOS_MENU:-1}"
 }
 
 SPEECH_GATE_HELD=0
@@ -230,6 +273,105 @@ record_agent_spoken() {
   fi
 }
 
+queue_macos_playback() {
+  local state_dir items_dir item_id item_file temporary_file
+  local harness session_id workspace inferred_agent menu_command
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "Warning: python3 is unavailable; using fallback TTS playback." >&2
+    return 1
+  fi
+
+  menu_command="${TTS_MENU_COMMAND:-$SCRIPT_DIR/tts-menu}"
+  if [ ! -x "$menu_command" ]; then
+    echo "Warning: TTS menu launcher is unavailable; using fallback playback." >&2
+    return 1
+  fi
+
+  state_dir="$(tts_state_dir)"
+  items_dir="$state_dir/items"
+  mkdir -p "$items_dir" || return 1
+
+  item_id="$(date +%s)-$$-$RANDOM"
+  item_file="$items_dir/$item_id.json"
+  temporary_file="$items_dir/.$item_id.tmp"
+  harness="$(infer_harness)"
+  session_id="$(infer_session_id)"
+  workspace="${TTS_WORKSPACE:-${WTG_WORKTREE_PATH:-$(pwd -P)}}"
+  inferred_agent="${AGENT_NAME:-${TTS_AGENT_NAME:-${TENEX_AGENT_NAME:-}}}"
+
+  if ! python3 - \
+    "$temporary_file" \
+    "$item_id" \
+    "$TEXT" \
+    "$inferred_agent" \
+    "$harness" \
+    "$session_id" \
+    "$workspace" \
+    "$VOICE" \
+    "$OUTPUT_FILE" \
+    "$(date +%s)" <<'PY'
+import json
+import sys
+
+(
+    destination,
+    item_id,
+    text,
+    agent_name,
+    harness,
+    session_id,
+    workspace,
+    voice,
+    output_file,
+    created_at,
+) = sys.argv[1:]
+
+def optional(value):
+    return value or None
+
+item = {
+    "id": item_id,
+    "text": text,
+    "agent_name": optional(agent_name),
+    "harness": optional(harness),
+    "session_id": optional(session_id),
+    "workspace": optional(workspace),
+    "voice": voice,
+    "output_file": output_file,
+    "status": "queued",
+    "created_at": int(created_at),
+    "started_at": None,
+    "completed_at": None,
+    "duration": None,
+    "error": None,
+}
+
+with open(destination, "w", encoding="utf-8") as handle:
+    json.dump(item, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+  then
+    rm -f "$temporary_file"
+    return 1
+  fi
+
+  resume_paused_media 0
+  mv "$temporary_file" "$item_file"
+  if env \
+    TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
+    TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
+    "$menu_command" start >/dev/null; then
+    record_agent_spoken
+    printf 'Queued TTS in macOS menu bar: %s\n' "$item_id" >&2
+    return 0
+  fi
+
+  rm -f "$item_file"
+  echo "Warning: native TTS queue failed to start; using fallback playback." >&2
+  return 1
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --no-play)
@@ -424,7 +566,8 @@ resume_paused_media() {
     return
   fi
 
-  sleep "$RESUME_DELAY" 2>/dev/null || true
+  local delay="${1:-$RESUME_DELAY}"
+  sleep "$delay" 2>/dev/null || true
 
   local app
   for app in "${PAUSED_MEDIA_APPS[@]}"; do
@@ -432,6 +575,7 @@ resume_paused_media() {
       scriptable_player_command "$app" "play" || true
     fi
   done
+  PAUSED_MEDIA_APPS=()
 }
 
 cleanup() {
@@ -547,6 +691,10 @@ if [ "$NO_PLAY" -eq 1 ]; then
 fi
 
 echo "✓ Generated: $OUTPUT_FILE"
+if macos_menu_enabled && queue_macos_playback; then
+  exit 0
+fi
+
 state_dir="$(tts_state_dir)"
 if ! mkdir -p "$state_dir" 2>/dev/null; then
   state_dir="/tmp/tts-state"

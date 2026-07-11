@@ -50,11 +50,23 @@ By default, `scripts/tts` generates the MP3 in the foreground, then queues
 playback in the background so the agent sees endpoint/setup failures before the
 command returns.
 
-Background playback workers share a speech gate, so only one audible TTS job
-speaks at a time even when multiple agents queue messages concurrently.
+On macOS, the first audible request starts a resident menu-bar app. It owns the
+playback queue, shows queued/current/recent speech, and provides pause, resume,
+15-second skip controls, and replay by clicking a recent row. The current item
+uses a podcast-style player with an approximate word-progress transcript.
+Queue rows include the text, voice, agent name, and any harness, full session
+identifier, and workspace metadata available in the calling environment.
+
+Use `scripts/tts-menu status` to check whether TTS is playing and inspect queue
+counts. Use `scripts/tts-menu status --json` for structured status. Use
+`scripts/tts-menu start`, `stop`, or `restart` to manage the menu-bar process.
+
+If the native app is disabled or cannot start, background playback workers use
+the speech gate so only one audible TTS job speaks at a time. Set
+`TTS_MACOS_MENU=0` to force this fallback.
 
 On macOS, the script checks scriptable media apps before generation and the
-background playback worker checks again before playback. If Music or Spotify is
+active playback backend checks again before playback. If Music or Spotify is
 already playing, it pauses them and resumes them a few seconds after playback
 ends.
 
@@ -64,8 +76,8 @@ ends.
 - Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
 - Use `TTS_MEDIA_APPS="Music,Spotify"` to customize the checked apps.
 
-The background worker logs under the TTS state directory, normally
-`~/.local/state/tts/`.
+Queue records, process state, and logs live under the TTS state directory,
+normally `~/.local/state/tts/`.
 
 `./scripts/tts --agent-name quinn-delta-306 --introduction "Agent Quinn here, working on improving TTS identity cues." "The fix is ready."` will speak with identity context when needed.
 
