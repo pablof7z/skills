@@ -63,6 +63,25 @@ struct QueueStoreTests {
         #expect(value.sessionLabel == "019c-live-menu-uat-full-session")
     }
 
+    @Test
+    func allowsOnlyOneMenuInstancePerStateDirectory() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        let first = MenuInstanceLock(store: store)
+        let second = MenuInstanceLock(store: store)
+
+        #expect(try first.acquire(processID: 111))
+        #expect(try !second.acquire(processID: 222))
+        #expect(try String(contentsOf: store.processFile, encoding: .utf8) == "111\n")
+
+        first.release()
+
+        #expect(try second.acquire(processID: 222))
+        #expect(try String(contentsOf: store.processFile, encoding: .utf8) == "222\n")
+        second.release()
+    }
+
     private func item(
         id: String,
         createdAt: Int64,
