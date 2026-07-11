@@ -146,47 +146,47 @@ private struct QueueView: View {
             if let current = controller.currentItem {
                 CurrentPlaybackView(item: current, controller: controller)
                     .padding(8)
-                Divider()
-            }
-
-            List {
-                Section("Up Next") {
-                    if controller.queuedItems.isEmpty {
-                        Text("Queue is empty")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(controller.queuedItems) { item in
-                            ItemRow(item: item, action: nil)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    Section("Up Next") {
+                        if controller.queuedItems.isEmpty {
+                            Text("Queue is empty")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(controller.queuedItems) { item in
+                                ItemRow(item: item, action: nil)
+                            }
                         }
                     }
-                }
 
-                Section("Recent") {
-                    if controller.recentItems.isEmpty {
-                        Text("No recent speech")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(controller.recentItems.prefix(30)) { item in
-                            ItemRow(item: item) {
-                                controller.replay(item)
-                            }
-                            .contextMenu {
-                                Button("Replay", systemImage: "arrow.counterclockwise") {
+                    Section("Recent") {
+                        if controller.recentItems.isEmpty {
+                            Text("No recent speech")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(controller.recentItems.prefix(30)) { item in
+                                ItemRow(item: item) {
                                     controller.replay(item)
                                 }
-                                Button("Show in Finder", systemImage: "folder") {
-                                    controller.reveal(item)
+                                .contextMenu {
+                                    Button("Replay", systemImage: "arrow.counterclockwise") {
+                                        controller.replay(item)
+                                    }
+                                    Button("Show in Finder", systemImage: "folder") {
+                                        controller.reveal(item)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            .listStyle(.inset)
-            .scrollContentBackground(.hidden)
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
 
-            Divider()
-            footer
+                Divider()
+                footer
+            }
         }
         .frame(width: 430, height: 640)
     }
@@ -254,6 +254,7 @@ private struct CurrentPlaybackView: View {
                 currentTime: controller.currentTime,
                 duration: controller.duration
             )
+            .layoutPriority(1)
 
             CurrentContextView(item: item)
 
@@ -276,7 +277,7 @@ private struct CurrentPlaybackView: View {
 
             TransportControls(controller: controller)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .playerGlassSurface()
@@ -379,7 +380,7 @@ private struct TranscriptView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
-        .frame(minHeight: 72, maxHeight: 112)
+        .frame(maxWidth: .infinity, minHeight: 180, maxHeight: .infinity, alignment: .topLeading)
         .accessibilityLabel("Transcript")
     }
 
