@@ -46,17 +46,19 @@ when a specific voice is required.
 
 ## Playback behavior
 
-By default, `scripts/tts` queues speech generation/playback in the background
-and returns immediately so the agent can keep working.
+By default, `scripts/tts` generates the MP3 in the foreground, then queues
+playback in the background so the agent sees endpoint/setup failures before the
+command returns.
 
-Background workers share a speech gate, so only one audible TTS job speaks at a
-time even when multiple agents queue messages concurrently.
+Background playback workers share a speech gate, so only one audible TTS job
+speaks at a time even when multiple agents queue messages concurrently.
 
-On macOS, the background worker checks scriptable media apps before generation
-and again before playback. If Music or Spotify is already playing, it pauses
-them and resumes them a few seconds after playback ends.
+On macOS, the script checks scriptable media apps before generation and the
+background playback worker checks again before playback. If Music or Spotify is
+already playing, it pauses them and resumes them a few seconds after playback
+ends.
 
-- Use `--no-play` to print the target MP3 path immediately and generate it in the background without playing it.
+- Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
 - Use `--voice-id voice` to choose an explicit voice.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
 - Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
@@ -67,4 +69,4 @@ The background worker logs under the TTS state directory, normally
 
 `./scripts/tts --agent-name quinn-delta-306 --introduction "Agent Quinn here, working on improving TTS identity cues." "The fix is ready."` will speak with identity context when needed.
 
-`./scripts/tts --no-play --voice-id af_bella "Hello world"` will print the output path immediately, skip playback, and use an explicit voice.
+`./scripts/tts --no-play --voice-id af_bella "Hello world"` will generate the MP3, print its output path, skip playback, and use an explicit voice.

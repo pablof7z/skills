@@ -103,7 +103,6 @@ acquire_speech_gate() {
         printf '%s\n' "$$"
         date +%s
       } > "$owner_file" 2>/dev/null || true
-      trap release_speech_gate EXIT
       return 0
     fi
 
@@ -120,55 +119,9 @@ acquire_speech_gate() {
   done
 }
 
-arg_present() {
-  local needle="$1"
-  shift
-
-  local arg
-  for arg in "$@"; do
-    if [ "$arg" = "--" ]; then
-      return 1
-    fi
-    if [ "$arg" = "$needle" ]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-queue_background_if_needed() {
-  if truthy "${TTS_BACKGROUND_CHILD:-0}" || arg_present "--help" "$@" || arg_present "-h" "$@"; then
-    return
-  fi
-
-  local state_dir output_file log_file pid
-  state_dir="$(tts_state_dir)"
-  if ! mkdir -p "$state_dir" 2>/dev/null; then
-    state_dir="/tmp/tts-state"
-    mkdir -p "$state_dir" 2>/dev/null || state_dir="/tmp"
-  fi
-
-  output_file="${TTS_OUTPUT_FILE:-/tmp/tts_${RANDOM}.mp3}"
-  log_file="$state_dir/tts-$(date +%Y%m%d-%H%M%S)-$$.log"
-
-  nohup env TTS_BACKGROUND_CHILD=1 TTS_CALLER_PPID="$PPID" TTS_OUTPUT_FILE="$output_file" "$0" "$@" </dev/null >>"$log_file" 2>&1 &
-  pid=$!
-  disown "$pid" 2>/dev/null || true
-
-  if arg_present "--no-play" "$@"; then
-    printf '%s\n' "$output_file"
-  else
-    printf 'Queued TTS in background: pid %s, log %s\n' "$pid" "$log_file" >&2
-  fi
-  exit 0
-}
-
-queue_background_if_needed "$@"
-
 usage() {
   echo "Usage: ./scripts/tts [options] 'Your text here'" >&2
-  echo "Queues speech generation/playback in the background and returns immediately." >&2
+  echo "Generates speech in the foreground, then queues playback in the background." >&2
   echo "Options:" >&2
   echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
   echo "  --introduction text        Brief identity/work context, 30 words or fewer." >&2
@@ -185,6 +138,7 @@ RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
 INTRODUCTION=""
 AGENT_NAME=""
 VOICE_ID=""
+PLAY_EXISTING_FILE=""
 INTRO_RECENT_SECONDS=600
 DETERMINISTIC_VOICES=(af_bella af_heart af_kore af_nova af_sarah am_michael am_puck)
 POSITIONAL=()
@@ -318,6 +272,14 @@ while [ "$#" -gt 0 ]; do
       VOICE_ID="$2"
       shift 2
       ;;
+    --play-existing)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --play-existing requires a file path." >&2
+        exit 1
+      fi
+      PLAY_EXISTING_FILE="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -342,13 +304,19 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ -n "$PLAY_EXISTING_FILE" ] && [ "${#POSITIONAL[@]}" -gt 0 ]; then
+  echo "Error: --play-existing does not accept text arguments." >&2
+  usage
+  exit 1
+fi
+
 if [ "${#POSITIONAL[@]}" -gt 2 ]; then
   echo "Error: too many arguments." >&2
   usage
   exit 1
 fi
 
-if [ -z "${POSITIONAL[0]:-}" ]; then
+if [ -z "$PLAY_EXISTING_FILE" ] && [ -z "${POSITIONAL[0]:-}" ]; then
   usage
   exit 1
 fi
@@ -359,7 +327,7 @@ if [ -n "$VOICE_ID" ] && [ -n "${POSITIONAL[1]:-}" ]; then
   exit 1
 fi
 
-TEXT=$(normalize_space "${POSITIONAL[0]}")
+TEXT=$(normalize_space "${POSITIONAL[0]:-}")
 INTRODUCTION=$(normalize_space "$INTRODUCTION")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
 AGENT_ID="$(agent_identity)"
@@ -368,17 +336,13 @@ if [ -n "$AGENT_NAME" ]; then
   VOICE_SEED="$AGENT_NAME"
 fi
 VOICE="${VOICE_ID:-${POSITIONAL[1]:-}}"
-if [ -z "$VOICE" ]; then
+if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   VOICE="$(select_voice_from_seed "$VOICE_SEED")"
 fi
 INTRO_STATE_DIR="$(intro_state_dir)"
 INTRO_STATE_FILE="$INTRO_STATE_DIR/last-speaker"
 
-if [ "$NO_PLAY" -eq 0 ]; then
-  acquire_speech_gate
-fi
-
-if [ -n "$INTRODUCTION" ]; then
+if [ -n "$INTRODUCTION" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   INTRO_WORDS=$(word_count "$INTRODUCTION")
   if [ "$INTRO_WORDS" -gt 30 ]; then
     echo "Error: --introduction must be 30 words or fewer." >&2
@@ -393,21 +357,6 @@ fi
 OUTPUT_FILE="${TTS_OUTPUT_FILE:-/tmp/tts_${RANDOM}.mp3}"
 TMP_ERR="/tmp/tts_error_${RANDOM}.log"
 PAUSED_MEDIA_APPS=()
-
-if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
-  echo "Error: KOKORO_API_ENDPOINT is not set." >&2
-  echo "No KOKORO_API_ENDPOINT env var is set. Read references/setup.md for instructions on how to set it up." >&2
-  exit 1
-fi
-
-API_URL="$KOKORO_API_ENDPOINT"
-if [[ "$API_URL" != */v1/audio/speech ]]; then
-  API_URL="${API_URL%/}/v1/audio/speech"
-fi
-
-if [ "$NO_PLAY" -eq 0 ]; then
-  record_agent_spoken
-fi
 
 media_control_enabled() {
   case "$MEDIA_CONTROL" in
@@ -497,6 +446,46 @@ cleanup() {
 
 trap cleanup EXIT
 
+if [ -n "$PLAY_EXISTING_FILE" ]; then
+  OUTPUT_FILE="$PLAY_EXISTING_FILE"
+  if [ ! -s "$OUTPUT_FILE" ]; then
+    echo "Error: playback file does not exist or is empty: $OUTPUT_FILE" >&2
+    exit 1
+  fi
+
+  acquire_speech_gate
+  record_agent_spoken
+  pause_media_if_playing
+
+  PLAYED=0
+  if command -v afplay >/dev/null 2>&1; then
+    afplay "$OUTPUT_FILE"
+    PLAYED=1
+  elif command -v xdg-open >/dev/null 2>&1; then
+    if xdg-open "$OUTPUT_FILE" >/dev/null 2>&1; then
+      PLAYED=1
+    fi
+  else
+    echo "Tip: open the file manually: $OUTPUT_FILE"
+  fi
+
+  if [ "$PLAYED" -eq 1 ]; then
+    record_agent_spoken
+  fi
+  exit 0
+fi
+
+if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
+  echo "Error: KOKORO_API_ENDPOINT is not set." >&2
+  echo "No KOKORO_API_ENDPOINT env var is set. Read references/setup.md for instructions on how to set it up." >&2
+  exit 1
+fi
+
+API_URL="$KOKORO_API_ENDPOINT"
+if [[ "$API_URL" != */v1/audio/speech ]]; then
+  API_URL="${API_URL%/}/v1/audio/speech"
+fi
+
 if command -v python3 >/dev/null 2>&1; then
   PAYLOAD=$(python3 - "$TEXT" "$VOICE" <<'PY'
 import json
@@ -558,20 +547,22 @@ if [ "$NO_PLAY" -eq 1 ]; then
 fi
 
 echo "✓ Generated: $OUTPUT_FILE"
-pause_media_if_playing
-
-PLAYED=0
-if command -v afplay >/dev/null 2>&1; then
-  afplay "$OUTPUT_FILE"
-  PLAYED=1
-elif command -v xdg-open >/dev/null 2>&1; then
-  if xdg-open "$OUTPUT_FILE" >/dev/null 2>&1; then
-    PLAYED=1
-  fi
-else
-  echo "Tip: open the file manually: $OUTPUT_FILE"
+state_dir="$(tts_state_dir)"
+if ! mkdir -p "$state_dir" 2>/dev/null; then
+  state_dir="/tmp/tts-state"
+  mkdir -p "$state_dir" 2>/dev/null || state_dir="/tmp"
 fi
-
-if [ "$PLAYED" -eq 1 ]; then
-  record_agent_spoken
+log_file="$state_dir/tts-playback-$(date +%Y%m%d-%H%M%S)-$$.log"
+playback_args=(--play-existing "$OUTPUT_FILE")
+if [ -n "$AGENT_NAME" ]; then
+  playback_args+=(--agent-name "$AGENT_NAME")
 fi
+nohup env \
+  TTS_CALLER_PPID="${TTS_CALLER_PPID:-$PPID}" \
+  TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
+  TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
+  "$0" "${playback_args[@]}" \
+  </dev/null >>"$log_file" 2>&1 &
+pid=$!
+disown "$pid" 2>/dev/null || true
+printf 'Queued TTS playback in background: pid %s, log %s\n' "$pid" "$log_file" >&2
