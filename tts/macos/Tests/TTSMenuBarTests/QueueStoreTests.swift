@@ -47,6 +47,7 @@ struct QueueStoreTests {
 
         #expect(replay.id.hasPrefix("replay-"))
         #expect(replay.text == original.text)
+        #expect(replay.subject == original.subject)
         #expect(replay.agentName == original.agentName)
         #expect(replay.sessionID == original.sessionID)
         #expect(replay.status == .queued)
@@ -61,6 +62,26 @@ struct QueueStoreTests {
         value.sessionID = "019c-live-menu-uat-full-session"
 
         #expect(value.sessionLabel == "019c-live-menu-uat-full-session")
+    }
+
+    @Test
+    func keepsOptionalSubjectForDisplay() {
+        var value = item(id: "subject", createdAt: 10)
+        value.subject = "Queue ownership is now explicit"
+
+        #expect(value.subjectLabel == "Queue ownership is now explicit")
+    }
+
+    @Test
+    func decodesExistingQueueItemsWithoutSubject() throws {
+        let data = try JSONEncoder().encode(item(id: "legacy", createdAt: 10))
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "subject")
+
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(TTSItem.self, from: legacyData)
+
+        #expect(decoded.subject == nil)
     }
 
     @Test
@@ -90,6 +111,7 @@ struct QueueStoreTests {
         TTSItem(
             id: id,
             text: "A useful spoken update",
+            subject: "A useful spoken update subject",
             agentName: "clay-river-860",
             harness: "codex",
             sessionID: "thread-123",

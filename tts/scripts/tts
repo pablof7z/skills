@@ -168,17 +168,19 @@ usage() {
   echo "Options:" >&2
   echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
   echo "  --introduction text        Brief identity/work context, 30 words or fewer." >&2
+  echo "  --subject text             Optional spoken/display subject, 5 to 10 words." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
   echo "  --no-play                  Print target MP3 path and generate it without playback." >&2
   echo "  --no-media-pause           Do not pause/resume media apps." >&2
   echo "  --resume-delay seconds     Delay before resuming paused media." >&2
-  echo "Example: ./scripts/tts --agent-name quinn-delta-306 --introduction 'Agent Quinn here, working on improving TTS identity cues.' 'The fix is ready.'" >&2
+  echo "Example: ./scripts/tts --agent-name quinn-delta-306 --introduction 'Agent Quinn here, working on TTS.' --subject 'Playback queue ownership is now explicit' 'The fix is ready.'" >&2
 }
 
 NO_PLAY=0
 MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
 RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
 INTRODUCTION=""
+SUBJECT=""
 AGENT_NAME=""
 VOICE_ID=""
 PLAY_EXISTING_FILE=""
@@ -241,15 +243,15 @@ should_prepend_introduction() {
   return 0
 }
 
-prepend_introduction() {
-  local introduction="$1"
+prepend_spoken_segment() {
+  local segment="$1"
   local text="$2"
-  case "$introduction" in
+  case "$segment" in
     *[.!?])
-      printf '%s %s\n' "$introduction" "$text"
+      printf '%s %s\n' "$segment" "$text"
       ;;
     *)
-      printf '%s. %s\n' "$introduction" "$text"
+      printf '%s. %s\n' "$segment" "$text"
       ;;
   esac
 }
@@ -304,6 +306,7 @@ queue_macos_playback() {
     "$temporary_file" \
     "$item_id" \
     "$TEXT" \
+    "$SUBJECT" \
     "$inferred_agent" \
     "$harness" \
     "$session_id" \
@@ -318,6 +321,7 @@ import sys
     destination,
     item_id,
     text,
+    subject,
     agent_name,
     harness,
     session_id,
@@ -333,6 +337,7 @@ def optional(value):
 item = {
     "id": item_id,
     "text": text,
+    "subject": optional(subject),
     "agent_name": optional(agent_name),
     "harness": optional(harness),
     "session_id": optional(session_id),
@@ -406,6 +411,14 @@ while [ "$#" -gt 0 ]; do
       INTRODUCTION="$2"
       shift 2
       ;;
+    --subject)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --subject requires a value." >&2
+        exit 1
+      fi
+      SUBJECT="$2"
+      shift 2
+      ;;
     --voice-id)
       if [ -z "${2:-}" ]; then
         echo "Error: --voice-id requires a value." >&2
@@ -471,6 +484,7 @@ fi
 
 TEXT=$(normalize_space "${POSITIONAL[0]:-}")
 INTRODUCTION=$(normalize_space "$INTRODUCTION")
+SUBJECT=$(normalize_space "$SUBJECT")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
 AGENT_ID="$(agent_identity)"
 VOICE_SEED="$AGENT_ID"
@@ -484,6 +498,15 @@ fi
 INTRO_STATE_DIR="$(intro_state_dir)"
 INTRO_STATE_FILE="$INTRO_STATE_DIR/last-speaker"
 
+if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
+  SUBJECT_WORDS=$(word_count "$SUBJECT")
+  if [ "$SUBJECT_WORDS" -lt 5 ] || [ "$SUBJECT_WORDS" -gt 10 ]; then
+    echo "Error: --subject must be between 5 and 10 words." >&2
+    exit 1
+  fi
+  TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")
+fi
+
 if [ -n "$INTRODUCTION" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   INTRO_WORDS=$(word_count "$INTRODUCTION")
   if [ "$INTRO_WORDS" -gt 30 ]; then
@@ -492,7 +515,7 @@ if [ -n "$INTRODUCTION" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   fi
 
   if should_prepend_introduction; then
-    TEXT=$(prepend_introduction "$INTRODUCTION" "$TEXT")
+    TEXT=$(prepend_spoken_segment "$INTRODUCTION" "$TEXT")
   fi
 fi
 

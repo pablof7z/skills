@@ -7,7 +7,7 @@ Agent work is increasingly parallel, but attention is still serial. Important up
 `tts` gives those updates a shared audio surface. Each agent can finish a meaningful unit of work with a short spoken message, then return control immediately. The listener gets one orderly stream instead of overlapping voices or another queue of unread text.
 
 <p align="center">
-  <img src="../assets/tts-menu-player.png" alt="The TTS macOS menu-bar player showing transcript progress, agent identity, session metadata, timeline, and playback controls" width="460">
+  <img src="../assets/tts-menu-player.png" alt="The TTS macOS menu-bar player showing a subject, transcript progress, agent identity, session metadata, timeline, and playback controls" width="460">
 </p>
 
 ## The experience
@@ -19,6 +19,7 @@ The workflow owns more than text generation:
 - One resident macOS process serializes updates from every agent session.
 - The current transcript receives the full player surface, with approximate word highlighting as playback advances.
 - Agent name, voice, harness, workspace, and full session identifier make each update attributable.
+- An optional 5-to-10-word subject is spoken after the introduction and gives substantive updates a scannable title in the player and queue.
 - Pause, timeline scrubbing, 15-second seek, and replay make it behave like a small podcast queue rather than a fire-and-forget alert.
 - Music and Spotify can be paused for speech and resumed afterward.
 
@@ -33,6 +34,7 @@ export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
 ./scripts/tts \
   --agent-name nova-summit-482 \
   --introduction "Agent Nova here, working on the repository launch." \
+  --subject "The repository launch update is ready" \
   "The README update is ready for review."
 ```
 
