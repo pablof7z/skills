@@ -54,6 +54,8 @@ On macOS, the first audible request starts a resident menu-bar app. It owns the
 playback queue, shows queued/current/recent speech, and provides pause, resume,
 15-second skip controls, and replay by clicking a recent row. The current item
 uses a podcast-style player with an approximate word-progress transcript.
+While an item is playing or paused, the popup focuses on its full player and
+transcript; the queue and recent history return when playback becomes idle.
 Queue rows include the text, voice, agent name, and any harness, full session
 identifier, and workspace metadata available in the calling environment.
 
