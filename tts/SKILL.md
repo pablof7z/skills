@@ -44,6 +44,16 @@ harness name. Use names like `quinn-delta-306`; do not use generic values like
 script can choose a deterministic voice from that name. Use `--voice-id` only
 when a specific voice is required.
 
+## Subject
+
+Use `--subject` when a substantive update benefits from a scannable topic in
+the queue. Write 5 to 10 words that name the outcome or subject clearly. The
+subject is displayed prominently in the player and spoken immediately after
+any introduction, before the message body.
+
+Skip `--subject` when it would add ceremony without useful context, such as a
+brief conversational response, acknowledgement, or follow-up question.
+
 ## Playback behavior
 
 By default, `scripts/tts` generates the MP3 in the foreground, then queues
@@ -57,7 +67,8 @@ uses a podcast-style player with an approximate word-progress transcript.
 While an item is playing or paused, the popup focuses on its full player and
 transcript; the queue and recent history return when playback becomes idle.
 Queue rows include the text, voice, agent name, and any harness, full session
-identifier, and workspace metadata available in the calling environment.
+identifier, subject, and workspace metadata available in the calling
+environment.
 
 Use `scripts/tts-menu status` to check whether TTS is playing and inspect queue
 counts. Use `scripts/tts-menu status --json` for structured status. Use
@@ -81,6 +92,6 @@ ends.
 Queue records, process state, and logs live under the TTS state directory,
 normally `~/.local/state/tts/`.
 
-`./scripts/tts --agent-name quinn-delta-306 --introduction "Agent Quinn here, working on improving TTS identity cues." "The fix is ready."` will speak with identity context when needed.
+`./scripts/tts --agent-name quinn-delta-306 --introduction "Agent Quinn here, working on TTS." --subject "Playback queue ownership is now explicit" "The fix is ready."` will speak the introduction when needed, then the subject, then the body.
 
 `./scripts/tts --no-play --voice-id af_bella "Hello world"` will generate the MP3, print its output path, skip playback, and use an explicit voice.

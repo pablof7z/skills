@@ -232,6 +232,13 @@ private struct CurrentPlaybackView: View {
                     .foregroundStyle(controller.isPaused ? .orange : .green)
             }
 
+            if let subject = item.subjectLabel {
+                Text(subject)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(2)
+                    .accessibilityAddTraits(.isHeader)
+            }
+
             TranscriptView(
                 text: item.text,
                 currentTime: controller.currentTime,
@@ -459,7 +466,7 @@ private struct ItemRow: View {
                 .buttonStyle(.plain)
                 .disabled(!FileManager.default.fileExists(atPath: item.outputFile))
                 .help("Replay")
-                .accessibilityLabel("Replay " + item.text)
+                .accessibilityLabel("Replay " + (item.subjectLabel ?? item.text))
             } else {
                 rowContent(showsReplay: false)
             }
@@ -475,8 +482,18 @@ private struct ItemRow: View {
     private func rowContent(showsReplay: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.text)
-                    .lineLimit(2)
+                if let subject = item.subjectLabel {
+                    Text(subject)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
+                    Text(item.text)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text(item.text)
+                        .lineLimit(2)
+                }
                 MetadataLine(item: item)
 
                 if let session = item.sessionLabel {

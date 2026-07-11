@@ -19,6 +19,7 @@ enum PlaybackStatus: String, Codable, CaseIterable {
 struct TTSItem: Codable, Identifiable, Equatable {
     var id: String
     var text: String
+    var subject: String?
     var agentName: String?
     var harness: String?
     var sessionID: String?
@@ -35,6 +36,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case text
+        case subject
         case agentName = "agent_name"
         case harness
         case sessionID = "session_id"
@@ -51,6 +53,10 @@ struct TTSItem: Codable, Identifiable, Equatable {
 
     var displayAgent: String {
         nonempty(agentName) ?? nonempty(harness) ?? "Unknown agent"
+    }
+
+    var subjectLabel: String? {
+        nonempty(subject)
     }
 
     var workspaceName: String? {
@@ -70,6 +76,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         TTSItem(
             id: "replay-\(UUID().uuidString.lowercased())",
             text: text,
+            subject: subject,
             agentName: agentName,
             harness: harness,
             sessionID: sessionID,

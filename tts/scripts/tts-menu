@@ -272,7 +272,7 @@ if json_output:
 print(f"state: {state}")
 if current:
     agent = current.get("agent_name") or current.get("harness") or "Unknown agent"
-    text = " ".join(current.get("text", "").split())
+    text = " ".join((current.get("subject") or current.get("text", "")).split())
     if len(text) > 90:
         text = text[:87] + "..."
     print(f"current: {agent} - {text}")

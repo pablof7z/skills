@@ -29,10 +29,10 @@ The agent should inspect the repository before it writes, identify the real audi
 
 Agents already produce useful status updates. `tts` turns them into a shared audio queue you can follow without watching every terminal or letting concurrent sessions speak over each other.
 
-On macOS, it becomes a menu-bar player with a readable transcript, agent and session identity, timeline scrubbing, pause, seek, and replay. Generation failures stay visible to the calling agent before playback moves into the background.
+On macOS, it becomes a menu-bar player with optional spoken subjects, a readable transcript, agent and session identity, timeline scrubbing, pause, seek, and replay. Generation failures stay visible to the calling agent before playback moves into the background.
 
 <p align="center">
-  <a href="tts/README.md"><img src="assets/tts-menu-player.png" alt="The TTS skill showing an agent update with transcript progress, session metadata, and podcast controls" width="240"></a>
+  <a href="tts/README.md"><img src="assets/tts-menu-player.png" alt="The TTS skill showing a subject, transcript progress, session metadata, and podcast controls" width="240"></a>
 </p>
 
 [See the player, workflow, and first spoken update →](tts/README.md)
