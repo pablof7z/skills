@@ -229,7 +229,7 @@ private struct QueueView: View {
             List {
                 if let current = controller.currentItem {
                     Section(controller.isPaused ? "Paused" : "Now Playing") {
-                        ItemRow(item: current, action: nil)
+                        ItemRow(item: current, action: { playNow(current) }, actionSymbol: "play.fill")
                     }
                 }
 
@@ -239,7 +239,7 @@ private struct QueueView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(controller.queuedItems) { item in
-                            ItemRow(item: item, action: nil)
+                            ItemRow(item: item, action: { playNow(item) }, actionSymbol: "play.fill")
                         }
                     }
                 }
@@ -250,12 +250,10 @@ private struct QueueView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(controller.recentItems.prefix(30)) { item in
-                            ItemRow(item: item) {
-                                controller.replay(item)
-                            }
+                            ItemRow(item: item, action: { playNow(item) }, actionSymbol: "arrow.counterclockwise")
                             .contextMenu {
-                                Button("Replay", systemImage: "arrow.counterclockwise") {
-                                    controller.replay(item)
+                                Button("Play Now", systemImage: "play.fill") {
+                                    playNow(item)
                                 }
                                 Button("Show in Finder", systemImage: "folder") {
                                     controller.reveal(item)
@@ -272,6 +270,12 @@ private struct QueueView: View {
             footer
         }
         .frame(width: 430, height: 640)
+    }
+
+    private func playNow(_ item: TTSItem) {
+        playerController.setPlayerVisible(true)
+        controller.playNow(item)
+        onClose()
     }
 
     private var header: some View {
@@ -341,32 +345,27 @@ private struct QueueView: View {
 
 private struct ItemRow: View {
     let item: TTSItem
-    let action: (() -> Void)?
+    let action: () -> Void
+    let actionSymbol: String
     @State private var isHovered = false
 
     var body: some View {
-        Group {
-            if let action {
-                Button(action: action) {
-                    rowContent(showsReplay: true)
-                }
-                .buttonStyle(.plain)
-                .disabled(!FileManager.default.fileExists(atPath: item.outputFile))
-                .help("Replay")
-                .accessibilityLabel("Replay " + (item.subjectLabel ?? item.text))
-            } else {
-                rowContent(showsReplay: false)
-            }
+        Button(action: action) {
+            rowContent()
         }
+        .buttonStyle(.plain)
+        .disabled(!FileManager.default.fileExists(atPath: item.outputFile))
+        .help("Play now")
+        .accessibilityLabel("Play now " + (item.subjectLabel ?? item.text))
         .padding(.horizontal, 4)
         .background(
-            isHovered && action != nil ? Color.accentColor.opacity(0.09) : Color.clear,
+            isHovered ? Color.accentColor.opacity(0.09) : Color.clear,
             in: RoundedRectangle(cornerRadius: 6)
         )
         .onHover { isHovered = $0 }
     }
 
-    private func rowContent(showsReplay: Bool) -> some View {
+    private func rowContent() -> some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 if let subject = item.subjectLabel {
@@ -400,12 +399,10 @@ private struct ItemRow: View {
 
             Spacer(minLength: 8)
 
-            if showsReplay {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 32, height: 32)
-                    .foregroundStyle(.secondary)
-            }
+            Image(systemName: actionSymbol)
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 32, height: 32)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 3)
     }
