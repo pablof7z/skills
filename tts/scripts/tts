@@ -170,6 +170,7 @@ usage() {
   echo "  --introduction text        Brief identity/work context, 30 words or fewer." >&2
   echo "  --subject text             Optional spoken/display subject, 5 to 10 words." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
+  echo "  --speed multiplier         One-off generation speed from 0.25 to 4.0." >&2
   echo "  --no-play                  Print target MP3 path and generate it without playback." >&2
   echo "  --no-media-pause           Do not pause/resume media apps." >&2
   echo "  --handoff-delay seconds    Gap after pausing active media before speech (default: 2)." >&2
@@ -185,6 +186,7 @@ INTRODUCTION=""
 SUBJECT=""
 AGENT_NAME=""
 VOICE_ID=""
+SPEED_OVERRIDE=""
 PLAY_EXISTING_FILE=""
 INTRO_RECENT_SECONDS=600
 DETERMINISTIC_VOICES=(af_bella af_heart af_kore af_nova af_sarah am_michael am_puck)
@@ -216,6 +218,42 @@ select_voice_from_seed() {
   checksum=$(printf '%s' "$seed" | cksum | awk '{ print $1 }')
   index=$(( checksum % ${#DETERMINISTIC_VOICES[@]} ))
   printf '%s\n' "${DETERMINISTIC_VOICES[$index]}"
+}
+
+voice_speed_from_profiles() {
+  local voice="$1"
+  local profiles="${TTS_VOICE_SPEEDS:-}"
+  local entry key value
+  local old_ifs="$IFS"
+  local entries=()
+
+  IFS=','
+  # shellcheck disable=SC2206
+  entries=($profiles)
+  IFS="$old_ifs"
+
+  for entry in "${entries[@]}"; do
+    case "$entry" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    key="$(normalize_space "${entry%%=*}")"
+    value="$(normalize_space "${entry#*=}")"
+    if [ "$key" = "$voice" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+speed_is_valid() {
+  awk -v speed="$1" 'BEGIN {
+    if (speed !~ /^([0-9]+([.][0-9]*)?|[.][0-9]+)$/) exit 1
+    if ((speed + 0) < 0.25 || (speed + 0) > 4.0) exit 1
+    exit 0
+  }'
 }
 
 should_prepend_introduction() {
@@ -455,6 +493,14 @@ while [ "$#" -gt 0 ]; do
       VOICE_ID="$2"
       shift 2
       ;;
+    --speed)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --speed requires a multiplier from 0.25 to 4.0." >&2
+        exit 1
+      fi
+      SPEED_OVERRIDE="$2"
+      shift 2
+      ;;
     --play-existing)
       if [ -z "${2:-}" ]; then
         echo "Error: --play-existing requires a file path." >&2
@@ -515,6 +561,11 @@ if ! [[ "$HANDOFF_DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   exit 1
 fi
 
+if [ -n "$PLAY_EXISTING_FILE" ] && [ -n "$SPEED_OVERRIDE" ]; then
+  echo "Error: --speed only applies when generating speech." >&2
+  exit 1
+fi
+
 DISPLAY_TEXT="${POSITIONAL[0]:-}"
 TEXT=$(normalize_space "$DISPLAY_TEXT")
 INTRODUCTION=$(normalize_space "$INTRODUCTION")
@@ -528,6 +579,22 @@ fi
 VOICE="${VOICE_ID:-${POSITIONAL[1]:-}}"
 if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   VOICE="$(select_voice_from_seed "$VOICE_SEED")"
+fi
+SPEED=""
+SPEED_RESOLVED=0
+if [ -n "$SPEED_OVERRIDE" ]; then
+  SPEED="$SPEED_OVERRIDE"
+  SPEED_RESOLVED=1
+elif [ -n "$VOICE" ] && PROFILE_SPEED="$(voice_speed_from_profiles "$VOICE")"; then
+  SPEED="$PROFILE_SPEED"
+  SPEED_RESOLVED=1
+fi
+if [ "$SPEED_RESOLVED" -eq 0 ]; then
+  SPEED="1.0"
+fi
+if [ -z "$PLAY_EXISTING_FILE" ] && ! speed_is_valid "$SPEED"; then
+  echo "Error: speed for voice $VOICE must be between 0.25 and 4.0; got '$SPEED'." >&2
+  exit 1
 fi
 INTRO_STATE_DIR="$(intro_state_dir)"
 INTRO_STATE_FILE="$INTRO_STATE_DIR/last-speaker"
@@ -698,23 +765,25 @@ fi
 CAPTIONED_API_URL="${KOKORO_CAPTIONED_API_ENDPOINT:-${API_URL%/v1/audio/speech}/dev/captioned_speech}"
 
 if command -v python3 >/dev/null 2>&1; then
-  PAYLOAD=$(python3 - "$TEXT" "$VOICE" <<'PY'
+  PAYLOAD=$(python3 - "$TEXT" "$VOICE" "$SPEED" <<'PY'
 import json
 import sys
 text = sys.argv[1]
 voice = sys.argv[2]
+speed = float(sys.argv[3])
 print(json.dumps({
     "model": "kokoro",
     "input": text,
     "voice": voice,
     "response_format": "mp3",
+    "speed": speed,
     "stream": False,
     "return_timestamps": True,
 }))
 PY
 )
 else
-  PAYLOAD="{\"model\":\"kokoro\",\"input\":\"$TEXT\",\"voice\":\"$VOICE\",\"response_format\":\"mp3\",\"stream\":false,\"return_timestamps\":true}"
+  PAYLOAD="{\"model\":\"kokoro\",\"input\":\"$TEXT\",\"voice\":\"$VOICE\",\"response_format\":\"mp3\",\"speed\":$SPEED,\"stream\":false,\"return_timestamps\":true}"
 fi
 
 AUTH_OPTS=()
@@ -727,7 +796,7 @@ fi
 
 set +e
 HTTP_CODE=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
-  "${AUTH_OPTS[@]}" "$CAPTIONED_API_URL" -w "%{http_code}" -o "$CAPTION_RESPONSE_FILE" 2>"$TMP_ERR")
+  ${AUTH_OPTS[@]+"${AUTH_OPTS[@]}"} "$CAPTIONED_API_URL" -w "%{http_code}" -o "$CAPTION_RESPONSE_FILE" 2>"$TMP_ERR")
 CURL_STATUS=$?
 set -e
 
@@ -791,7 +860,7 @@ if [ "$CAPTIONED_READY" -ne 1 ]; then
   echo "Warning: precise TTS timestamps are unavailable; generating audio without word alignment." >&2
   rm -f "$CAPTION_RESPONSE_FILE" "$TIMESTAMPS_FILE" "$OUTPUT_FILE"
   if command -v python3 >/dev/null 2>&1; then
-    PAYLOAD=$(python3 - "$TEXT" "$VOICE" <<'PY'
+    PAYLOAD=$(python3 - "$TEXT" "$VOICE" "$SPEED" <<'PY'
 import json
 import sys
 print(json.dumps({
@@ -799,15 +868,16 @@ print(json.dumps({
     "input": sys.argv[1],
     "voice": sys.argv[2],
     "response_format": "mp3",
+    "speed": float(sys.argv[3]),
 }))
 PY
 )
   else
-    PAYLOAD="{\"model\":\"kokoro\",\"input\":\"$TEXT\",\"voice\":\"$VOICE\",\"response_format\":\"mp3\"}"
+    PAYLOAD="{\"model\":\"kokoro\",\"input\":\"$TEXT\",\"voice\":\"$VOICE\",\"response_format\":\"mp3\",\"speed\":$SPEED}"
   fi
   set +e
   HTTP_CODE=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
-    "${AUTH_OPTS[@]}" "$API_URL" -w "%{http_code}" -o "$OUTPUT_FILE" 2>"$TMP_ERR")
+    ${AUTH_OPTS[@]+"${AUTH_OPTS[@]}"} "$API_URL" -w "%{http_code}" -o "$OUTPUT_FILE" 2>"$TMP_ERR")
   CURL_STATUS=$?
   set -e
   if [ "$CURL_STATUS" -ne 0 ]; then

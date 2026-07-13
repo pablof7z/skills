@@ -14,6 +14,7 @@ Set this environment variable before running `./scripts/tts`:
 - `KOKORO_CAPTIONED_API_ENDPOINT` to override the inferred
   `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
 - `TTS_MEDIA_HANDOFF_DELAY_SECONDS` to change the two-second gap between pausing active media and starting speech
+- `TTS_VOICE_SPEEDS` for comma-separated per-voice generation speeds, such as `af_bella=1.08,am_michael=0.92`
 - Swift from Xcode or the Command Line Tools for the macOS menu-bar app
 
 ## Suggested local env file
@@ -23,7 +24,12 @@ The script loads environment variables from `~/.env.tts` by default. You can set
 ```bash
 KOKORO_API_ENDPOINT=https://<your-host>/v1/audio/speech
 KOKORO_API_KEY=<optional bearer token>
+TTS_VOICE_SPEEDS="af_bella=1.08,am_michael=0.92"
 ```
+
+The script resolves speed after selecting the voice. A `--speed` value overrides
+the matching per-voice entry for one invocation; voices without an entry use
+`1.0`. Values must be between `0.25` and `4.0`.
 
 To use a custom file path, set `KOKORO_ENV_FILE`.
 
