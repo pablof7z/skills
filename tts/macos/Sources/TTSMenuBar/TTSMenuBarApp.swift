@@ -16,11 +16,15 @@ struct TTSMenuBarApp {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let controller = PlaybackController()
     private let store = QueueStore()
+    private lazy var controller = PlaybackController(store: store)
+    private lazy var hudPreferencesStore = HUDPreferencesStore(stateDirectory: store.stateDirectory)
     private lazy var instanceLock = MenuInstanceLock(store: store)
     private let popover = NSPopover()
-    private lazy var nowSpeakingPanel = NowSpeakingPanelController(controller: controller)
+    private lazy var nowSpeakingPanel = NowSpeakingPanelController(
+        controller: controller,
+        preferencesStore: hudPreferencesStore
+    )
     private var statusItem: NSStatusItem?
     private var controllerObservation: AnyCancellable?
     private var ownsLock = false
@@ -46,8 +50,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
-    private func togglePopover() {
+    private func handleStatusItemClick() {
         guard let button = statusItem?.button else { return }
+        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
+            if popover.isShown {
+                popover.performClose(nil)
+            }
+            showQuickMenu(for: event, button: button)
+            return
+        }
         if popover.isShown {
             popover.performClose(nil)
         } else {
@@ -60,7 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         guard let button = item.button else { return }
         button.target = self
-        button.action = #selector(togglePopover)
+        button.action = #selector(handleStatusItemClick)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.imagePosition = .imageLeading
         button.title = " TTS"
         statusItem = item
@@ -70,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(
             rootView: QueueView(
                 controller: controller,
+                playerController: nowSpeakingPanel,
                 onClose: { [weak self] in self?.popover.performClose(nil) }
             )
         )
@@ -80,6 +93,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         updateStatusItem()
+    }
+
+    private func showQuickMenu(for event: NSEvent, button: NSStatusBarButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let playerItem = NSMenuItem(
+            title: nowSpeakingPanel.isPlayerVisible ? "Hide Player" : "Show Player",
+            action: #selector(togglePlayerFromQuickMenu),
+            keyEquivalent: ""
+        )
+        playerItem.image = NSImage(
+            systemSymbolName: nowSpeakingPanel.isPlayerVisible ? "eye.slash" : "eye",
+            accessibilityDescription: nil
+        )
+        playerItem.target = self
+        menu.addItem(playerItem)
+
+        let pauseItem = NSMenuItem(
+            title: controller.isGloballyPaused ? "Resume All TTS" : "Pause All TTS",
+            action: #selector(toggleGlobalPlaybackFromQuickMenu),
+            keyEquivalent: ""
+        )
+        pauseItem.image = NSImage(
+            systemSymbolName: controller.isGloballyPaused ? "play.fill" : "pause.fill",
+            accessibilityDescription: nil
+        )
+        pauseItem.target = self
+        menu.addItem(pauseItem)
+
+        NSMenu.popUpContextMenu(menu, with: event, for: button)
+    }
+
+    @objc
+    private func togglePlayerFromQuickMenu() {
+        nowSpeakingPanel.togglePlayerVisibility()
+    }
+
+    @objc
+    private func toggleGlobalPlaybackFromQuickMenu() {
+        controller.toggleGlobalPlaybackPause()
     }
 
     private func updateStatusItem() {
@@ -164,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 private struct QueueView: View {
     @ObservedObject var controller: PlaybackController
+    @ObservedObject var playerController: NowSpeakingPanelController
     let onClose: () -> Void
 
     var body: some View {
@@ -229,6 +284,17 @@ private struct QueueView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                playerController.togglePlayerVisibility()
+            } label: {
+                Label(
+                    playerController.isPlayerVisible ? "Hide Player" : "Show Player",
+                    systemImage: playerController.isPlayerVisible ? "eye.slash" : "eye"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(playerController.isPlayerVisible ? "Hide the floating player" : "Show the floating player")
             Button {
                 controller.toggleGlobalPlaybackPause()
             } label: {
