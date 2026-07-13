@@ -648,6 +648,10 @@ if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
   exit 1
 fi
 
+if [ "$NO_PLAY" -ne 1 ]; then
+  echo "TTS audio will play in the background after generation completes." >&2
+fi
+
 API_URL="$KOKORO_API_ENDPOINT"
 if [[ "$API_URL" != */v1/audio/speech ]]; then
   API_URL="${API_URL%/}/v1/audio/speech"
