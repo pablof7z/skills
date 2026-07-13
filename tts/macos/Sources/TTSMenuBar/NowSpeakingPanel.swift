@@ -3,34 +3,45 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class NowSpeakingPanelController {
+final class NowSpeakingPanelController: ObservableObject {
     private enum Layout {
         static let compactSize = NSSize(width: 400, height: 120)
         static let expandedSize = NSSize(width: 540, height: 470)
         static let screenInset: CGFloat = 20
-        static let prominentSeconds: UInt64 = 5
         static let lingerSeconds: TimeInterval = 8
         static let fadeSeconds: TimeInterval = 0.34
     }
 
     private let playbackController: PlaybackController
-    private let presentation = NowSpeakingPresentation()
+    private let preferencesStore: HUDPreferencesStore
+    private let presentation: NowSpeakingPresentation
     private let panel: PassiveHUDPanel
+    @Published private(set) var isPlayerVisible: Bool
     private var playbackObservation: AnyCancellable?
     private var presentationObservation: AnyCancellable?
     private var screenObservation: AnyCancellable?
-    private var collapseTask: Task<Void, Never>?
+    private var moveObservation: AnyCancellable?
+    private var resizeObservation: AnyCancellable?
+    private var liveResizeEndObservation: AnyCancellable?
     private var lingerTask: Task<Void, Never>?
     private var fadeTask: Task<Void, Never>?
+    private var geometrySaveTask: Task<Void, Never>?
     private var activeItemID: String?
     private var lastCurrentItem: TTSItem?
     private var lastDuration: TimeInterval = 0
     private var lingerCountdown = LingerCountdown(duration: Layout.lingerSeconds)
     private var observedHover = false
+    private var observedMiniPlayer: Bool
     private var isFading = false
 
-    init(controller: PlaybackController) {
+    init(controller: PlaybackController, preferencesStore: HUDPreferencesStore) {
         playbackController = controller
+        self.preferencesStore = preferencesStore
+        presentation = NowSpeakingPresentation(
+            isMiniPlayer: preferencesStore.preferences.isMiniPlayer
+        )
+        isPlayerVisible = preferencesStore.preferences.isPlayerVisible
+        observedMiniPlayer = preferencesStore.preferences.isMiniPlayer
         panel = PassiveHUDPanel(
             contentRect: NSRect(origin: .zero, size: Layout.expandedSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -42,7 +53,9 @@ final class NowSpeakingPanelController {
         let hostingView = FirstMouseHostingView(
             rootView: NowSpeakingHUDView(
                 controller: controller,
-                presentation: presentation
+                presentation: presentation,
+                onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
+                onHide: { [weak self] in self?.setPlayerVisible(false) }
             )
             .environment(\.colorScheme, .dark)
         )
@@ -63,12 +76,47 @@ final class NowSpeakingPanelController {
             for: NSApplication.didChangeScreenParametersNotification
         ).sink { [weak self] _ in
             Task { @MainActor in
-                self?.positionPanel(size: self?.panel.frame.size ?? Layout.expandedSize)
+                guard let self else { return }
+                let size = self.presentation.isExpanded
+                    ? self.preferredExpandedSize
+                    : Layout.compactSize
+                self.configureResizeLimits(expanded: self.presentation.isExpanded)
+                self.positionPanel(size: size)
+            }
+        }
+        moveObservation = NotificationCenter.default.publisher(
+            for: NSWindow.didMoveNotification,
+            object: panel
+        ).sink { [weak self] _ in
+            Task { @MainActor in
+                self?.schedulePositionSave()
+            }
+        }
+        resizeObservation = NotificationCenter.default.publisher(
+            for: NSWindow.didResizeNotification,
+            object: panel
+        ).sink { [weak self] _ in
+            Task { @MainActor in
+                self?.scheduleGeometrySave()
+            }
+        }
+        liveResizeEndObservation = NotificationCenter.default.publisher(
+            for: NSWindow.didEndLiveResizeNotification,
+            object: panel
+        ).sink { [weak self] _ in
+            Task { @MainActor in
+                self?.clampCurrentFrameToVisibleScreen()
             }
         }
     }
 
     func refresh() {
+        guard isPlayerVisible else {
+            if panel.isVisible || activeItemID != nil {
+                hide()
+            }
+            return
+        }
         guard let item = playbackController.currentItem else {
             beginLingerIfNeeded()
             return
@@ -85,10 +133,9 @@ final class NowSpeakingPanelController {
 
         if activeItemID != item.id {
             activeItemID = item.id
-            showProminently()
-            scheduleCollapse(for: item.id)
+            showPlayer()
         } else if !panel.isVisible {
-            showProminently()
+            showPlayer()
         }
     }
 
@@ -96,10 +143,43 @@ final class NowSpeakingPanelController {
         playbackObservation?.cancel()
         presentationObservation?.cancel()
         screenObservation?.cancel()
-        collapseTask?.cancel()
+        moveObservation?.cancel()
+        resizeObservation?.cancel()
+        liveResizeEndObservation?.cancel()
         lingerTask?.cancel()
         fadeTask?.cancel()
+        geometrySaveTask?.cancel()
+        if panel.isVisible {
+            preferencesStore.setOrigin(panel.frame.origin)
+            if presentation.isExpanded {
+                preferencesStore.setExpandedSize(panel.frame.size)
+            }
+        }
         panel.orderOut(nil)
+    }
+
+    func togglePlayerVisibility() {
+        setPlayerVisible(!isPlayerVisible)
+    }
+
+    func setPlayerVisible(_ visible: Bool) {
+        guard visible != isPlayerVisible else { return }
+        isPlayerVisible = visible
+        preferencesStore.setPlayerVisible(visible)
+        if visible {
+            refresh()
+        } else {
+            hide()
+        }
+    }
+
+    func toggleMiniPlayer() {
+        let useMiniPlayer = !presentation.isMiniPlayer
+        if useMiniPlayer && presentation.isExpanded {
+            preferencesStore.setExpandedSize(panel.frame.size)
+        }
+        preferencesStore.setMiniPlayer(useMiniPlayer)
+        presentation.setMiniPlayer(useMiniPlayer)
     }
 
     private func configurePanel() {
@@ -114,19 +194,20 @@ final class NowSpeakingPanelController {
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = false
         panel.acceptsMouseMovedEvents = true
-        panel.isMovable = false
+        panel.isMovable = true
+        panel.isMovableByWindowBackground = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.animationBehavior = .utilityWindow
         panel.isReleasedWhenClosed = false
         panel.setAccessibilityLabel("Now speaking")
+        configureResizeLimits(expanded: true)
     }
 
-    private func showProminently() {
-        collapseTask?.cancel()
-        presentation.isProminent = true
-        positionPanel(size: Layout.expandedSize)
+    private func showPlayer() {
+        configureResizeLimits(expanded: presentation.isExpanded)
+        positionPanel(size: presentation.isExpanded ? preferredExpandedSize : Layout.compactSize)
         panel.alphaValue = 0
         NSApp.unhideWithoutActivation()
         panel.orderFrontRegardless()
@@ -137,23 +218,15 @@ final class NowSpeakingPanelController {
         }
     }
 
-    private func scheduleCollapse(for itemID: String) {
-        collapseTask?.cancel()
-        collapseTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Layout.prominentSeconds * 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            guard let self, self.activeItemID == itemID else { return }
-            self.presentation.isProminent = false
-        }
-    }
-
     private func updateLayout(animated: Bool) {
         if playbackController.currentItem == nil && presentation.lingeringItem == nil {
             hide()
             return
         }
         guard panel.isVisible else { return }
-        let size = presentation.isExpanded ? Layout.expandedSize : Layout.compactSize
+        let expanded = presentation.isExpanded
+        configureResizeLimits(expanded: expanded)
+        let size = expanded ? preferredExpandedSize : Layout.compactSize
         let frame = frameFor(size: size)
         let alpha: CGFloat = presentation.isExpanded ? 1 : 0.84
         guard HUDLayoutUpdate.isNeeded(
@@ -181,7 +254,11 @@ final class NowSpeakingPanelController {
     }
 
     private func presentationDidChange() {
-        updateLayout(animated: true)
+        let miniPlayer = presentation.isMiniPlayer
+        if miniPlayer != observedMiniPlayer {
+            observedMiniPlayer = miniPlayer
+            updateLayout(animated: true)
+        }
 
         let isHovered = presentation.isHovered
         guard isHovered != observedHover else { return }
@@ -200,9 +277,7 @@ final class NowSpeakingPanelController {
 
     private func hide() {
         guard activeItemID != nil || panel.isVisible else { return }
-        collapseTask?.cancel()
         cancelLingerDismissal(resetCountdown: true, restoreOpacity: false)
-        collapseTask = nil
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0
@@ -301,16 +376,67 @@ final class NowSpeakingPanelController {
     }
 
     private func frameFor(size: NSSize) -> NSRect {
-        let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
-        guard let visibleFrame = screen?.visibleFrame else {
-            return NSRect(origin: NSPoint(x: Layout.screenInset, y: Layout.screenInset), size: size)
-        }
-        return NSRect(
-            x: visibleFrame.minX + Layout.screenInset,
-            y: visibleFrame.minY + Layout.screenInset,
-            width: size.width,
-            height: size.height
+        HUDPlacement.frame(
+            size: size,
+            preferredOrigin: preferencesStore.preferences.origin,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            inset: Layout.screenInset
         )
+    }
+
+    private var preferredExpandedSize: NSSize {
+        HUDPlacement.preferredExpandedSize(
+            saved: preferencesStore.preferences.expandedSize,
+            minimum: Layout.expandedSize
+        )
+    }
+
+    private func configureResizeLimits(expanded: Bool) {
+        let maximumSize = HUDPlacement.frame(
+            size: CGSize(width: 100_000, height: 100_000),
+            preferredOrigin: preferencesStore.preferences.origin,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            inset: Layout.screenInset
+        ).size
+        if expanded {
+            panel.minSize = NSSize(
+                width: min(Layout.expandedSize.width, maximumSize.width),
+                height: min(Layout.expandedSize.height, maximumSize.height)
+            )
+            panel.maxSize = maximumSize
+        } else {
+            let compactSize = frameFor(size: Layout.compactSize).size
+            panel.minSize = compactSize
+            panel.maxSize = compactSize
+        }
+    }
+
+    private func clampCurrentFrameToVisibleScreen() {
+        let frame = HUDPlacement.frame(
+            size: panel.frame.size,
+            preferredOrigin: panel.frame.origin,
+            visibleFrames: NSScreen.screens.map(\.visibleFrame),
+            inset: Layout.screenInset
+        )
+        panel.setFrame(frame, display: true)
+        scheduleGeometrySave()
+    }
+
+    private func schedulePositionSave() {
+        scheduleGeometrySave()
+    }
+
+    private func scheduleGeometrySave() {
+        geometrySaveTask?.cancel()
+        geometrySaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled, let self else { return }
+            self.geometrySaveTask = nil
+            self.preferencesStore.setOrigin(self.panel.frame.origin)
+            if self.presentation.isExpanded {
+                self.preferencesStore.setExpandedSize(self.panel.frame.size)
+            }
+        }
     }
 }
 
@@ -323,17 +449,127 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+private struct PlayerResizeRegions: NSViewRepresentable {
+    func makeNSView(context: Context) -> PlayerResizeRegionsView {
+        PlayerResizeRegionsView()
+    }
+
+    func updateNSView(_ nsView: PlayerResizeRegionsView, context: Context) {}
+}
+
+private final class PlayerResizeRegionsView: NSView {
+    private static let hitWidth: CGFloat = 12
+    private static let cornerWidth: CGFloat = 20
+    private static let minimumSize = CGSize(width: 540, height: 470)
+    private var initialFrame: NSRect?
+    private var initialPointer: NSPoint?
+    private var activeEdges: HUDResizeEdges = []
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        edges(at: point).isEmpty ? nil : self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        activeEdges = edges(at: convert(event.locationInWindow, from: nil))
+        initialFrame = window?.frame
+        initialPointer = NSEvent.mouseLocation
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !activeEdges.isEmpty,
+              let window,
+              let initialFrame,
+              let initialPointer else { return }
+        let pointer = NSEvent.mouseLocation
+        let delta = CGPoint(
+            x: pointer.x - initialPointer.x,
+            y: pointer.y - initialPointer.y
+        )
+        let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame
+            .insetBy(dx: 20, dy: 20)
+            ?? initialFrame
+        let frame = HUDResize.frame(
+            initialFrame: initialFrame,
+            pointerDelta: delta,
+            edges: activeEdges,
+            visibleFrame: visibleFrame,
+            minimumSize: Self.minimumSize
+        )
+        window.setFrame(frame, display: true)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        initialFrame = nil
+        initialPointer = nil
+        activeEdges = []
+    }
+
+    override func resetCursorRects() {
+        let edge = Self.hitWidth
+        let corner = Self.cornerWidth
+        addCursorRect(NSRect(x: 0, y: corner, width: edge, height: max(0, bounds.height - 2 * corner)), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: bounds.width - edge, y: corner, width: edge, height: max(0, bounds.height - 2 * corner)), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: corner, y: 0, width: max(0, bounds.width - 2 * corner), height: edge), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: corner, y: bounds.height - edge, width: max(0, bounds.width - 2 * corner), height: edge), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: 0, y: 0, width: corner, height: corner), cursor: Self.northeastSouthwestCursor)
+        addCursorRect(NSRect(x: bounds.width - corner, y: bounds.height - corner, width: corner, height: corner), cursor: Self.northeastSouthwestCursor)
+        addCursorRect(NSRect(x: 0, y: bounds.height - corner, width: corner, height: corner), cursor: Self.northwestSoutheastCursor)
+        addCursorRect(NSRect(x: bounds.width - corner, y: 0, width: corner, height: corner), cursor: Self.northwestSoutheastCursor)
+    }
+
+    private func edges(at point: NSPoint) -> HUDResizeEdges {
+        guard bounds.contains(point) else { return [] }
+        var result: HUDResizeEdges = []
+        let nearVerticalCorner = point.y <= Self.cornerWidth
+            || point.y >= bounds.height - Self.cornerWidth
+        let nearHorizontalCorner = point.x <= Self.cornerWidth
+            || point.x >= bounds.width - Self.cornerWidth
+        let horizontalThreshold = nearVerticalCorner ? Self.cornerWidth : Self.hitWidth
+        let verticalThreshold = nearHorizontalCorner ? Self.cornerWidth : Self.hitWidth
+        if point.x <= horizontalThreshold { result.insert(.left) }
+        if point.x >= bounds.width - horizontalThreshold { result.insert(.right) }
+        if point.y <= verticalThreshold { result.insert(.bottom) }
+        if point.y >= bounds.height - verticalThreshold { result.insert(.top) }
+        return result
+    }
+
+    private static let northwestSoutheastCursor = diagonalCursor(
+        symbol: "arrow.up.left.and.arrow.down.right"
+    )
+    private static let northeastSouthwestCursor = diagonalCursor(
+        symbol: "arrow.up.right.and.arrow.down.left"
+    )
+
+    private static func diagonalCursor(symbol: String) -> NSCursor {
+        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) else {
+            return .crosshair
+        }
+        image.size = NSSize(width: 18, height: 18)
+        return NSCursor(image: image, hotSpot: NSPoint(x: 9, y: 9))
+    }
+}
+
 @MainActor
 private final class NowSpeakingPresentation: ObservableObject {
-    @Published var isProminent = true
+    @Published private(set) var isMiniPlayer: Bool
     @Published private(set) var isHovered = false
     @Published var lingeringItem: TTSItem?
     @Published var lingeringTime: TimeInterval = 0
     @Published var lingeringDuration: TimeInterval = 0
     private var hoverExitTask: Task<Void, Never>?
 
+    init(isMiniPlayer: Bool) {
+        self.isMiniPlayer = isMiniPlayer
+    }
+
     var isExpanded: Bool {
-        isProminent || isHovered
+        !isMiniPlayer
+    }
+
+    func setMiniPlayer(_ miniPlayer: Bool) {
+        isMiniPlayer = miniPlayer
     }
 
     func updateHover(_ hovering: Bool) {
@@ -362,6 +598,8 @@ private final class NowSpeakingPresentation: ObservableObject {
 private struct NowSpeakingHUDView: View {
     @ObservedObject var controller: PlaybackController
     @ObservedObject var presentation: NowSpeakingPresentation
+    let onToggleMiniPlayer: () -> Void
+    let onHide: () -> Void
 
     var body: some View {
         if let item = displayedItem {
@@ -398,6 +636,21 @@ private struct NowSpeakingHUDView: View {
             .padding(8)
             .onHover { presentation.updateHover($0) }
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
+            .overlay {
+                if presentation.isExpanded {
+                    PlayerResizeRegions()
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if presentation.isExpanded {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(11)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .accessibilityLabel("Now speaking. \(item.nowSpeakingTitle). \(item.nowSpeakingContext)")
         }
     }
@@ -451,6 +704,30 @@ private struct NowSpeakingHUDView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onToggleMiniPlayer) {
+                Image(
+                    systemName: presentation.isExpanded
+                        ? "arrow.down.right.and.arrow.up.left"
+                        : "arrow.up.left.and.arrow.down.right"
+                )
+                .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .help(presentation.isExpanded ? "Use mini player" : "Expand player")
+            .accessibilityLabel(presentation.isExpanded ? "Use mini player" : "Expand player")
+
+            Button(action: onHide) {
+                Image(systemName: "xmark")
+                    .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .help("Hide player")
+            .accessibilityLabel("Hide player")
         }
     }
 

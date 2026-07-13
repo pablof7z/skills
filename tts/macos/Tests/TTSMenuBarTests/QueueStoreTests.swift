@@ -54,6 +54,106 @@ struct QueueStoreTests {
         #expect(!store.isGlobalPlaybackPaused())
     }
 
+    @Test
+    func persistsPlayerVisibilityAndPosition() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = HUDPreferencesStore(stateDirectory: directory)
+
+        #expect(store.preferences == HUDPreferences())
+        store.setPlayerVisible(false)
+        store.setMiniPlayer(true)
+        store.setOrigin(CGPoint(x: -820, y: 146))
+        store.setExpandedSize(CGSize(width: 680, height: 560))
+
+        let reloaded = HUDPreferencesStore(stateDirectory: directory)
+        #expect(!reloaded.preferences.isPlayerVisible)
+        #expect(reloaded.preferences.isMiniPlayer)
+        #expect(reloaded.preferences.origin == CGPoint(x: -820, y: 146))
+        #expect(reloaded.preferences.expandedSize == CGSize(width: 680, height: 560))
+    }
+
+    @Test
+    func clampsSavedPlayerPositionOntoRemainingDisplay() {
+        let frame = HUDPlacement.frame(
+            size: CGSize(width: 540, height: 470),
+            preferredOrigin: CGPoint(x: 3200, y: 1400),
+            visibleFrames: [CGRect(x: 0, y: 0, width: 1440, height: 900)],
+            inset: 20
+        )
+
+        #expect(frame == CGRect(x: 880, y: 410, width: 540, height: 470))
+    }
+
+    @Test
+    func keepsPlayerOnItsSavedDisplayWhileThatDisplayExists() {
+        let frame = HUDPlacement.frame(
+            size: CGSize(width: 400, height: 120),
+            preferredOrigin: CGPoint(x: -1000, y: 180),
+            visibleFrames: [
+                CGRect(x: -1440, y: 0, width: 1440, height: 900),
+                CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            ],
+            inset: 20
+        )
+
+        #expect(frame.origin == CGPoint(x: -1000, y: 180))
+    }
+
+    @Test
+    func reducesOversizedPlayerToFitRemainingDisplay() {
+        let frame = HUDPlacement.frame(
+            size: CGSize(width: 2000, height: 1200),
+            preferredOrigin: CGPoint(x: 3000, y: 1400),
+            visibleFrames: [CGRect(x: 0, y: 0, width: 1440, height: 900)],
+            inset: 20
+        )
+
+        #expect(frame == CGRect(x: 20, y: 20, width: 1400, height: 860))
+    }
+
+    @Test
+    func restoresOriginalExpandedSizeAsMinimum() {
+        let size = HUDPlacement.preferredExpandedSize(
+            saved: CGSize(width: 282, height: 205),
+            minimum: CGSize(width: 540, height: 470)
+        )
+
+        #expect(size == CGSize(width: 540, height: 470))
+        #expect(
+            HUDPlacement.preferredExpandedSize(
+                saved: CGSize(width: 760, height: 620),
+                minimum: CGSize(width: 540, height: 470)
+            ) == CGSize(width: 760, height: 620)
+        )
+    }
+
+    @Test
+    func resizesFromEveryEdgeWithoutCrossingMinimumOrScreen() {
+        let visibleFrame = CGRect(x: 20, y: 20, width: 1400, height: 860)
+        let initial = CGRect(x: 200, y: 160, width: 600, height: 520)
+        let minimum = CGSize(width: 540, height: 470)
+
+        #expect(
+            HUDResize.frame(
+                initialFrame: initial,
+                pointerDelta: CGPoint(x: 300, y: 300),
+                edges: [.right, .top],
+                visibleFrame: visibleFrame,
+                minimumSize: minimum
+            ) == CGRect(x: 200, y: 160, width: 900, height: 720)
+        )
+        #expect(
+            HUDResize.frame(
+                initialFrame: initial,
+                pointerDelta: CGPoint(x: 300, y: 300),
+                edges: [.left, .bottom],
+                visibleFrame: visibleFrame,
+                minimumSize: minimum
+            ) == CGRect(x: 260, y: 210, width: 540, height: 470)
+        )
+    }
+
     @Test @MainActor
     func mutedOutputKeepsPendingSpeechQueued() throws {
         let directory = temporaryDirectory()

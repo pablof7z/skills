@@ -76,6 +76,16 @@ The menu-bar popup remains a queue overview while speech is active: it lists
 the current item, upcoming items, and recent history without duplicating the
 player or transcript. Its Pause All toggle keeps current and newly generated
 speech waiting until resumed, and the menu-bar badge shows the queued count.
+The player can be dragged from any non-interactive background and its expanded
+view has forgiving resize zones on every edge and corner, with the original `540×470` layout
+as its minimum unless the display itself is smaller. A remembered header control
+switches manually between expanded and mini-player modes; hover never changes
+the window size. Position, expanded size, mini-player mode, and
+Show Player / Hide Player state are remembered; the header × hides the HUD
+without stopping speech. Display changes clamp the whole frame onto a remaining
+visible screen and reduce an oversized saved frame to fit. Right-clicking the
+TTS status item also exposes Show/Hide Player and Pause/Resume All; left-click
+still opens the queue popup.
 After generation, the command reports the current queue count. If global TTS
 playback is paused, it explicitly says that the audio was generated and queued
 but will not play until resumed; relay that state accurately rather than
