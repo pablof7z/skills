@@ -43,6 +43,7 @@ struct QueueStoreTests {
         original.status = .played
         original.startedAt = 11
         original.completedAt = 12
+        original.wordTimings = [timing("A", 0, 0.2)]
 
         let replay = original.replayCopy(now: 20)
 
@@ -56,6 +57,7 @@ struct QueueStoreTests {
         #expect(replay.startedAt == nil)
         #expect(replay.completedAt == nil)
         #expect(replay.playbackOffset == nil)
+        #expect(replay.wordTimings == original.wordTimings)
     }
 
     @Test
@@ -155,26 +157,62 @@ struct QueueStoreTests {
     }
 
     @Test
-    func mapsTranscriptWordsToPlaybackTime() {
-        #expect(TranscriptTiming.activeWordIndex(currentTime: 0, duration: 100, wordCount: 10) == 0)
-        #expect(TranscriptTiming.activeWordIndex(currentTime: 52, duration: 100, wordCount: 10) == 5)
-        #expect(TranscriptTiming.activeWordIndex(currentTime: 100, duration: 100, wordCount: 10) == 9)
-        #expect(TranscriptTiming.time(forWordAt: 5, wordCount: 10, duration: 100) == 50)
-        #expect(TranscriptTiming.time(forWordAt: 99, wordCount: 10, duration: 100) == 90)
+    func usesRealWordTimingInsideNaturalPhrases() throws {
+        let text = "Natural phrasing guides the eye. Short pauses help."
+        let timings = [
+            timing("Natural", 0.02, 0.36),
+            timing("phrasing", 0.36, 0.82),
+            timing("guides", 0.82, 1.08),
+            timing("the", 1.08, 1.18),
+            timing("eye", 1.18, 1.55),
+            timing(".", 1.55, 1.78),
+            timing("Short", 1.92, 2.22),
+            timing("pauses", 2.22, 2.62),
+            timing("help", 2.62, 2.94),
+            timing(".", 2.94, 3.08),
+        ]
+
+        let document = TranscriptDocument.build(text: text, timings: timings, duration: 3.08)
+        let state = document.playbackState(at: 1.12, duration: 3.08)
+
+        #expect(document.words.count == 8)
+        #expect(document.phrases.count == 2)
+        #expect(state.activeWordIndex == 3)
+        #expect(state.activePhraseIndex == 0)
+        #expect(document.seekTime(forWordAt: 5, duration: 3.08) == 1.92)
+        let secondPhrase = try #require(document.phrases.last)
+        #expect((text as NSString).substring(with: secondPhrase.range) == "Short pauses help")
     }
 
     @Test
-    func transcriptHoverDecorationDoesNotAddLayoutSpacing() {
-        let idle = TranscriptWordDecoration.resolve(isCurrent: false, isHovered: false)
-        let hovered = TranscriptWordDecoration.resolve(isCurrent: false, isHovered: true)
-        let currentHovered = TranscriptWordDecoration.resolve(isCurrent: true, isHovered: true)
+    func measuredPauseCreatesPhraseWithoutPunctuation() {
+        let text = "A calm phrase then another thought"
+        let timings = [
+            timing("A", 0, 0.1),
+            timing("calm", 0.1, 0.4),
+            timing("phrase", 0.4, 0.8),
+            timing("then", 1.2, 1.5),
+            timing("another", 1.5, 1.9),
+            timing("thought", 1.9, 2.2),
+        ]
 
-        #expect(idle.accentOpacity == 0)
-        #expect(idle.scale == 1)
-        #expect(hovered.accentOpacity > 0)
-        #expect(hovered.scale > 1)
-        #expect(hovered.verticalOffset < 0)
-        #expect(currentHovered.accentOpacity > hovered.accentOpacity)
+        let document = TranscriptDocument.build(text: text, timings: timings, duration: 2.2)
+
+        #expect(document.phrases.map(\.wordRange) == [0..<3, 3..<6])
+    }
+
+    @Test
+    func legacyTranscriptShowsPhraseProgressWithoutFakeWordPrecision() {
+        let document = TranscriptDocument.build(
+            text: "First sentence. Second sentence.",
+            timings: nil,
+            duration: 10
+        )
+        let state = document.playbackState(at: 7, duration: 10)
+
+        #expect(state.activeWordIndex == nil)
+        #expect(state.activePhraseIndex == 1)
+        #expect(document.seekTime(forWordAt: 2, duration: 10) == 5)
     }
 
     @Test
@@ -193,6 +231,30 @@ struct QueueStoreTests {
 
         countdown.cancel()
         #expect(countdown.timeRemaining(at: 300) == 8)
+    }
+
+    @Test
+    func unchangedHUDLayoutDoesNotRequestAnotherAnimation() {
+        let frame = CGRect(x: 20, y: 20, width: 540, height: 470)
+
+        #expect(!HUDLayoutUpdate.isNeeded(
+            currentFrame: frame,
+            targetFrame: frame,
+            currentAlpha: 1,
+            targetAlpha: 1
+        ))
+        #expect(HUDLayoutUpdate.isNeeded(
+            currentFrame: frame,
+            targetFrame: CGRect(x: 20, y: 20, width: 470, height: 226),
+            currentAlpha: 1,
+            targetAlpha: 1
+        ))
+        #expect(HUDLayoutUpdate.isNeeded(
+            currentFrame: frame,
+            targetFrame: frame,
+            currentAlpha: 0.84,
+            targetAlpha: 1
+        ))
     }
 
     @MainActor
@@ -220,12 +282,14 @@ struct QueueStoreTests {
         var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         object.removeValue(forKey: "subject")
         object.removeValue(forKey: "playback_offset")
+        object.removeValue(forKey: "word_timings")
 
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TTSItem.self, from: legacyData)
 
         #expect(decoded.subject == nil)
         #expect(decoded.playbackOffset == nil)
+        #expect(decoded.wordTimings == nil)
     }
 
     @Test
@@ -274,5 +338,9 @@ struct QueueStoreTests {
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("tts-menu-tests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func timing(_ word: String, _ start: Double, _ end: Double) -> TTSWordTiming {
+        TTSWordTiming(word: word, startTime: start, endTime: end)
     }
 }

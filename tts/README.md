@@ -18,7 +18,7 @@ The workflow owns more than text generation:
 - Successful audio moves into background playback only after that handshake.
 - One resident macOS process serializes updates from every agent session.
 - A bottom-left player identifies the subject, agent, Git project (or directory path outside Git), and progress without taking focus from the current window. It grows on hover for playback controls, opens a natural-reading transcript whose words visibly respond as seek targets, uses a stable Git-project accent color for recognition, and lingers briefly after speech so missed words can be replayed in place. Hover pauses that grace period; unused players fade away.
-- The current transcript receives the full player surface, with approximate word highlighting as playback advances.
+- The transcript keeps a natural phrase softly in focus while a stronger word playhead follows real synthesis timestamps. Its prose geometry stays fixed, phrase following scrolls only when needed, and every mapped word seeks to its actual audio boundary.
 - Agent name, voice, harness, workspace, and full session identifier make each update attributable.
 - An optional 5-to-10-word subject is spoken after the introduction and gives substantive updates a scannable title in the player and queue.
 - Pause, timeline scrubbing, 15-second seek, and replay make it behave like a small podcast queue rather than a fire-and-forget alert.

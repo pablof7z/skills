@@ -70,38 +70,6 @@ enum WorkspaceAccent {
     }
 }
 
-enum TranscriptTiming {
-    static func activeWordIndex(
-        currentTime: TimeInterval,
-        duration: TimeInterval,
-        wordCount: Int
-    ) -> Int? {
-        guard duration > 0, wordCount > 0 else { return nil }
-        let progress = min(max(currentTime / duration, 0), 0.999_999)
-        return min(Int(progress * Double(wordCount)), wordCount - 1)
-    }
-
-    static func time(forWordAt index: Int, wordCount: Int, duration: TimeInterval) -> TimeInterval {
-        guard duration > 0, wordCount > 0 else { return 0 }
-        let boundedIndex = min(max(index, 0), wordCount - 1)
-        return duration * Double(boundedIndex) / Double(wordCount)
-    }
-}
-
-struct TranscriptWordDecoration: Equatable {
-    let accentOpacity: Double
-    let scale: CGFloat
-    let verticalOffset: CGFloat
-
-    static func resolve(isCurrent: Bool, isHovered: Bool) -> TranscriptWordDecoration {
-        TranscriptWordDecoration(
-            accentOpacity: isCurrent ? (isHovered ? 0.32 : 0.24) : (isHovered ? 0.13 : 0),
-            scale: isHovered ? 1.015 : 1,
-            verticalOffset: isHovered ? -0.5 : 0
-        )
-    }
-}
-
 struct LingerCountdown: Equatable {
     let duration: TimeInterval
     private(set) var remaining: TimeInterval
@@ -136,5 +104,17 @@ struct LingerCountdown: Equatable {
     func timeRemaining(at time: TimeInterval) -> TimeInterval {
         guard let deadline else { return remaining }
         return max(0, deadline - time)
+    }
+}
+
+enum HUDLayoutUpdate {
+    static func isNeeded(
+        currentFrame: CGRect,
+        targetFrame: CGRect,
+        currentAlpha: CGFloat,
+        targetAlpha: CGFloat,
+        tolerance: CGFloat = 0.001
+    ) -> Bool {
+        !currentFrame.equalTo(targetFrame) || abs(currentAlpha - targetAlpha) > tolerance
     }
 }

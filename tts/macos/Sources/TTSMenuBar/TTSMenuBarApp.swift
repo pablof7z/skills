@@ -242,10 +242,13 @@ private struct CurrentPlaybackView: View {
                     .accessibilityAddTraits(.isHeader)
             }
 
-            TranscriptView(
+            ReadAlongTranscriptView(
                 text: item.text,
+                timings: item.wordTimings,
                 currentTime: controller.currentTime,
-                duration: controller.duration
+                duration: controller.duration,
+                accent: .accentColor,
+                onSeek: { controller.seek(to: $0) }
             )
             .layoutPriority(1)
 
@@ -358,48 +361,6 @@ private struct TransportControls: View {
                 .frame(width: 44, height: 44)
         }
         .help("Forward 15 seconds")
-    }
-}
-
-private struct TranscriptView: View {
-    let text: String
-    let currentTime: TimeInterval
-    let duration: TimeInterval
-
-    var body: some View {
-        ScrollView {
-            transcript
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-        }
-        .frame(maxWidth: .infinity, minHeight: 180, maxHeight: .infinity, alignment: .topLeading)
-        .accessibilityLabel("Transcript")
-    }
-
-    private var transcript: Text {
-        let words = text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        guard !words.isEmpty else { return Text("") }
-
-        let progress = duration > 0 ? min(max(currentTime / duration, 0), 0.999_999) : 0
-        let activeIndex = min(Int(progress * Double(words.count)), words.count - 1)
-
-        return words.enumerated().reduce(Text("")) { result, entry in
-            let (index, word) = entry
-            let token = (index == 0 ? "" : " ") + word
-            let styled: Text
-            if index < activeIndex {
-                styled = Text(token).foregroundColor(.primary)
-            } else if index == activeIndex {
-                styled = Text(token)
-                    .foregroundColor(.accentColor)
-                    .fontWeight(.bold)
-                    .underline()
-            } else {
-                styled = Text(token).foregroundColor(.secondary.opacity(0.62))
-            }
-            return result + styled
-        }
     }
 }
 

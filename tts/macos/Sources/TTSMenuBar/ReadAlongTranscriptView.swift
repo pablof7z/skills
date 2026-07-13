@@ -1,0 +1,234 @@
+import AppKit
+import SwiftUI
+
+struct ReadAlongTranscriptView: NSViewRepresentable {
+    let text: String
+    let timings: [TTSWordTiming]?
+    let currentTime: TimeInterval
+    let duration: TimeInterval
+    let accent: Color
+    let onSeek: (TimeInterval) -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = InteractiveTranscriptTextView()
+        textView.isEditable = false
+        textView.isSelectable = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 5, height: 7)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.setAccessibilityLabel("Interactive transcript")
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? InteractiveTranscriptTextView else { return }
+        textView.update(
+            text: text,
+            timings: timings,
+            currentTime: currentTime,
+            duration: duration,
+            accent: NSColor(accent),
+            onSeek: onSeek
+        )
+    }
+
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: ()) {
+        NSCursor.arrow.set()
+    }
+}
+
+final class InteractiveTranscriptTextView: NSTextView {
+    private var document = TranscriptDocument(text: "", words: [], phrases: [])
+    private var timings: [TTSWordTiming]?
+    private var playbackState = TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
+    private var hoveredWordIndex: Int?
+    private var lastScrolledPhraseIndex: Int?
+    private var accent = NSColor.controlAccentColor
+    private var duration: TimeInterval = 0
+    private var onSeek: ((TimeInterval) -> Void)?
+    private var pointerTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerTrackingArea {
+            removeTrackingArea(pointerTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        pointerTrackingArea = area
+    }
+
+    func update(
+        text: String,
+        timings: [TTSWordTiming]?,
+        currentTime: TimeInterval,
+        duration: TimeInterval,
+        accent: NSColor,
+        onSeek: @escaping (TimeInterval) -> Void
+    ) {
+        let contentChanged = document.text != text || self.timings != timings || self.duration != duration
+        self.timings = timings
+        self.duration = duration
+        self.accent = accent
+        self.onSeek = onSeek
+
+        if contentChanged {
+            document = TranscriptDocument.build(text: text, timings: timings, duration: duration)
+            installText(text)
+            lastScrolledPhraseIndex = nil
+        }
+
+        let nextState = document.playbackState(at: currentTime, duration: duration)
+        guard contentChanged || nextState != playbackState else { return }
+        playbackState = nextState
+        applyPlaybackDecoration()
+        followActivePhraseIfNeeded()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let next = wordIndex(at: convert(event.locationInWindow, from: nil))
+        guard next != hoveredWordIndex else { return }
+        hoveredWordIndex = next
+        (next == nil ? NSCursor.arrow : NSCursor.pointingHand).set()
+        applyPlaybackDecoration()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard hoveredWordIndex != nil else { return }
+        hoveredWordIndex = nil
+        NSCursor.arrow.set()
+        applyPlaybackDecoration()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let index = wordIndex(at: point) else {
+            super.mouseDown(with: event)
+            return
+        }
+        onSeek?(document.seekTime(forWordAt: index, duration: duration))
+    }
+
+    private func installText(_ text: String) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 5
+        paragraph.paragraphSpacing = 4
+        paragraph.lineBreakMode = .byWordWrapping
+        textStorage?.setAttributedString(NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 18, weight: .regular),
+                .foregroundColor: NSColor.labelColor.withAlphaComponent(0.58),
+                .paragraphStyle: paragraph,
+            ]
+        ))
+        invalidateIntrinsicContentSize()
+    }
+
+    private func applyPlaybackDecoration() {
+        guard let layoutManager, !document.text.isEmpty else { return }
+        let wholeRange = NSRange(location: 0, length: (document.text as NSString).length)
+        for attribute in [
+            NSAttributedString.Key.foregroundColor,
+            .backgroundColor,
+            .underlineStyle,
+            .underlineColor,
+        ] {
+            layoutManager.removeTemporaryAttribute(attribute, forCharacterRange: wholeRange)
+        }
+
+        layoutManager.addTemporaryAttributes(
+            [.foregroundColor: NSColor.labelColor.withAlphaComponent(0.58)],
+            forCharacterRange: wholeRange
+        )
+
+        if let activeWordIndex = playbackState.activeWordIndex,
+           document.words.indices.contains(activeWordIndex) {
+            let completedEnd = document.words[activeWordIndex].range.location
+            if completedEnd > 0 {
+                layoutManager.addTemporaryAttributes(
+                    [.foregroundColor: NSColor.labelColor.withAlphaComponent(0.86)],
+                    forCharacterRange: NSRange(location: 0, length: completedEnd)
+                )
+            }
+        }
+
+        if let activePhraseIndex = playbackState.activePhraseIndex,
+           document.phrases.indices.contains(activePhraseIndex) {
+            let phrase = document.phrases[activePhraseIndex]
+            layoutManager.addTemporaryAttributes(
+                [
+                    .foregroundColor: NSColor.labelColor.withAlphaComponent(0.91),
+                    .backgroundColor: accent.withAlphaComponent(0.11),
+                ],
+                forCharacterRange: phrase.range
+            )
+        }
+
+        if let activeWordIndex = playbackState.activeWordIndex,
+           document.words.indices.contains(activeWordIndex) {
+            layoutManager.addTemporaryAttributes(
+                [
+                    .foregroundColor: accent,
+                    .backgroundColor: accent.withAlphaComponent(0.28),
+                ],
+                forCharacterRange: document.words[activeWordIndex].range
+            )
+        }
+
+        if let hoveredWordIndex, document.words.indices.contains(hoveredWordIndex) {
+            layoutManager.addTemporaryAttributes(
+                [
+                    .foregroundColor: accent,
+                    .backgroundColor: accent.withAlphaComponent(0.17),
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .underlineColor: accent.withAlphaComponent(0.9),
+                ],
+                forCharacterRange: document.words[hoveredWordIndex].range
+            )
+        }
+
+        needsDisplay = true
+    }
+
+    private func followActivePhraseIfNeeded() {
+        guard let phraseIndex = playbackState.activePhraseIndex,
+              phraseIndex != lastScrolledPhraseIndex,
+              document.phrases.indices.contains(phraseIndex) else { return }
+        lastScrolledPhraseIndex = phraseIndex
+        scrollRangeToVisible(document.phrases[phraseIndex].range)
+    }
+
+    private func wordIndex(at point: NSPoint) -> Int? {
+        guard let layoutManager, let textContainer else { return nil }
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        guard containerPoint.x >= 0, containerPoint.y >= 0 else { return nil }
+        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else { return nil }
+        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        return document.wordIndex(at: characterIndex)
+    }
+}
