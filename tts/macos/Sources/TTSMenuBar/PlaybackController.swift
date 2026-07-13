@@ -203,6 +203,15 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         guard let audioFile = attachment.audioFile,
               FileManager.default.fileExists(atPath: audioFile) else { return }
 
+        let pendingChild = items.first {
+            $0.parentItemID == brief.id
+                && $0.attachmentID == attachment.id
+                && ($0.status == .queued || $0.status == .playing || $0.status == .paused)
+        }
+        if let pendingChild, currentItem?.id == pendingChild.id {
+            return
+        }
+
         var returnOffset: TimeInterval?
         if let current = currentItem, let player {
             if current.isAttachmentPlayback {
@@ -211,6 +220,16 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                 returnOffset = player.currentTime
             }
             finishCurrentForReplacement()
+        }
+
+        if var pendingChild {
+            if let returnOffset {
+                pendingChild.returnToPlaybackOffset = returnOffset
+                try? store.save(pendingChild)
+                replaceItem(pendingChild)
+            }
+            play(pendingChild)
+            return
         }
 
         guard let child = brief.attachmentPlaybackItem(
@@ -287,12 +306,17 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                     duration = nextDuration
                 }
             } else if !isPlaybackBlocked,
-                      let next = loaded.first(where: { $0.status == .queued }) {
+                      let next = Self.nextQueuedItem(in: loaded) {
                 play(next)
             }
         } catch {
             NSLog("Unable to refresh TTS queue: %@", error.localizedDescription)
         }
+    }
+
+    static func nextQueuedItem(in items: [TTSItem]) -> TTSItem? {
+        items.first { $0.status == .queued && $0.isAttachmentPlayback }
+            ?? items.first { $0.status == .queued }
     }
 
     private func play(_ queuedItem: TTSItem) {

@@ -282,6 +282,55 @@ struct QueueStoreTests {
         #expect(controller.queuedItems.map(\.id) == ["main"])
     }
 
+    @Test @MainActor
+    func repeatedAttachmentClicksReusePendingPlayback() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let audioFile = directory.appendingPathComponent("why.mp3")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data().write(to: audioFile)
+        var why = attachment()
+        why.audioFile = audioFile.path
+        var main = item(id: "main", createdAt: 10)
+        main.attachments = [why]
+        let store = QueueStore(stateDirectory: directory)
+        try store.save(main)
+        let controller = PlaybackController(
+            store: store,
+            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            outputIsMuted: { true }
+        )
+        defer { controller.shutdown() }
+        controller.start()
+
+        #expect(why.isPlayable)
+        #expect(FileManager.default.fileExists(atPath: audioFile.path))
+        #expect(controller.items.map(\.id) == [main.id])
+
+        controller.playAttachment(why, from: main)
+        #expect(controller.items.filter(\.isAttachmentPlayback).count == 1)
+        controller.playAttachment(why, from: main)
+
+        let children = try store.loadItems().filter { $0.isAttachmentPlayback }
+        #expect(children.count == 1)
+        #expect(children.first?.parentItemID == main.id)
+        #expect(children.first?.attachmentID == why.id)
+    }
+
+    @Test @MainActor
+    func explicitlyRequestedAttachmentPlaysBeforeOrdinaryQueue() throws {
+        let ordinary = item(id: "ordinary", createdAt: 10)
+        var attachmentPlayback = item(id: "attachment", createdAt: 20)
+        attachmentPlayback.parentItemID = "main"
+        attachmentPlayback.attachmentID = "why"
+
+        let next = try #require(
+            PlaybackController.nextQueuedItem(in: [ordinary, attachmentPlayback])
+        )
+
+        #expect(next.id == attachmentPlayback.id)
+    }
+
     @Test
     func playbackStateSaveCannotClobberPreparedAttachmentAudio() throws {
         var stale = attachment()
