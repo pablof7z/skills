@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Hook-level regression probe for WorktreeGuard-lite.
 
-This exercises the same JSON hook surface Codex uses. A denied Codex hook exits
-successfully and carries the denial in stdout, so this probe parses the hook
-decision instead of treating exit code 0 as success.
+This exercises the same JSON hook surface Codex and Claude Code use (policy
+logic is shared; each case runs through both harness dispatchers). A denied
+hook exits successfully and carries the denial in stdout, so this probe
+parses the hook decision instead of treating exit code 0 as success.
 """
 
 from __future__ import annotations
@@ -51,13 +52,22 @@ def main() -> int:
             if actual != case.expected:
                 failures.append((case, actual, stdout, stderr))
 
+        for index, case in enumerate(cases, start=1):
+            payload = dict(case.payload)
+            payload["session_id"] = "probe-claude"
+            payload["turn_id"] = f"claude-case-{index}"
+            actual, stdout, stderr = hook_decision(payload, env, harness="claude")
+            print(f"{actual.upper():5} [claude] {case.name}")
+            if actual != case.expected:
+                failures.append((case, actual, stdout, stderr))
+
         records = read_jsonl(Path(env["WTG_ACTION_LOG_FILE"]))
-        if len(records) != len(cases):
+        if len(records) != len(cases) * 2:
             failures.append(
                 (
                     Case(
                         name="action log records every checked hook",
-                        expected=str(len(cases)),
+                        expected=str(len(cases) * 2),
                         payload={},
                     ),
                     str(len(records)),
@@ -74,7 +84,10 @@ def main() -> int:
                 if stderr:
                     print(stderr, file=sys.stderr)
             return 1
-        print(f"PASS {len(cases)} hook decisions; action log records={len(records)}")
+        print(
+            f"PASS {len(cases)} hook decisions x2 harnesses (codex, claude); "
+            f"action log records={len(records)}"
+        )
         return 0
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -281,9 +294,11 @@ def move_patch(source: Path, destination: Path) -> str:
     )
 
 
-def hook_decision(payload: dict[str, Any], env: dict[str, str]) -> tuple[str, str, str]:
+def hook_decision(
+    payload: dict[str, Any], env: dict[str, str], *, harness: str = "codex"
+) -> tuple[str, str, str]:
     result = subprocess.run(
-        [str(WTG), "hook", "codex", "pre-tool-use"],
+        [str(WTG), "hook", harness, "pre-tool-use"],
         input=json.dumps(payload).encode(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

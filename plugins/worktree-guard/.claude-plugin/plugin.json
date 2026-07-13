@@ -1,0 +1,20 @@
+{
+  "name": "worktree-guard",
+  "displayName": "WorktreeGuard",
+  "version": "0.2.0",
+  "description": "Claude Code hooks and a bundled local command for WorktreeGuard-protected Git worktrees.",
+  "author": {
+    "name": "Pablo Fernandez",
+    "url": "https://github.com/pablof7z"
+  },
+  "homepage": "https://github.com/pablof7z/skills",
+  "repository": "https://github.com/pablof7z/skills",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "git",
+    "worktree",
+    "hooks",
+    "guardrails"
+  ]
+}

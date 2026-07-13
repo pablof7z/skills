@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Codex hook entrypoint for WorktreeGuard.
+"""Claude Code hook entrypoint for WorktreeGuard.
 
-Use the bundled WorktreeGuard-lite command shipped inside this plugin package
-by default so cache fallback hooks are self-contained. Set `WTG_BIN` to route
-hook events to a different WorktreeGuard command.
+See also `wtg-hook-codex`, the Codex counterpart of this shim; both delegate
+to the shared `wtg hook <harness> <event>` surface in
+`lib/worktreeguard_lite.py`. Use the bundled WorktreeGuard-lite command
+shipped inside this plugin package by default so cache fallback hooks are
+self-contained. Set `WTG_BIN` to route hook events to a different
+WorktreeGuard command.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ def main() -> int:
     env.setdefault("WTG_COMMAND", str(wtg_bin))
 
     result = subprocess.run(
-        [str(wtg_bin), "hook", "codex", event],
+        [str(wtg_bin), "hook", "claude", event],
         input=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
