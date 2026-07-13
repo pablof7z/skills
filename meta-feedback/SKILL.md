@@ -26,6 +26,8 @@ Do not capture:
 - A stylistic preference with no effect on behavior or outcome.
 - A model mistake already addressed clearly by the skill.
 - A tool or environment failure the skill could not reasonably anticipate.
+- A missing, unreadable, malformed, or misnamed user input when the target skill does not explicitly promise to locate, repair, validate, or recover it. Treat this as a task-input failure even when the skill does not define a fallback.
+- A generic edge case whose handling follows ordinary agent judgment rather than specialized behavior the skill claims to define.
 - A content-free agreement with an existing issue.
 
 ## Locate the feedback directory
