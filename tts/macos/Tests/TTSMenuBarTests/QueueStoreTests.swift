@@ -163,6 +163,38 @@ struct QueueStoreTests {
         #expect(TranscriptTiming.time(forWordAt: 99, wordCount: 10, duration: 100) == 90)
     }
 
+    @Test
+    func transcriptHoverDecorationDoesNotAddLayoutSpacing() {
+        let idle = TranscriptWordDecoration.resolve(isCurrent: false, isHovered: false)
+        let hovered = TranscriptWordDecoration.resolve(isCurrent: false, isHovered: true)
+        let currentHovered = TranscriptWordDecoration.resolve(isCurrent: true, isHovered: true)
+
+        #expect(idle.accentOpacity == 0)
+        #expect(idle.scale == 1)
+        #expect(hovered.accentOpacity > 0)
+        #expect(hovered.scale > 1)
+        #expect(hovered.verticalOffset < 0)
+        #expect(currentHovered.accentOpacity > hovered.accentOpacity)
+    }
+
+    @Test
+    func lingerCountdownPreservesRemainingTimeAcrossHoverPause() {
+        var countdown = LingerCountdown(duration: 8)
+        countdown.start(at: 100)
+
+        countdown.pause(at: 103)
+        #expect(countdown.timeRemaining(at: 150) == 5)
+
+        countdown.resume(at: 150)
+        #expect(countdown.timeRemaining(at: 152) == 3)
+
+        countdown.pause(at: 154)
+        #expect(countdown.timeRemaining(at: 300) == 1)
+
+        countdown.cancel()
+        #expect(countdown.timeRemaining(at: 300) == 8)
+    }
+
     @MainActor
     @Test
     func speakingPanelCannotTakeWindowFocus() {
