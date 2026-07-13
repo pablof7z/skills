@@ -116,6 +116,68 @@ class AttachmentFlowTests(unittest.TestCase):
                 thread.join(timeout=2)
                 server.server_close()
 
+    def test_worker_waits_for_attachment_metadata_race(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        worker = repository / "tts" / "scripts" / "tts-attachment-worker"
+        with tempfile.TemporaryDirectory(prefix="tts-attachment-race-") as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            home.mkdir()
+            attachment_directory = root / "attachment"
+            attachment_directory.mkdir()
+            source = attachment_directory / "source.md"
+            source.write_text("# Delayed attachment\n\nThe worker should claim this after it appears.", encoding="utf-8")
+            item_path = root / "item.json"
+            item = {"voice": "af_nova", "attachments": None}
+            item_path.write_text(json.dumps(item), encoding="utf-8")
+
+            server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "KOKORO_API_ENDPOINT": f"http://127.0.0.1:{server.server_port}/v1/audio/speech",
+                    }
+                )
+                process = subprocess.Popen(
+                    [str(worker), str(item_path)],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                time.sleep(0.2)
+                item["attachments"] = [
+                    {
+                        "id": "01-delayed",
+                        "label": "Delayed attachment",
+                        "kind": "narrated_text",
+                        "status": "preparing",
+                        "source_file": str(source),
+                        "audio_file": str(attachment_directory / "narration.mp3"),
+                        "word_timings": None,
+                        "error": None,
+                    }
+                ]
+                replacement = item_path.with_suffix(".new")
+                replacement.write_text(json.dumps(item), encoding="utf-8")
+                replacement.replace(item_path)
+                stdout, stderr = process.communicate(timeout=15)
+
+                self.assertEqual(process.returncode, 0, stderr)
+                updated = json.loads(item_path.read_text(encoding="utf-8"))
+                self.assertEqual(updated["attachments"][0]["status"], "ready")
+                self.assertTrue(Path(updated["attachments"][0]["audio_file"]).is_file())
+                self.assertIn("Claimed 1 narrated attachment", stdout)
+                self.assertIn("Narrated attachment ready", stdout)
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def atomic_write_json(path: Path, value: dict) -> None:
@@ -25,9 +26,23 @@ def atomic_write_json(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def load_item(item_path: Path, timeout: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            with item_path.open(encoding="utf-8") as handle:
+                value = json.load(handle)
+            if isinstance(value, dict):
+                return value
+        except (OSError, ValueError) as error:
+            last_error = error
+        time.sleep(0.05)
+    raise RuntimeError(f"Unable to read attachment queue item: {last_error or item_path}")
+
+
 def update_attachment(item_path: Path, attachment_id: str, **changes: object) -> None:
-    with item_path.open(encoding="utf-8") as handle:
-        item = json.load(handle)
+    item = load_item(item_path)
     for attachment in item.get("attachments") or []:
         if attachment.get("id") == attachment_id:
             attachment.update(changes)
@@ -49,6 +64,8 @@ def prepare(item_path: Path, attachment: dict, voice: str, tts_command: Path) ->
     source = Path(str(attachment["source_file"]))
     audio = Path(str(attachment["audio_file"]))
     timings = audio.with_name("timings.json")
+    label = str(attachment.get("label") or attachment_id)
+    print(f"Preparing narrated attachment: {label}", flush=True)
     try:
         text = source.read_text(encoding="utf-8")
         speech = markdown_for_speech(text)
@@ -88,8 +105,12 @@ def prepare(item_path: Path, attachment: dict, voice: str, tts_command: Path) ->
             word_timings=word_timings,
             error=None,
         )
+        print(f"Narrated attachment ready: {label}", flush=True)
     except Exception as error:  # Keep the worker alive for the remaining assets.
-        update_attachment(item_path, attachment_id, status="failed", error=str(error))
+        try:
+            update_attachment(item_path, attachment_id, status="failed", error=str(error))
+        finally:
+            print(f"Narrated attachment failed: {label}: {error}", file=sys.stderr, flush=True)
 
 
 def main() -> int:
@@ -97,13 +118,28 @@ def main() -> int:
         print("usage: tts-attachment-worker ITEM_JSON", file=sys.stderr)
         return 2
     item_path = Path(sys.argv[1]).expanduser().resolve()
-    with item_path.open(encoding="utf-8") as handle:
-        item = json.load(handle)
+    deadline = time.monotonic() + 5.0
+    item = load_item(item_path)
+    pending = []
+    while time.monotonic() < deadline:
+        pending = [
+            attachment
+            for attachment in (item.get("attachments") or [])
+            if attachment.get("kind") == "narrated_text"
+            and attachment.get("status") == "preparing"
+        ]
+        if pending:
+            break
+        time.sleep(0.1)
+        item = load_item(item_path)
+    if not pending:
+        print("No narrated attachments became available for preparation.", file=sys.stderr)
+        return 1
     voice = str(item["voice"])
     tts_command = Path(__file__).resolve().with_name("tts")
-    for attachment in item.get("attachments") or []:
-        if attachment.get("kind") == "narrated_text" and attachment.get("status") == "preparing":
-            prepare(item_path, attachment, voice, tts_command)
+    print(f"Claimed {len(pending)} narrated attachment(s).", flush=True)
+    for attachment in pending:
+        prepare(item_path, attachment, voice, tts_command)
     return 0
 
 
