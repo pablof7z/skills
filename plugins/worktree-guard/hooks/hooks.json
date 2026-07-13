@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" session-start; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" session-start; fi",
+            "timeout": 5,
+            "statusMessage": "Registering WorktreeGuard session"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" pre-tool-use; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" pre-tool-use; fi",
+            "timeout": 5,
+            "statusMessage": "Checking WorktreeGuard policy"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" permission-request; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" permission-request; fi",
+            "timeout": 10,
+            "statusMessage": "Checking WorktreeGuard approval"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" post-tool-use; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" post-tool-use; fi",
+            "timeout": 5,
+            "statusMessage": "Recording WorktreeGuard tool result"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" stop; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" stop; fi",
+            "timeout": 5,
+            "statusMessage": "Saving WorktreeGuard session state"
+          }
+        ]
+      }
+    ]
+  }
+}

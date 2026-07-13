@@ -1,4 +1,4 @@
-"""Small local WorktreeGuard implementation bundled with the Codex plugin."""
+"""Small local WorktreeGuard implementation bundled with the WorktreeGuard plugin."""
 
 from __future__ import annotations
 
@@ -109,9 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     hook_parser = subparsers.add_parser("hook", help="Run a harness hook")
     hook_subparsers = hook_parser.add_subparsers(dest="harness", required=True)
-    codex_parser = hook_subparsers.add_parser("codex")
-    codex_parser.add_argument("event", nargs="?", default="hook")
-    codex_parser.set_defaults(func=cmd_hook_codex)
+    for harness_name in ("codex", "claude"):
+        harness_parser = hook_subparsers.add_parser(harness_name)
+        harness_parser.add_argument("event", nargs="?", default="hook")
+        harness_parser.set_defaults(func=cmd_hook_harness)
 
     return parser
 
@@ -211,12 +212,14 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     git_path = shutil.which("git")
-    hook_shim = stable_hook_shim_path()
     print(f"git: {git_path or 'missing'}")
     print(f"state: {state_path()}")
     print(f"action log: {action_log_path()}")
     print(f"deny log: {deny_log_path()}")
-    print(f"hook shim: {hook_shim} ({'executable' if os.access(hook_shim, os.X_OK) else 'missing'})")
+    for harness_name in ("codex", "claude"):
+        hook_shim = stable_hook_shim_path(harness_name)
+        status = "executable" if os.access(hook_shim, os.X_OK) else "missing"
+        print(f"hook shim ({harness_name}): {hook_shim} ({status})")
     state = load_state()
     repos = state.get("repos", {})
     grants = active_grants(state)
@@ -541,12 +544,12 @@ def paint(value: str, color: str, enabled: bool) -> str:
     return f"{color}{value}{ANSI_RESET}" if enabled and value else value
 
 
-def cmd_hook_codex(args: argparse.Namespace) -> int:
+def cmd_hook_harness(args: argparse.Namespace) -> int:
     payload = load_hook_payload(sys.stdin.buffer.read())
-    return run_codex_hook(args.event, payload)
+    return run_harness_hook(args.event, payload)
 
 
-def run_codex_hook(event: str, payload: dict[str, Any]) -> int:
+def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
     if event == "session-start":
         return emit_session_context(payload)
 
@@ -704,7 +707,7 @@ def emit_session_context(payload: dict[str, Any]) -> int:
     if protected is not None:
         base_path = resolve_path(str(protected["base_path"]))
         context = (
-            "WorktreeGuard Codex is active for this protected base checkout:\n"
+            "WorktreeGuard is active for this protected base checkout:\n"
             f"{base_path}\n\n"
             "Do mutating work from a Git worktree, not this protected base checkout."
         )
@@ -712,10 +715,10 @@ def emit_session_context(payload: dict[str, Any]) -> int:
         try:
             repo = discover_repo(cwd)
         except WorktreeGuardError:
-            context = "WorktreeGuard Codex is installed. This directory is not in a Git repo."
+            context = "WorktreeGuard is installed. This directory is not in a Git repo."
         else:
             context = (
-                "WorktreeGuard Codex is active. This directory is a Git worktree for "
+                "WorktreeGuard is active. This directory is a Git worktree for "
                 "the protected base checkout:\n"
                 f"{repo.base_path}\n\n"
                 "Mutating work is allowed in this worktree."
@@ -1698,7 +1701,7 @@ def request_human_approval(
         )
 
     prompt = (
-        "Codex is requesting protected base checkout access.\n\n"
+        "The coding agent is requesting protected base checkout access.\n\n"
         f"Repo: {repo.base_path}\n"
         f"Branch: {repo.branch}\n"
         f"Scope requested: {requested_scope}\n\n"
@@ -1834,8 +1837,8 @@ def deny_log_path() -> Path:
     return Path.home() / DEFAULT_DENY_LOG_FILE
 
 
-def stable_hook_shim_path() -> Path:
-    return Path.home() / ".local" / "bin" / "wtg-hook-codex"
+def stable_hook_shim_path(harness: str) -> Path:
+    return Path.home() / ".local" / "bin" / f"wtg-hook-{harness}"
 
 
 def discover_repo(path: Path) -> "Repo":

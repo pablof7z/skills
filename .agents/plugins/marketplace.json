@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "worktreeguard-codex",
+      "name": "worktree-guard",
       "source": {
         "source": "local",
-        "path": "./plugins/worktreeguard-codex"
+        "path": "./plugins/worktree-guard"
       },
       "policy": {
         "installation": "AVAILABLE",

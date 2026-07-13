@@ -1,0 +1,15 @@
+{
+  "name": "skills-local",
+  "description": "Local marketplace for plugins developed in this skills repo.",
+  "owner": {
+    "name": "Pablo Fernandez",
+    "url": "https://github.com/pablof7z"
+  },
+  "plugins": [
+    {
+      "name": "worktree-guard",
+      "source": "./plugins/worktree-guard",
+      "description": "Keep agent writes out of protected Git main worktrees; allow linked worktrees."
+    }
+  ]
+}
