@@ -9,7 +9,9 @@ Use this skill to turn available evidence into a short, clear explanation. Favor
 
 ## Core Rule
 
-Explain the thing well enough that the user can reason about it or decide what to inspect next. Do not teach every internal detail, enumerate every file, or introduce more concepts than the user needs.
+Use the shortest answer that preserves the message. Be as terse as possible without dropping the context or definitions the user needs to understand what the parts mean.
+
+Optimize for a quick scan. Prefer short sentences, bullets, and compact sections over large paragraphs. Include only what helps the user understand the mental model, reason about it, or decide what to inspect next.
 
 ## Workflow
 
@@ -37,12 +39,14 @@ Explain the thing well enough that the user can reason about it or decide what t
 
 ## Output Shape
 
-Default to a compact answer:
+Default to the shortest useful answer:
 
 1. One-sentence gist.
-2. A short plain-language explanation, usually 2-4 bullets or one tight paragraph.
-3. The main moving parts, capped at about five.
-4. What matters most or what to inspect next.
+2. Only the context needed to make the gist understandable.
+3. The main moving parts, usually 2-4 skimmable bullets and never more than five.
+4. What matters most or what to inspect next, only when useful.
+
+Prefer bullets to a paragraph when they make the answer easier to scan. If a paragraph is clearer, keep it tight. Remove repetition, throat-clearing, and details that do not change the user's understanding.
 
 Include source references when they help the user trust the explanation, especially for local files, docs, or web sources. Do not include a long bibliography.
 
