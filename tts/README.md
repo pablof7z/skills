@@ -43,6 +43,8 @@ On macOS 13 or later with Swift available, the first audible request builds and 
 
 Use `./scripts/tts-menu status` to inspect current playback and queue counts. Use `--no-play` when you only need the generated file; that command returns only after the file exists.
 
+Set voice-specific pacing with `TTS_VOICE_SPEEDS="af_bella=1.08,am_michael=0.92"`. Use `--speed` for a one-off override; unconfigured voices use normal `1.0` speed.
+
 ## What it touches
 
 `tts` sends the supplied text to the endpoint you configure. It writes generated audio under `/tmp`, keeps queue state under `~/.local/state/tts`, and may pause or resume supported media apps on macOS. Set `TTS_MEDIA_CONTROL=0` to disable media control.

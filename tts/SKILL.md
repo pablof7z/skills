@@ -92,6 +92,7 @@ the paused apps a few seconds after playback ends.
 
 - Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
 - Use `--voice-id voice` to choose an explicit voice.
+- Use `--speed multiplier` for a one-off generation speed from `0.25` to `4.0`. Persistent per-voice speeds come from `TTS_VOICE_SPEEDS`, with `1.0` as the default.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
 - Use `--handoff-delay seconds` or `TTS_MEDIA_HANDOFF_DELAY_SECONDS=seconds` to change the post-pause handoff.
 - Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
