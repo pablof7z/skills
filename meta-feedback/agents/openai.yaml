@@ -1,0 +1,4 @@
+interface:
+  display_name: "Meta Feedback"
+  short_description: "Record grounded feedback about skills"
+  default_prompt: "Use $meta-feedback to record evidence-based feedback from this skill use."
