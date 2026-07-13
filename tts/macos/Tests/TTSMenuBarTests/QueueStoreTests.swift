@@ -73,6 +73,40 @@ struct QueueStoreTests {
     }
 
     @Test
+    func buildsNowSpeakingContextFromAgentAndWorkspace() {
+        var value = item(id: "hud", createdAt: 10)
+        value.subject = "The passive speaking cue is ready"
+        value.agentName = "river-codex"
+        value.workspace = "/Users/pablofernandez/Work/skills"
+
+        #expect(value.nowSpeakingTitle == "The passive speaking cue is ready")
+        #expect(value.nowSpeakingContext == "river-codex · skills")
+    }
+
+    @Test
+    func fallsBackToSpokenTextWhenSubjectIsMissing() {
+        var value = item(id: "no-subject", createdAt: 10)
+        value.subject = nil
+
+        #expect(value.nowSpeakingTitle == value.text)
+    }
+
+    @MainActor
+    @Test
+    func speakingPanelCannotTakeWindowFocus() {
+        let panel = PassiveHUDPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        #expect(!panel.canBecomeKey)
+        #expect(!panel.canBecomeMain)
+        #expect(panel.styleMask.contains(.nonactivatingPanel))
+    }
+
+    @Test
     func decodesExistingQueueItemsWithoutSubject() throws {
         let data = try JSONEncoder().encode(item(id: "legacy", createdAt: 10))
         var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])

@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = QueueStore()
     private lazy var instanceLock = MenuInstanceLock(store: store)
     private let popover = NSPopover()
+    private lazy var nowSpeakingPanel = NowSpeakingPanelController(controller: controller)
     private var statusItem: NSStatusItem?
     private var controllerObservation: AnyCancellable?
     private var ownsLock = false
@@ -32,11 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         configureStatusItem()
+        nowSpeakingPanel.refresh()
         controller.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         controllerObservation?.cancel()
+        nowSpeakingPanel.shutdown()
         controller.shutdown()
         releaseInstanceLock()
         ProcessInfo.processInfo.enableAutomaticTermination("TTS menu bar stays resident")

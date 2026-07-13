@@ -17,6 +17,7 @@ The workflow owns more than text generation:
 - The HTTP request stays in the foreground until the endpoint accepts it and the audio file exists, so setup and generation failures remain visible to the agent.
 - Successful audio moves into background playback only after that handshake.
 - One resident macOS process serializes updates from every agent session.
+- A passive bottom-left cue identifies the subject, agent, workspace, and progress without taking focus from the current window.
 - The current transcript receives the full player surface, with approximate word highlighting as playback advances.
 - Agent name, voice, harness, workspace, and full session identifier make each update attributable.
 - An optional 5-to-10-word subject is spoken after the introduction and gives substantive updates a scannable title in the player and queue.
