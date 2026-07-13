@@ -11,17 +11,18 @@ final class MediaController {
         self.environment = environment
     }
 
-    func pausePlayingApps() {
-        guard mediaControlEnabled else { return }
+    func pausePlayingApps() -> Bool {
+        guard mediaControlEnabled else { return false }
         resumeTask?.cancel()
         resumeTask = nil
         let pausedNow = mediaApps.filter { app in
             guard appIsRunning(app), playerState(app) == "playing" else { return false }
-            return runAppleScript("tell application \"\(escaped(app))\" to pause") != nil
+            return runAppleScriptCommand("tell application \"\(escaped(app))\" to pause")
         }
         for app in pausedNow where !pausedApps.contains(app) {
             pausedApps.append(app)
         }
+        return !pausedNow.isEmpty
     }
 
     func resumePausedApps(after delay: TimeInterval) {
@@ -34,7 +35,7 @@ final class MediaController {
             let apps = pausedApps
             pausedApps = []
             for app in apps where appIsRunning(app) {
-                _ = runAppleScript("tell application \"\(escaped(app))\" to play")
+                _ = runAppleScriptCommand("tell application \"\(escaped(app))\" to play")
             }
             resumeTask = nil
         }
@@ -46,7 +47,7 @@ final class MediaController {
         let apps = pausedApps
         pausedApps = []
         for app in apps where appIsRunning(app) {
-            _ = runAppleScript("tell application \"\(escaped(app))\" to play")
+            _ = runAppleScriptCommand("tell application \"\(escaped(app))\" to play")
         }
     }
 
@@ -77,6 +78,12 @@ final class MediaController {
         let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
         guard error == nil else { return nil }
         return result?.stringValue
+    }
+
+    private func runAppleScriptCommand(_ source: String) -> Bool {
+        var error: NSDictionary?
+        _ = NSAppleScript(source: source)?.executeAndReturnError(&error)
+        return error == nil
     }
 
     private func escaped(_ value: String) -> String {

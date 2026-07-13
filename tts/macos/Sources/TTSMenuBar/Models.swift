@@ -46,6 +46,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var error: String?
     var playbackOffset: Double? = nil
     var wordTimings: [TTSWordTiming]? = nil
+    var mediaHandoffDelay: Double? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -65,6 +66,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case error
         case playbackOffset = "playback_offset"
         case wordTimings = "word_timings"
+        case mediaHandoffDelay = "media_handoff_delay"
     }
 
     var displayAgent: String {
@@ -76,8 +78,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
     }
 
     var workspaceName: String? {
-        guard let workspace = nonempty(workspace) else { return nil }
-        return URL(fileURLWithPath: workspace).lastPathComponent
+        guard workspacePath != nil else { return nil }
+        return WorkspaceAccent.projectLabel(forWorkspacePath: workspacePath)
     }
 
     var workspacePath: String? {
@@ -88,12 +90,16 @@ struct TTSItem: Codable, Identifiable, Equatable {
         WorkspaceAccent.displayLabel(forWorkspacePath: workspacePath)
     }
 
+    var workspaceWorktreeLabel: String? {
+        WorkspaceAccent.worktreeLabel(forWorkspacePath: workspacePath)
+    }
+
     var nowSpeakingTitle: String {
         subjectLabel ?? text
     }
 
     var nowSpeakingContext: String {
-        [displayAgent, workspaceDisplayLabel]
+        [displayAgent, workspaceDisplayLabel, workspaceWorktreeLabel]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -127,7 +133,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
             duration: duration,
             error: nil,
             playbackOffset: playbackOffset,
-            wordTimings: wordTimings
+            wordTimings: wordTimings,
+            mediaHandoffDelay: mediaHandoffDelay
         )
     }
 }

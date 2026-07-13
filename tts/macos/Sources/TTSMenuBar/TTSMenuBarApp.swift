@@ -410,7 +410,10 @@ private struct CurrentContextView: View {
             details.append("Harness " + harness)
         }
         if let workspace = item.workspaceName {
-            details.append("Workspace " + workspace)
+            details.append("Project " + workspace)
+        }
+        if let worktree = item.workspaceWorktreeLabel {
+            details.append("Worktree " + worktree)
         }
         return details.joined(separator: " · ")
     }
@@ -494,6 +497,9 @@ private struct ItemRow: View {
         }
         if let workspace = item.workspaceName {
             details.append(workspace)
+        }
+        if let worktree = item.workspaceWorktreeLabel {
+            details.append(worktree)
         }
         details.append(item.createdDate.formatted(date: .omitted, time: .shortened))
         return details.joined(separator: " · ")

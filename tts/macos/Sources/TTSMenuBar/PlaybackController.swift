@@ -13,6 +13,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private let mediaController: MediaController
     private var player: AVAudioPlayer?
     private var refreshTimer: Timer?
+    private var playbackStartTask: Task<Void, Never>?
     private var started = false
 
     init(store: QueueStore = QueueStore(), mediaController: MediaController = MediaController()) {
@@ -57,6 +58,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     func shutdown() {
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
         if var item = currentItem {
@@ -94,6 +97,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     func stop() {
         guard player != nil else { return }
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
         player?.stop()
         finishCurrent(success: true, error: nil)
     }
@@ -180,16 +185,29 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             item.playbackOffset = nil
             try store.save(item)
 
-            mediaController.pausePlayingApps()
+            let pausedMedia = mediaController.pausePlayingApps()
             player = audioPlayer
             currentItemID = item.id
             duration = audioPlayer.duration
             currentTime = audioPlayer.currentTime
             replaceItem(item)
 
-            guard audioPlayer.play() else {
+            if pausedMedia {
+                let delay = queuedItem.mediaHandoffDelay
+                    ?? TimeInterval(ProcessInfo.processInfo.environment["TTS_MEDIA_HANDOFF_DELAY_SECONDS"] ?? "2")
+                    ?? 2
+                playbackStartTask?.cancel()
+                playbackStartTask = Task { @MainActor [weak self, weak audioPlayer] in
+                    try? await Task.sleep(for: .seconds(max(0, delay)))
+                    guard !Task.isCancelled, let self, let audioPlayer, self.player === audioPlayer else { return }
+                    self.playbackStartTask = nil
+                    guard audioPlayer.play() else {
+                        self.finishCurrent(success: false, error: "The audio device refused playback.")
+                        return
+                    }
+                }
+            } else if !audioPlayer.play() {
                 finishCurrent(success: false, error: "The audio device refused playback.")
-                return
             }
         } catch {
             fail(queuedItem, message: error.localizedDescription)
@@ -198,6 +216,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     private func finishCurrent(success: Bool, error: String?) {
         guard var item = currentItem else { return }
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
         item.status = success ? .played : .failed
         item.completedAt = Int64(Date().timeIntervalSince1970)
         item.duration = player?.duration ?? item.duration

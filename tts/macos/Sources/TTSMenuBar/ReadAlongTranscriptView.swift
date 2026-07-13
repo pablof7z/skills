@@ -51,6 +51,7 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
 
 final class InteractiveTranscriptTextView: NSTextView {
     private var document = TranscriptDocument(text: "", words: [], phrases: [])
+    private var sourceText = ""
     private var timings: [TTSWordTiming]?
     private var playbackState = TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
     private var hoveredWordIndex: Int?
@@ -82,15 +83,17 @@ final class InteractiveTranscriptTextView: NSTextView {
         accent: NSColor,
         onSeek: @escaping (TimeInterval) -> Void
     ) {
-        let contentChanged = document.text != text || self.timings != timings || self.duration != duration
+        let contentChanged = sourceText != text || self.timings != timings || self.duration != duration
         self.timings = timings
         self.duration = duration
         self.accent = accent
         self.onSeek = onSeek
 
         if contentChanged {
-            document = TranscriptDocument.build(text: text, timings: timings, duration: duration)
-            installText(text)
+            sourceText = text
+            let rendered = TranscriptMarkdown.render(text, accent: accent)
+            document = TranscriptDocument.build(text: rendered.string, timings: timings, duration: duration)
+            installText(rendered)
             lastScrolledPhraseIndex = nil
         }
 
@@ -125,19 +128,8 @@ final class InteractiveTranscriptTextView: NSTextView {
         onSeek?(document.seekTime(forWordAt: index, duration: duration))
     }
 
-    private func installText(_ text: String) {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 5
-        paragraph.paragraphSpacing = 4
-        paragraph.lineBreakMode = .byWordWrapping
-        textStorage?.setAttributedString(NSAttributedString(
-            string: text,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 18, weight: .regular),
-                .foregroundColor: NSColor.labelColor.withAlphaComponent(0.58),
-                .paragraphStyle: paragraph,
-            ]
-        ))
+    private func installText(_ text: NSAttributedString) {
+        textStorage?.setAttributedString(text)
         invalidateIntrinsicContentSize()
     }
 

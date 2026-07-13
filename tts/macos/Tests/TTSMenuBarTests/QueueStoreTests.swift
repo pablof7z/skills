@@ -130,15 +130,30 @@ struct QueueStoreTests {
     func recognizesGitWorktreeMarkerFile() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+        let project = directory.appendingPathComponent("recognizable-project", isDirectory: true)
+        let worktreeGitDirectory = project
+            .appendingPathComponent(".git/worktrees/feature", isDirectory: true)
         let worktree = directory.appendingPathComponent("feature-worktree", isDirectory: true)
         let nested = worktree.appendingPathComponent("src", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: worktreeGitDirectory,
+            withIntermediateDirectories: true
+        )
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
-        try Data("gitdir: /tmp/repo/.git/worktrees/feature\n".utf8).write(
+        try Data("../..\n".utf8).write(
+            to: worktreeGitDirectory.appendingPathComponent("commondir")
+        )
+        try Data("gitdir: \(worktreeGitDirectory.path)\n".utf8).write(
             to: worktree.appendingPathComponent(".git")
         )
 
-        #expect(WorkspaceAccent.projectLabel(forWorkspacePath: nested.path) == "feature-worktree")
-        #expect(WorkspaceAccent.displayLabel(forWorkspacePath: nested.path) == "feature-worktree")
+        #expect(WorkspaceAccent.projectLabel(forWorkspacePath: nested.path) == "recognizable-project")
+        #expect(WorkspaceAccent.displayLabel(forWorkspacePath: nested.path) == "recognizable-project")
+        #expect(WorkspaceAccent.worktreeLabel(forWorkspacePath: nested.path) == "feature-worktree")
+        #expect(
+            WorkspaceAccent.paletteIndex(forWorkspacePath: nested.path)
+                == WorkspaceAccent.paletteIndex(forWorkspacePath: project.path)
+        )
     }
 
     @Test
@@ -182,6 +197,46 @@ struct QueueStoreTests {
         #expect(document.seekTime(forWordAt: 5, duration: 3.08) == 1.92)
         let secondPhrase = try #require(document.phrases.last)
         #expect((text as NSString).substring(with: secondPhrase.range) == "Short pauses help")
+    }
+
+    @Test
+    func alignsVisibleMessageAfterSpokenFraming() throws {
+        let text = "The agent message starts here.\n\n• First point"
+        let timings = [
+            timing("Agent", 0.0, 0.3),
+            timing("River", 0.3, 0.6),
+            timing("speaking", 0.6, 1.0),
+            timing(".", 1.0, 1.1),
+            timing("A", 1.2, 1.3),
+            timing("short", 1.3, 1.5),
+            timing("subject", 1.5, 1.8),
+            timing(".", 1.8, 1.9),
+            timing("The", 2.2, 2.35),
+            timing("agent", 2.35, 2.6),
+            timing("message", 2.6, 2.95),
+            timing("starts", 2.95, 3.2),
+            timing("here", 3.2, 3.5),
+            timing(".", 3.5, 3.6),
+            timing("First", 3.8, 4.1),
+            timing("point", 4.1, 4.4),
+        ]
+
+        let document = TranscriptDocument.build(text: text, timings: timings, duration: 4.4)
+
+        #expect(document.words.first?.startTime == 2.2)
+        #expect(document.playbackState(at: 1.5, duration: 4.4).activeWordIndex == nil)
+        #expect(document.playbackState(at: 2.4, duration: 4.4).activeWordIndex == 1)
+        #expect(document.seekTime(forWordAt: 5, duration: 4.4) == 3.8)
+    }
+
+    @Test
+    func rendersMarkdownAsStructuredTranscriptText() {
+        let rendered = TranscriptMarkdown.render(
+            "# Update\n\n- **First** item\n- `Second` item",
+            accent: .systemPink
+        )
+
+        #expect(rendered.string == "Update\n\n• First item\n• Second item")
     }
 
     @Test
