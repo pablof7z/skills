@@ -110,10 +110,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         currentTime = player.currentTime
     }
 
-    func replay(_ item: TTSItem) {
+    func replay(_ item: TTSItem, startingAt time: TimeInterval? = nil) {
         guard FileManager.default.fileExists(atPath: item.outputFile) else { return }
         do {
-            try store.save(item.replayCopy())
+            let offset = time.map { max(0, $0) }
+            try store.save(item.replayCopy(startingAt: offset))
             refresh()
         } catch {
             NSLog("Unable to queue replay: %@", error.localizedDescription)
@@ -158,19 +159,24 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             audioPlayer.delegate = self
             audioPlayer.prepareToPlay()
 
+            if let offset = queuedItem.playbackOffset {
+                audioPlayer.currentTime = min(max(0, offset), audioPlayer.duration)
+            }
+
             var item = queuedItem
             item.status = .playing
             item.startedAt = Int64(Date().timeIntervalSince1970)
             item.completedAt = nil
             item.duration = audioPlayer.duration
             item.error = nil
+            item.playbackOffset = nil
             try store.save(item)
 
             mediaController.pausePlayingApps()
             player = audioPlayer
             currentItemID = item.id
             duration = audioPlayer.duration
-            currentTime = 0
+            currentTime = audioPlayer.currentTime
             replaceItem(item)
 
             guard audioPlayer.play() else {

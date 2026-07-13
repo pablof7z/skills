@@ -17,7 +17,7 @@ The workflow owns more than text generation:
 - The HTTP request stays in the foreground until the endpoint accepts it and the audio file exists, so setup and generation failures remain visible to the agent.
 - Successful audio moves into background playback only after that handshake.
 - One resident macOS process serializes updates from every agent session.
-- A bottom-left player identifies the subject, agent, full working-directory path, and progress without taking focus from the current window. It grows on hover for playback controls, opens an interactive word-seeking transcript on click, and uses a stable Git-project accent color for recognition.
+- A bottom-left player identifies the subject, agent, Git project (or directory path outside Git), and progress without taking focus from the current window. It grows on hover for playback controls, opens a natural-reading word-seeking transcript on click, uses a stable Git-project accent color for recognition, and lingers briefly after speech so missed words can be replayed in place.
 - The current transcript receives the full player surface, with approximate word highlighting as playback advances.
 - Agent name, voice, harness, workspace, and full session identifier make each update attributable.
 - An optional 5-to-10-word subject is spoken after the introduction and gives substantive updates a scannable title in the player and queue.

@@ -10,6 +10,7 @@ final class NowSpeakingPanelController {
         static let transcriptSize = NSSize(width: 540, height: 470)
         static let screenInset: CGFloat = 20
         static let prominentSeconds: UInt64 = 5
+        static let lingerSeconds: UInt64 = 8
     }
 
     private let playbackController: PlaybackController
@@ -19,7 +20,10 @@ final class NowSpeakingPanelController {
     private var presentationObservation: AnyCancellable?
     private var screenObservation: AnyCancellable?
     private var collapseTask: Task<Void, Never>?
+    private var lingerTask: Task<Void, Never>?
     private var activeItemID: String?
+    private var lastCurrentItem: TTSItem?
+    private var lastDuration: TimeInterval = 0
 
     init(controller: PlaybackController) {
         playbackController = controller
@@ -62,9 +66,15 @@ final class NowSpeakingPanelController {
 
     func refresh() {
         guard let item = playbackController.currentItem else {
-            hide()
+            beginLingerIfNeeded()
             return
         }
+
+        lingerTask?.cancel()
+        lingerTask = nil
+        presentation.lingeringItem = nil
+        lastCurrentItem = item
+        lastDuration = max(playbackController.duration, item.duration ?? 0)
 
         if activeItemID != item.id {
             activeItemID = item.id
@@ -80,6 +90,7 @@ final class NowSpeakingPanelController {
         presentationObservation?.cancel()
         screenObservation?.cancel()
         collapseTask?.cancel()
+        lingerTask?.cancel()
         panel.orderOut(nil)
     }
 
@@ -129,6 +140,10 @@ final class NowSpeakingPanelController {
     }
 
     private func updateLayout(animated: Bool) {
+        if playbackController.currentItem == nil && presentation.lingeringItem == nil {
+            hide()
+            return
+        }
         guard panel.isVisible else { return }
         let size: NSSize
         if presentation.isTranscriptVisible {
@@ -157,12 +172,47 @@ final class NowSpeakingPanelController {
     private func hide() {
         guard activeItemID != nil || panel.isVisible else { return }
         collapseTask?.cancel()
+        lingerTask?.cancel()
         collapseTask = nil
+        lingerTask = nil
         activeItemID = nil
+        lastCurrentItem = nil
+        lastDuration = 0
         panel.orderOut(nil)
         panel.alphaValue = 1
         presentation.isHovered = false
         presentation.isTranscriptVisible = false
+        presentation.lingeringItem = nil
+        presentation.lingeringTime = 0
+        presentation.lingeringDuration = 0
+    }
+
+    private func beginLingerIfNeeded() {
+        guard panel.isVisible, let lastCurrentItem else {
+            hide()
+            return
+        }
+        guard presentation.lingeringItem == nil else { return }
+
+        let duration = max(lastDuration, lastCurrentItem.duration ?? 0)
+        presentation.lingeringItem = lastCurrentItem
+        presentation.lingeringDuration = duration
+        presentation.lingeringTime = duration
+        scheduleLingerHide()
+    }
+
+    private func scheduleLingerHide() {
+        lingerTask?.cancel()
+        lingerTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Layout.lingerSeconds * 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            guard self.playbackController.currentItem == nil else { return }
+            if self.presentation.isHovered {
+                self.scheduleLingerHide()
+            } else {
+                self.hide()
+            }
+        }
     }
 
     private func positionPanel(size: NSSize) {
@@ -197,6 +247,9 @@ private final class NowSpeakingPresentation: ObservableObject {
     @Published var isProminent = true
     @Published var isHovered = false
     @Published var isTranscriptVisible = false
+    @Published var lingeringItem: TTSItem?
+    @Published var lingeringTime: TimeInterval = 0
+    @Published var lingeringDuration: TimeInterval = 0
 
     var isExpanded: Bool {
         isProminent || isHovered || isTranscriptVisible
@@ -208,7 +261,7 @@ private struct NowSpeakingHUDView: View {
     @ObservedObject var presentation: NowSpeakingPresentation
 
     var body: some View {
-        if let item = controller.currentItem {
+        if let item = displayedItem {
             let accent = WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
             VStack(alignment: .leading, spacing: presentation.isExpanded ? 12 : 8) {
                 summary(item: item, accent: accent)
@@ -228,10 +281,10 @@ private struct NowSpeakingHUDView: View {
                     Divider().overlay(Color.white.opacity(0.11))
                     WordTranscriptView(
                         text: item.text,
-                        currentTime: controller.currentTime,
-                        duration: controller.duration,
+                        currentTime: playbackTime,
+                        duration: playbackDuration,
                         accent: accent,
-                        onSeek: controller.seek(to:)
+                        onSeek: { seek(item: item, to: $0) }
                     )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
@@ -249,7 +302,7 @@ private struct NowSpeakingHUDView: View {
 
     private func summary(item: TTSItem, accent: Color) -> some View {
         HStack(alignment: .center, spacing: presentation.isExpanded ? 13 : 10) {
-            Image(systemName: controller.isPaused ? "pause.fill" : "waveform")
+            Image(systemName: statusSymbol)
                 .font(.system(size: presentation.isExpanded ? 22 : 17, weight: .semibold))
                 .foregroundStyle(accent)
                 .frame(
@@ -272,19 +325,19 @@ private struct NowSpeakingHUDView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
 
-                    if let workspacePath = item.workspacePath {
+                    if let workspaceLabel = item.workspaceDisplayLabel {
                         HStack(spacing: 5) {
                             Image(systemName: "folder")
                                 .foregroundStyle(accent.opacity(0.9))
                                 .accessibilityHidden(true)
-                            Text(workspacePath)
+                            Text(workspaceLabel)
                                 .truncationMode(.middle)
                         }
                         .font(presentation.isExpanded ? .caption : .caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Working directory \(workspacePath)")
+                        .accessibilityLabel("Workspace \(workspaceLabel)")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -311,19 +364,29 @@ private struct NowSpeakingHUDView: View {
         VStack(spacing: 3) {
             Slider(
                 value: Binding(
-                    get: { controller.currentTime },
-                    set: { controller.seek(to: $0) }
+                    get: { playbackTime },
+                    set: { newValue in
+                        if isLingering {
+                            presentation.lingeringTime = newValue
+                        } else {
+                            controller.seek(to: newValue)
+                        }
+                    }
                 ),
-                in: 0...max(controller.duration, 1)
+                in: 0...max(playbackDuration, 1),
+                onEditingChanged: { isEditing in
+                    guard !isEditing, isLingering, let item = presentation.lingeringItem else { return }
+                    controller.replay(item, startingAt: presentation.lingeringTime)
+                }
             )
             .tint(accent)
             .controlSize(.small)
             .accessibilityLabel("Playback position")
 
             HStack {
-                Text(formattedTime(controller.currentTime))
+                Text(formattedTime(playbackTime))
                 Spacer()
-                Text("-" + formattedTime(max(0, controller.duration - controller.currentTime)))
+                Text("-" + formattedTime(max(0, playbackDuration - playbackTime)))
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -333,21 +396,40 @@ private struct NowSpeakingHUDView: View {
     private func controls(accent: Color) -> some View {
         HStack(spacing: 15) {
             controlButton(symbol: "gobackward.15", label: "Back 15 seconds", accent: accent) {
-                controller.rewind()
+                if let item = presentation.lingeringItem {
+                    controller.replay(item, startingAt: max(0, presentation.lingeringTime - 15))
+                } else {
+                    controller.rewind()
+                }
             }
             controlButton(
-                symbol: controller.isPaused ? "play.fill" : "pause.fill",
-                label: controller.isPaused ? "Resume" : "Pause",
+                symbol: isLingering ? "arrow.counterclockwise" : (controller.isPaused ? "play.fill" : "pause.fill"),
+                label: isLingering ? "Replay" : (controller.isPaused ? "Resume" : "Pause"),
                 accent: accent,
                 prominent: true
             ) {
-                controller.togglePause()
+                if let item = presentation.lingeringItem {
+                    controller.replay(item, startingAt: 0)
+                } else {
+                    controller.togglePause()
+                }
             }
             controlButton(symbol: "stop.fill", label: "Stop", accent: accent) {
-                controller.stop()
+                if isLingering {
+                    presentation.lingeringItem = nil
+                } else {
+                    controller.stop()
+                }
             }
             controlButton(symbol: "goforward.15", label: "Forward 15 seconds", accent: accent) {
-                controller.forward()
+                if let item = presentation.lingeringItem {
+                    controller.replay(
+                        item,
+                        startingAt: min(playbackDuration, presentation.lingeringTime + 15)
+                    )
+                } else {
+                    controller.forward()
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -376,8 +458,37 @@ private struct NowSpeakingHUDView: View {
     }
 
     private var progress: Double {
-        guard controller.duration > 0 else { return 0 }
-        return min(max(controller.currentTime / controller.duration, 0), 1)
+        guard playbackDuration > 0 else { return 0 }
+        return min(max(playbackTime / playbackDuration, 0), 1)
+    }
+
+    private var displayedItem: TTSItem? {
+        controller.currentItem ?? presentation.lingeringItem
+    }
+
+    private var isLingering: Bool {
+        controller.currentItem == nil && presentation.lingeringItem != nil
+    }
+
+    private var playbackTime: TimeInterval {
+        isLingering ? presentation.lingeringTime : controller.currentTime
+    }
+
+    private var playbackDuration: TimeInterval {
+        isLingering ? presentation.lingeringDuration : controller.duration
+    }
+
+    private var statusSymbol: String {
+        if isLingering { return "arrow.counterclockwise" }
+        return controller.isPaused ? "pause.fill" : "waveform"
+    }
+
+    private func seek(item: TTSItem, to time: TimeInterval) {
+        if isLingering {
+            controller.replay(item, startingAt: time)
+        } else {
+            controller.seek(to: time)
+        }
     }
 
     private func formattedTime(_ seconds: TimeInterval) -> String {
@@ -409,7 +520,7 @@ private struct WordTranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                WordFlowLayout(spacing: 5) {
+                WordFlowLayout(horizontalSpacing: 4, verticalSpacing: 3) {
                     ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                         Button {
                             onSeek(TranscriptTiming.time(
@@ -421,12 +532,15 @@ private struct WordTranscriptView: View {
                             Text(word)
                                 .font(.body.weight(index == activeIndex ? .semibold : .regular))
                                 .foregroundStyle(wordColor(at: index))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 3)
-                                .background(
-                                    index == activeIndex ? accent.opacity(0.24) : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                )
+                                .background {
+                                    if index == activeIndex {
+                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                            .fill(accent.opacity(0.24))
+                                            .padding(.horizontal, -3)
+                                            .padding(.vertical, -2)
+                                    }
+                                }
+                                .contentShape(Rectangle().inset(by: -2))
                         }
                         .buttonStyle(.plain)
                         .id(index)
@@ -461,7 +575,8 @@ private struct WordTranscriptView: View {
 }
 
 private struct WordFlowLayout: Layout {
-    let spacing: CGFloat
+    let horizontalSpacing: CGFloat
+    let verticalSpacing: CGFloat
 
     func sizeThatFits(
         proposal: ProposedViewSize,
@@ -477,14 +592,14 @@ private struct WordFlowLayout: Layout {
             let size = subview.sizeThatFits(.unspecified)
             if x > 0, x + size.width > maximumWidth {
                 x = 0
-                y += rowHeight + spacing
+                y += rowHeight + verticalSpacing
                 rowHeight = 0
             }
-            x += size.width + spacing
+            x += size.width + horizontalSpacing
             rowHeight = max(rowHeight, size.height)
         }
 
-        return CGSize(width: proposal.width ?? max(0, x - spacing), height: y + rowHeight)
+        return CGSize(width: proposal.width ?? max(0, x - horizontalSpacing), height: y + rowHeight)
     }
 
     func placeSubviews(
@@ -501,11 +616,11 @@ private struct WordFlowLayout: Layout {
             let size = subview.sizeThatFits(.unspecified)
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
-                y += rowHeight + spacing
+                y += rowHeight + verticalSpacing
                 rowHeight = 0
             }
             subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
+            x += size.width + horizontalSpacing
             rowHeight = max(rowHeight, size.height)
         }
     }

@@ -30,14 +30,19 @@ enum WorkspaceAccent {
     }
 
     static func projectLabel(forWorkspacePath path: String?) -> String {
-        guard let path else { return "unknown" }
-        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "unknown" }
-        let workspaceURL = URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL
+        guard let workspaceURL = workspaceURL(for: path) else { return "unknown" }
         if let projectRoot = nearestGitRoot(from: workspaceURL) {
             return projectRoot.lastPathComponent
         }
         return workspaceURL.lastPathComponent
+    }
+
+    static func displayLabel(forWorkspacePath path: String?) -> String? {
+        guard let workspaceURL = workspaceURL(for: path) else { return nil }
+        if let projectRoot = nearestGitRoot(from: workspaceURL) {
+            return projectRoot.lastPathComponent
+        }
+        return path?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     static func nearestGitRoot(
@@ -55,6 +60,13 @@ enum WorkspaceAccent {
             guard parent.path != candidate.path else { return nil }
             candidate = parent
         }
+    }
+
+    private static func workspaceURL(for path: String?) -> URL? {
+        guard let path else { return nil }
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL
     }
 }
 

@@ -32,6 +32,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var completedAt: Int64?
     var duration: Double?
     var error: String?
+    var playbackOffset: Double? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -49,6 +50,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case completedAt = "completed_at"
         case duration
         case error
+        case playbackOffset = "playback_offset"
     }
 
     var displayAgent: String {
@@ -68,12 +70,16 @@ struct TTSItem: Codable, Identifiable, Equatable {
         nonempty(workspace)
     }
 
+    var workspaceDisplayLabel: String? {
+        WorkspaceAccent.displayLabel(forWorkspacePath: workspacePath)
+    }
+
     var nowSpeakingTitle: String {
         subjectLabel ?? text
     }
 
     var nowSpeakingContext: String {
-        [displayAgent, workspacePath]
+        [displayAgent, workspaceDisplayLabel]
             .compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -86,7 +92,10 @@ struct TTSItem: Codable, Identifiable, Equatable {
         Date(timeIntervalSince1970: TimeInterval(createdAt))
     }
 
-    func replayCopy(now: Int64 = Int64(Date().timeIntervalSince1970)) -> TTSItem {
+    func replayCopy(
+        now: Int64 = Int64(Date().timeIntervalSince1970),
+        startingAt playbackOffset: TimeInterval? = nil
+    ) -> TTSItem {
         TTSItem(
             id: "replay-\(UUID().uuidString.lowercased())",
             text: text,
@@ -102,7 +111,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
             startedAt: nil,
             completedAt: nil,
             duration: duration,
-            error: nil
+            error: nil,
+            playbackOffset: playbackOffset
         )
     }
 }
