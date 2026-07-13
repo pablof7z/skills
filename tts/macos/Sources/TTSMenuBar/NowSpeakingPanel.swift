@@ -6,8 +6,7 @@ import SwiftUI
 final class NowSpeakingPanelController {
     private enum Layout {
         static let compactSize = NSSize(width: 400, height: 120)
-        static let playerSize = NSSize(width: 470, height: 226)
-        static let transcriptSize = NSSize(width: 540, height: 470)
+        static let expandedSize = NSSize(width: 540, height: 470)
         static let screenInset: CGFloat = 20
         static let prominentSeconds: UInt64 = 5
         static let lingerSeconds: TimeInterval = 8
@@ -33,7 +32,7 @@ final class NowSpeakingPanelController {
     init(controller: PlaybackController) {
         playbackController = controller
         panel = PassiveHUDPanel(
-            contentRect: NSRect(origin: .zero, size: Layout.playerSize),
+            contentRect: NSRect(origin: .zero, size: Layout.expandedSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -64,7 +63,7 @@ final class NowSpeakingPanelController {
             for: NSApplication.didChangeScreenParametersNotification
         ).sink { [weak self] _ in
             Task { @MainActor in
-                self?.positionPanel(size: self?.panel.frame.size ?? Layout.playerSize)
+                self?.positionPanel(size: self?.panel.frame.size ?? Layout.expandedSize)
             }
         }
     }
@@ -126,9 +125,8 @@ final class NowSpeakingPanelController {
 
     private func showProminently() {
         collapseTask?.cancel()
-        presentation.isTranscriptVisible = false
         presentation.isProminent = true
-        positionPanel(size: Layout.playerSize)
+        positionPanel(size: Layout.expandedSize)
         panel.alphaValue = 0
         NSApp.unhideWithoutActivation()
         panel.orderFrontRegardless()
@@ -155,14 +153,7 @@ final class NowSpeakingPanelController {
             return
         }
         guard panel.isVisible else { return }
-        let size: NSSize
-        if presentation.isTranscriptVisible {
-            size = Layout.transcriptSize
-        } else if presentation.isExpanded {
-            size = Layout.playerSize
-        } else {
-            size = Layout.compactSize
-        }
+        let size = presentation.isExpanded ? Layout.expandedSize : Layout.compactSize
         let frame = frameFor(size: size)
         let alpha: CGFloat = presentation.isExpanded ? 1 : 0.84
         guard HUDLayoutUpdate.isNeeded(
@@ -217,8 +208,7 @@ final class NowSpeakingPanelController {
         lastDuration = 0
         panel.orderOut(nil)
         panel.alphaValue = 1
-        presentation.isHovered = false
-        presentation.isTranscriptVisible = false
+        presentation.clearHover()
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
         presentation.lingeringDuration = 0
@@ -336,14 +326,36 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 private final class NowSpeakingPresentation: ObservableObject {
     @Published var isProminent = true
-    @Published var isHovered = false
-    @Published var isTranscriptVisible = false
+    @Published private(set) var isHovered = false
     @Published var lingeringItem: TTSItem?
     @Published var lingeringTime: TimeInterval = 0
     @Published var lingeringDuration: TimeInterval = 0
+    private var hoverExitTask: Task<Void, Never>?
 
     var isExpanded: Bool {
-        isProminent || isHovered || isTranscriptVisible
+        isProminent || isHovered
+    }
+
+    func updateHover(_ hovering: Bool) {
+        hoverExitTask?.cancel()
+        hoverExitTask = nil
+        if hovering {
+            isHovered = true
+            return
+        }
+
+        hoverExitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled, let self else { return }
+            self.hoverExitTask = nil
+            self.isHovered = false
+        }
+    }
+
+    func clearHover() {
+        hoverExitTask?.cancel()
+        hoverExitTask = nil
+        isHovered = false
     }
 }
 
@@ -358,17 +370,6 @@ private struct NowSpeakingHUDView: View {
                 summary(item: item, accent: accent)
 
                 if presentation.isExpanded {
-                    timeline(accent: accent)
-                    controls(accent: accent)
-                } else {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                        .tint(accent)
-                        .controlSize(.mini)
-                        .accessibilityLabel("Playback progress")
-                }
-
-                if presentation.isTranscriptVisible {
                     Divider().overlay(Color.white.opacity(0.11))
                     ReadAlongTranscriptView(
                         text: item.text,
@@ -379,6 +380,15 @@ private struct NowSpeakingHUDView: View {
                         onSeek: { seek(item: item, to: $0) }
                     )
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    Divider().overlay(Color.white.opacity(0.11))
+                    timeline(accent: accent)
+                    controls(item: item, accent: accent)
+                } else {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .tint(accent)
+                        .controlSize(.mini)
+                        .accessibilityLabel("Playback progress")
                 }
             }
             .padding(.horizontal, presentation.isExpanded ? 18 : 14)
@@ -386,8 +396,8 @@ private struct NowSpeakingHUDView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .hudSurface(accent: accent)
             .padding(8)
-            .onHover { presentation.isHovered = $0 }
-            .animation(.easeInOut(duration: 0.2), value: presentation.isTranscriptVisible)
+            .onHover { presentation.updateHover($0) }
+            .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .accessibilityLabel("Now speaking. \(item.nowSpeakingTitle). \(item.nowSpeakingContext)")
         }
     }
@@ -403,63 +413,44 @@ private struct NowSpeakingHUDView: View {
                 )
                 .background(accent.opacity(0.16), in: Circle())
 
-            Button {
-                presentation.isTranscriptVisible.toggle()
-            } label: {
-                VStack(alignment: .leading, spacing: presentation.isExpanded ? 5 : 3) {
-                    Text(item.nowSpeakingTitle)
-                        .font(presentation.isExpanded ? .title3.weight(.semibold) : .headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(presentation.isExpanded ? 2 : 1)
+            VStack(alignment: .leading, spacing: presentation.isExpanded ? 5 : 3) {
+                Text(item.nowSpeakingTitle)
+                    .font(presentation.isExpanded ? .title3.weight(.semibold) : .headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(presentation.isExpanded ? 2 : 1)
 
-                    Text(item.displayAgent)
-                        .font(presentation.isExpanded ? .subheadline.weight(.medium) : .caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                Text(item.displayAgent)
+                    .font(presentation.isExpanded ? .subheadline.weight(.medium) : .caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
 
-                    if let workspaceLabel = item.workspaceDisplayLabel {
-                        HStack(spacing: 5) {
-                            Image(systemName: "folder")
-                                .foregroundStyle(accent.opacity(0.9))
-                                .accessibilityHidden(true)
-                            Text(workspaceLabel)
-                                .fontWeight(.semibold)
+                if let workspaceLabel = item.workspaceDisplayLabel {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(accent.opacity(0.9))
+                            .accessibilityHidden(true)
+                        Text(workspaceLabel)
+                            .fontWeight(.semibold)
+                            .truncationMode(.middle)
+                        if let worktreeLabel = item.workspaceWorktreeLabel {
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                            Text(worktreeLabel)
                                 .truncationMode(.middle)
-                            if let worktreeLabel = item.workspaceWorktreeLabel {
-                                Text("·")
-                                    .foregroundStyle(.tertiary)
-                                Text(worktreeLabel)
-                                    .truncationMode(.middle)
-                            }
                         }
-                        .font(presentation.isExpanded ? .caption : .caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(
-                            item.workspaceWorktreeLabel.map {
-                                "Project \(workspaceLabel), worktree \($0)"
-                            } ?? "Project \(workspaceLabel)"
-                        )
                     }
+                    .font(presentation.isExpanded ? .caption : .caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(
+                        item.workspaceWorktreeLabel.map {
+                            "Project \(workspaceLabel), worktree \($0)"
+                        } ?? "Project \(workspaceLabel)"
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(presentation.isTranscriptVisible ? "Collapse transcript" : "Show transcript")
-
-            Button {
-                presentation.isTranscriptVisible.toggle()
-            } label: {
-                Image(systemName: presentation.isTranscriptVisible ? "chevron.down.circle.fill" : "text.bubble")
-                    .font(.system(size: presentation.isExpanded ? 20 : 16, weight: .medium))
-                    .foregroundStyle(presentation.isTranscriptVisible ? accent : .secondary)
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.plain)
-            .help(presentation.isTranscriptVisible ? "Collapse transcript" : "Show transcript")
-            .accessibilityLabel(presentation.isTranscriptVisible ? "Collapse transcript" : "Show transcript")
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -496,8 +487,9 @@ private struct NowSpeakingHUDView: View {
         }
     }
 
-    private func controls(accent: Color) -> some View {
-        HStack(spacing: 15) {
+    private func controls(item: TTSItem, accent: Color) -> some View {
+        HStack(spacing: 12) {
+            playbackRateButton(item: item, accent: accent)
             controlButton(symbol: "gobackward.15", label: "Back 15 seconds", accent: accent) {
                 if let item = presentation.lingeringItem {
                     controller.replay(item, startingAt: max(0, presentation.lingeringTime - 15))
@@ -536,6 +528,26 @@ private struct NowSpeakingHUDView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func playbackRateButton(item: TTSItem, accent: Color) -> some View {
+        Button {
+            controller.cyclePlaybackRate(for: item)
+        } label: {
+            Text(controller.playbackRateLabel)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(accent)
+                .frame(width: 42, height: 34)
+                .background(accent.opacity(0.14), in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(accent.opacity(0.28), lineWidth: 0.75)
+                }
+        }
+        .buttonStyle(.plain)
+        .help("Playback speed for \(item.voice). Click to change.")
+        .accessibilityLabel("Playback speed for \(item.voice)")
+        .accessibilityValue(controller.playbackRateLabel)
     }
 
     private func controlButton(

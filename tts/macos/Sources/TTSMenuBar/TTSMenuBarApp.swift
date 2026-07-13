@@ -86,7 +86,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else { return }
         let symbolName: String
         let accessibilityLabel: String
-        if controller.isPaused {
+        if controller.isGloballyPaused {
+            symbolName = "pause.circle.fill"
+            accessibilityLabel = "All TTS paused, \(controller.queuedItems.count) queued"
+        } else if controller.isSystemOutputMuted {
+            symbolName = "speaker.slash.circle.fill"
+            accessibilityLabel = "System output muted, TTS paused, \(controller.queuedItems.count) queued"
+        } else if controller.isPaused {
             symbolName = "pause.circle.fill"
             accessibilityLabel = "TTS paused"
         } else if controller.currentItem != nil {
@@ -100,7 +106,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accessibilityLabel = "TTS idle"
         }
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)
+        button.attributedTitle = statusTitle(queuedCount: controller.queuedItems.count)
         button.setAccessibilityLabel(accessibilityLabel)
+    }
+
+    private func statusTitle(queuedCount: Int) -> NSAttributedString {
+        let title = NSMutableAttributedString(string: " TTS")
+        guard queuedCount > 0 else { return title }
+
+        title.append(NSAttributedString(string: " "))
+        let attachment = NSTextAttachment()
+        let image = queueBadgeImage(count: queuedCount)
+        attachment.image = image
+        attachment.bounds = NSRect(x: 0, y: -3, width: image.size.width, height: image.size.height)
+        title.append(NSAttributedString(attachment: attachment))
+        return title
+    }
+
+    private func queueBadgeImage(count: Int) -> NSImage {
+        let label = count > 99 ? "99+" : String(count)
+        let width: CGFloat = count > 9 ? (count > 99 ? 27 : 21) : 17
+        let size = NSSize(width: width, height: 17)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.systemRed.setFill()
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 8.5, yRadius: 8.5).fill()
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+            .foregroundColor: NSColor.white,
+        ]
+        let labelSize = (label as NSString).size(withAttributes: attributes)
+        (label as NSString).draw(
+            at: NSPoint(x: (size.width - labelSize.width) / 2, y: (size.height - labelSize.height) / 2),
+            withAttributes: attributes
+        )
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 
     private func acquireInstanceLock() -> Bool {
@@ -129,50 +171,50 @@ private struct QueueView: View {
             header
             Divider()
 
-            if let current = controller.currentItem {
-                CurrentPlaybackView(item: current, controller: controller)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    Section("Up Next") {
-                        if controller.queuedItems.isEmpty {
-                            Text("Queue is empty")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(controller.queuedItems) { item in
-                                ItemRow(item: item, action: nil)
-                            }
+            List {
+                if let current = controller.currentItem {
+                    Section(controller.isPaused ? "Paused" : "Now Playing") {
+                        ItemRow(item: current, action: nil)
+                    }
+                }
+
+                Section("Up Next") {
+                    if controller.queuedItems.isEmpty {
+                        Text("Queue is empty")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(controller.queuedItems) { item in
+                            ItemRow(item: item, action: nil)
                         }
                     }
+                }
 
-                    Section("Recent") {
-                        if controller.recentItems.isEmpty {
-                            Text("No recent speech")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(controller.recentItems.prefix(30)) { item in
-                                ItemRow(item: item) {
+                Section("Recent") {
+                    if controller.recentItems.isEmpty {
+                        Text("No recent speech")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(controller.recentItems.prefix(30)) { item in
+                            ItemRow(item: item) {
+                                controller.replay(item)
+                            }
+                            .contextMenu {
+                                Button("Replay", systemImage: "arrow.counterclockwise") {
                                     controller.replay(item)
                                 }
-                                .contextMenu {
-                                    Button("Replay", systemImage: "arrow.counterclockwise") {
-                                        controller.replay(item)
-                                    }
-                                    Button("Show in Finder", systemImage: "folder") {
-                                        controller.reveal(item)
-                                    }
+                                Button("Show in Finder", systemImage: "folder") {
+                                    controller.reveal(item)
                                 }
                             }
                         }
                     }
                 }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-
-                Divider()
-                footer
             }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+
+            Divider()
+            footer
         }
         .frame(width: 430, height: 640)
     }
@@ -187,6 +229,17 @@ private struct QueueView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                controller.toggleGlobalPlaybackPause()
+            } label: {
+                Label(
+                    controller.isGloballyPaused ? "Resume All" : "Pause All",
+                    systemImage: controller.isGloballyPaused ? "play.fill" : "pause.fill"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(controller.isGloballyPaused ? "Resume all TTS playback" : "Pause all TTS playback")
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
@@ -212,210 +265,11 @@ private struct QueueView: View {
     }
 
     private var statusText: String {
+        if controller.isGloballyPaused { return "All playback paused" }
+        if controller.isSystemOutputMuted { return "System output muted · playback waiting" }
         if controller.isPaused { return "Paused" }
         if controller.currentItem != nil { return "Playing" }
         return controller.queuedItems.isEmpty ? "Idle" : "Waiting"
-    }
-}
-
-private struct CurrentPlaybackView: View {
-    let item: TTSItem
-    @ObservedObject var controller: PlaybackController
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Now Playing")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                Spacer()
-                Text(controller.isPaused ? "Paused" : "Playing")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(controller.isPaused ? .orange : .green)
-            }
-
-            if let subject = item.subjectLabel {
-                Text(subject)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
-                    .accessibilityAddTraits(.isHeader)
-            }
-
-            ReadAlongTranscriptView(
-                text: item.text,
-                timings: item.wordTimings,
-                currentTime: controller.currentTime,
-                duration: controller.duration,
-                accent: .accentColor,
-                onSeek: { controller.seek(to: $0) }
-            )
-            .layoutPriority(1)
-
-            CurrentContextView(item: item)
-
-            Slider(
-                value: Binding(
-                    get: { controller.currentTime },
-                    set: { controller.seek(to: $0) }
-                ),
-                in: 0...max(controller.duration, 1)
-            )
-            .controlSize(.large)
-
-            HStack {
-                Text(time(controller.currentTime))
-                Spacer()
-                Text("-" + time(max(0, controller.duration - controller.currentTime)))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-
-            TransportControls(controller: controller)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .playerGlassSurface()
-    }
-
-    private func time(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite else { return "0:00" }
-        let total = max(0, Int(seconds.rounded()))
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
-
-private struct TransportControls: View {
-    @ObservedObject var controller: PlaybackController
-
-    var body: some View {
-        if #available(macOS 26.0, *) {
-            GlassEffectContainer(spacing: 16) {
-                glassControls
-            }
-        } else {
-            fallbackControls
-        }
-    }
-
-    @available(macOS 26.0, *)
-    private var glassControls: some View {
-        HStack(spacing: 22) {
-            rewindButton
-                .buttonStyle(.glass)
-            playPauseButton
-                .buttonStyle(.glassProminent)
-                .tint(.accentColor)
-            forwardButton
-                .buttonStyle(.glass)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var fallbackControls: some View {
-        HStack(spacing: 22) {
-            rewindButton
-                .buttonStyle(.plain)
-                .background(Color.secondary.opacity(0.14), in: Circle())
-            playPauseButton
-                .buttonStyle(.plain)
-                .foregroundStyle(.white)
-                .background(Color.accentColor, in: Circle())
-            forwardButton
-                .buttonStyle(.plain)
-                .background(Color.secondary.opacity(0.14), in: Circle())
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var rewindButton: some View {
-        Button {
-            controller.rewind()
-        } label: {
-            Image(systemName: "gobackward.15")
-                .font(.system(size: 21, weight: .semibold))
-                .frame(width: 44, height: 44)
-        }
-        .help("Rewind 15 seconds")
-    }
-
-    private var playPauseButton: some View {
-        Button {
-            controller.togglePause()
-        } label: {
-            Image(systemName: controller.isPaused ? "play.fill" : "pause.fill")
-                .font(.system(size: 24, weight: .bold))
-                .frame(width: 54, height: 54)
-        }
-        .keyboardShortcut(.space, modifiers: [])
-        .help(controller.isPaused ? "Resume" : "Pause")
-    }
-
-    private var forwardButton: some View {
-        Button {
-            controller.forward()
-        } label: {
-            Image(systemName: "goforward.15")
-                .font(.system(size: 21, weight: .semibold))
-                .frame(width: 44, height: 44)
-        }
-        .help("Forward 15 seconds")
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func playerGlassSurface() -> some View {
-        if #available(macOS 26.0, *) {
-            glassEffect(
-                .regular.tint(Color.accentColor.opacity(0.08)),
-                in: .rect(cornerRadius: 8)
-            )
-        } else {
-            background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        }
-    }
-}
-
-private struct CurrentContextView: View {
-    let item: TTSItem
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            MetadataLine(item: item)
-
-            if let session = item.sessionLabel {
-                HStack(spacing: 5) {
-                    Text("Session")
-                        .foregroundStyle(.tertiary)
-                    Text(session)
-                        .fontDesign(.monospaced)
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .help(session)
-            }
-
-            Text(contextLine)
-                .foregroundStyle(.tertiary)
-        }
-        .font(.caption)
-    }
-
-    private var contextLine: String {
-        var details: [String] = []
-        if let harness = item.harness, !harness.isEmpty {
-            details.append("Harness " + harness)
-        }
-        if let workspace = item.workspaceName {
-            details.append("Project " + workspace)
-        }
-        if let worktree = item.workspaceWorktreeLabel {
-            details.append("Worktree " + worktree)
-        }
-        return details.joined(separator: " · ")
     }
 }
 

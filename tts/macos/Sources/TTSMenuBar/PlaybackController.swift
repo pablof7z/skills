@@ -8,17 +8,31 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     @Published private(set) var currentItemID: String?
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    @Published private(set) var playbackRate: Float = 1.0
+    @Published private(set) var isGloballyPaused = false
+    @Published private(set) var isSystemOutputMuted = false
 
     private let store: QueueStore
     private let mediaController: MediaController
+    private let playbackRateStore: VoicePlaybackRateStore
+    private let outputIsMuted: () -> Bool
     private var player: AVAudioPlayer?
     private var refreshTimer: Timer?
     private var playbackStartTask: Task<Void, Never>?
+    private var automaticallyPausedItemID: String?
     private var started = false
 
-    init(store: QueueStore = QueueStore(), mediaController: MediaController = MediaController()) {
+    init(
+        store: QueueStore = QueueStore(),
+        mediaController: MediaController = MediaController(),
+        playbackRateStore: VoicePlaybackRateStore? = nil,
+        outputIsMuted: @escaping () -> Bool = { SystemOutputMuteReader().isMuted() }
+    ) {
         self.store = store
         self.mediaController = mediaController
+        self.playbackRateStore = playbackRateStore
+            ?? VoicePlaybackRateStore(stateDirectory: store.stateDirectory)
+        self.outputIsMuted = outputIsMuted
         super.init()
     }
 
@@ -46,6 +60,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         do {
             try store.prepare()
             try store.recoverInterruptedItems()
+            isGloballyPaused = store.isGlobalPlaybackPaused()
+            isSystemOutputMuted = outputIsMuted()
         } catch {
             NSLog("TTS queue initialization failed: %@", error.localizedDescription)
         }
@@ -71,11 +87,18 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         }
         player = nil
         currentItemID = nil
+        automaticallyPausedItemID = nil
         mediaController.resumePausedAppsImmediately()
     }
 
     func togglePause() {
+        if isGloballyPaused {
+            setGlobalPlaybackPaused(false)
+            return
+        }
+        guard !isSystemOutputMuted else { return }
         guard var item = currentItem, let player else { return }
+        automaticallyPausedItemID = nil
         if player.isPlaying {
             player.pause()
             item.status = .paused
@@ -85,6 +108,21 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         }
         try? store.save(item)
         replaceItem(item)
+    }
+
+    func toggleGlobalPlaybackPause() {
+        setGlobalPlaybackPaused(!isGloballyPaused)
+    }
+
+    func setGlobalPlaybackPaused(_ paused: Bool) {
+        guard paused != isGloballyPaused else { return }
+        do {
+            try store.setGlobalPlaybackPaused(paused)
+        } catch {
+            NSLog("Unable to update global TTS pause: %@", error.localizedDescription)
+            return
+        }
+        applyGlobalPlaybackPause(paused)
     }
 
     func rewind(seconds: TimeInterval = 15) {
@@ -115,6 +153,29 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         currentTime = player.currentTime
     }
 
+    func cyclePlaybackRate(for item: TTSItem) {
+        let current = currentItem?.id == item.id
+            ? playbackRate
+            : playbackRateStore.rate(for: item.voice)
+        setPlaybackRate(VoicePlaybackRateStore.nextRate(after: current), for: item)
+    }
+
+    func setPlaybackRate(_ rate: Float, for item: TTSItem) {
+        guard VoicePlaybackRateStore.availableRates.contains(where: { abs($0 - rate) < 0.001 }) else {
+            return
+        }
+        try? playbackRateStore.save(rate, for: item.voice)
+        playbackRate = rate
+        if currentItem?.id == item.id, let player {
+            player.enableRate = true
+            player.rate = rate
+        }
+    }
+
+    var playbackRateLabel: String {
+        VoicePlaybackRateStore.label(for: playbackRate)
+    }
+
     func replay(_ item: TTSItem, startingAt time: TimeInterval? = nil) {
         guard FileManager.default.fileExists(atPath: item.outputFile) else { return }
         do {
@@ -140,6 +201,16 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     private func refresh() {
         do {
+            let persistedPause = store.isGlobalPlaybackPaused()
+            if persistedPause != isGloballyPaused {
+                isGloballyPaused = persistedPause
+                updatePlaybackForBlockingState()
+            }
+            let outputMuted = outputIsMuted()
+            if outputMuted != isSystemOutputMuted {
+                isSystemOutputMuted = outputMuted
+                updatePlaybackForBlockingState()
+            }
             let loaded = try store.loadItems()
             if loaded != items {
                 items = loaded
@@ -153,7 +224,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                 if abs(duration - nextDuration) > 0.001 {
                     duration = nextDuration
                 }
-            } else if let next = loaded.first(where: { $0.status == .queued }) {
+            } else if !isPlaybackBlocked,
+                      let next = loaded.first(where: { $0.status == .queued }) {
                 play(next)
             }
         } catch {
@@ -162,6 +234,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     private func play(_ queuedItem: TTSItem) {
+        guard !isPlaybackBlocked else { return }
         guard FileManager.default.fileExists(atPath: queuedItem.outputFile) else {
             fail(queuedItem, message: "Audio file is no longer available.")
             return
@@ -170,6 +243,9 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         do {
             let audioPlayer = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: queuedItem.outputFile))
             audioPlayer.delegate = self
+            audioPlayer.enableRate = true
+            let preferredRate = playbackRateStore.rate(for: queuedItem.voice)
+            audioPlayer.rate = preferredRate
             audioPlayer.prepareToPlay()
 
             if let offset = queuedItem.playbackOffset {
@@ -185,32 +261,69 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             item.playbackOffset = nil
             try store.save(item)
 
-            let pausedMedia = mediaController.pausePlayingApps()
             player = audioPlayer
             currentItemID = item.id
             duration = audioPlayer.duration
             currentTime = audioPlayer.currentTime
+            playbackRate = preferredRate
             replaceItem(item)
-
-            if pausedMedia {
-                let delay = queuedItem.mediaHandoffDelay
-                    ?? TimeInterval(ProcessInfo.processInfo.environment["TTS_MEDIA_HANDOFF_DELAY_SECONDS"] ?? "2")
-                    ?? 2
-                playbackStartTask?.cancel()
-                playbackStartTask = Task { @MainActor [weak self, weak audioPlayer] in
-                    try? await Task.sleep(for: .seconds(max(0, delay)))
-                    guard !Task.isCancelled, let self, let audioPlayer, self.player === audioPlayer else { return }
-                    self.playbackStartTask = nil
-                    guard audioPlayer.play() else {
-                        self.finishCurrent(success: false, error: "The audio device refused playback.")
-                        return
-                    }
-                }
-            } else if !audioPlayer.play() {
-                finishCurrent(success: false, error: "The audio device refused playback.")
-            }
+            beginPlayback(audioPlayer, for: item)
         } catch {
             fail(queuedItem, message: error.localizedDescription)
+        }
+    }
+
+    private func applyGlobalPlaybackPause(_ paused: Bool) {
+        isGloballyPaused = paused
+        updatePlaybackForBlockingState()
+    }
+
+    private var isPlaybackBlocked: Bool {
+        isGloballyPaused || isSystemOutputMuted
+    }
+
+    private func updatePlaybackForBlockingState() {
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+
+        guard var item = currentItem, let player else { return }
+        if isPlaybackBlocked {
+            if item.status != .paused {
+                automaticallyPausedItemID = item.id
+            }
+            player.pause()
+            item.status = .paused
+            try? store.save(item)
+            replaceItem(item)
+            mediaController.resumePausedAppsImmediately()
+        } else if automaticallyPausedItemID == item.id {
+            automaticallyPausedItemID = nil
+            item.status = .playing
+            try? store.save(item)
+            replaceItem(item)
+            beginPlayback(player, for: item)
+        }
+    }
+
+    private func beginPlayback(_ audioPlayer: AVAudioPlayer, for item: TTSItem) {
+        let pausedMedia = mediaController.pausePlayingApps()
+        if pausedMedia {
+            let delay = item.mediaHandoffDelay
+                ?? TimeInterval(ProcessInfo.processInfo.environment["TTS_MEDIA_HANDOFF_DELAY_SECONDS"] ?? "2")
+                ?? 2
+            playbackStartTask?.cancel()
+            playbackStartTask = Task { @MainActor [weak self, weak audioPlayer] in
+                try? await Task.sleep(for: .seconds(max(0, delay)))
+                guard !Task.isCancelled, let self, let audioPlayer, self.player === audioPlayer else { return }
+                self.playbackStartTask = nil
+                guard !self.isPlaybackBlocked else { return }
+                guard audioPlayer.play() else {
+                    self.finishCurrent(success: false, error: "The audio device refused playback.")
+                    return
+                }
+            }
+        } else if !audioPlayer.play() {
+            finishCurrent(success: false, error: "The audio device refused playback.")
         }
     }
 
@@ -226,6 +339,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
         player = nil
         currentItemID = nil
+        automaticallyPausedItemID = nil
         currentTime = 0
         duration = 0
         replaceItem(item)
