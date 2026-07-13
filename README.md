@@ -45,6 +45,14 @@ It finds the strongest honest hook, proof, first useful loop, trust boundary, an
 
 [See how a repository becomes a product-shaped project →](repo-marketing/README.md)
 
+### [Meta Feedback: Turn Skill Friction into Evidence](meta-feedback/SKILL.md)
+
+Skills rarely fail in clean, repeatable ways. An instruction is ambiguous, a trigger misses, or a user has to correct the agent—and the useful evidence disappears into the session.
+
+`meta-feedback` records that concrete incident beside the target skill as a canonical Markdown issue, including the context, impact, workaround, and exact skill revision. Repeated incidents accumulate without pretending one observation proves the fix.
+
+[See how real skill friction becomes a durable issue →](meta-feedback/SKILL.md)
+
 ### [Design Exploration Capture: Preserve the Path to a Decision](design-exploration-capture/README.md)
 
 The hardest design discussions do not fail from a lack of ideas. They fail when assumptions quietly become decisions, rejected options return without context, or implementation begins before the important uncertainty is gone.
@@ -78,6 +86,7 @@ The repository includes a WorktreeGuard plugin for keeping agent mutations out o
 Most skill folders contain instructions and reference material only. The exceptions are explicit:
 
 - `tts` sends supplied text to the Kokoro-compatible endpoint you configure, writes generated audio under `/tmp`, stores queue state under `~/.local/state/tts`, and may control Music or Spotify on macOS unless disabled.
+- `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
 - `design-exploration-capture` may create or update local exploration notes while a design session is active.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
 - The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
