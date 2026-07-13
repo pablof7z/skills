@@ -220,6 +220,8 @@ struct QueueStoreTests {
         original.startedAt = 11
         original.completedAt = 12
         original.wordTimings = [timing("A", 0, 0.2)]
+        original.attachments = [attachment()]
+        original.assetDirectory = "/tmp/brief"
 
         let replay = original.replayCopy(now: 20)
 
@@ -234,6 +236,79 @@ struct QueueStoreTests {
         #expect(replay.completedAt == nil)
         #expect(replay.playbackOffset == nil)
         #expect(replay.wordTimings == original.wordTimings)
+        #expect(replay.attachments == original.attachments)
+        #expect(replay.assetDirectory == original.assetDirectory)
+    }
+
+    @Test
+    func createsAssociatedAttachmentPlaybackThatCanReturnToParent() throws {
+        var brief = item(id: "brief", createdAt: 10)
+        brief.attachments = [attachment()]
+        let value = try #require(
+            brief.attachmentPlaybackItem(attachment(), now: 20, returnTo: 12.5)
+        )
+
+        #expect(value.isAttachmentPlayback)
+        #expect(value.parentItemID == "brief")
+        #expect(value.attachmentID == "why")
+        #expect(value.returnToPlaybackOffset == 12.5)
+        #expect(value.outputFile == "/tmp/why.mp3")
+        #expect(value.text == "# Why this matters\n\nUseful detail.")
+        #expect(value.subject == "Why this matters")
+        #expect(value.attachments == brief.attachments)
+        #expect(value.status == .queued)
+    }
+
+    @Test @MainActor
+    func supplementalPlaybackDoesNotInflateVisibleQueueOrHistory() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        let main = item(id: "main", createdAt: 10)
+        var supplemental = item(id: "supplemental", createdAt: 20)
+        supplemental.parentItemID = "main"
+        supplemental.attachmentID = "why"
+        try store.save(main)
+        try store.save(supplemental)
+        let controller = PlaybackController(
+            store: store,
+            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            outputIsMuted: { true }
+        )
+        defer { controller.shutdown() }
+
+        controller.start()
+
+        #expect(controller.queuedItems.map(\.id) == ["main"])
+    }
+
+    @Test
+    func playbackStateSaveCannotClobberPreparedAttachmentAudio() throws {
+        var stale = attachment()
+        stale.status = .preparing
+        stale.audioFile = "/tmp/pending.mp3"
+        stale.wordTimings = nil
+        var prepared = attachment()
+        prepared.status = .ready
+
+        let merged = QueueStore.mergingPreparedAttachments([stale], with: [prepared])
+
+        #expect(merged == [prepared])
+        #expect(QueueStore.mergingPreparedAttachments(nil, with: [prepared]) == [prepared])
+    }
+
+    @Test
+    func attachmentLoadsCopiedMarkdownOnlyWhenNeeded() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let source = directory.appendingPathComponent("source.md")
+        try Data("# Durable detail\n\nThe copied file owns this text.".utf8).write(to: source)
+        var value = attachment()
+        value.sourceFile = source.path
+        value.text = nil
+
+        #expect(value.displayText == "# Durable detail\n\nThe copied file owns this text.")
     }
 
     @Test
@@ -514,6 +589,11 @@ struct QueueStoreTests {
         object.removeValue(forKey: "subject")
         object.removeValue(forKey: "playback_offset")
         object.removeValue(forKey: "word_timings")
+        object.removeValue(forKey: "attachments")
+        object.removeValue(forKey: "asset_directory")
+        object.removeValue(forKey: "parent_item_id")
+        object.removeValue(forKey: "attachment_id")
+        object.removeValue(forKey: "return_to_playback_offset")
 
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TTSItem.self, from: legacyData)
@@ -521,6 +601,9 @@ struct QueueStoreTests {
         #expect(decoded.subject == nil)
         #expect(decoded.playbackOffset == nil)
         #expect(decoded.wordTimings == nil)
+        #expect(decoded.attachments == nil)
+        #expect(decoded.assetDirectory == nil)
+        #expect(!decoded.isAttachmentPlayback)
     }
 
     @Test
@@ -573,5 +656,19 @@ struct QueueStoreTests {
 
     private func timing(_ word: String, _ start: Double, _ end: Double) -> TTSWordTiming {
         TTSWordTiming(word: word, startTime: start, endTime: end)
+    }
+
+    private func attachment() -> TTSAttachment {
+        TTSAttachment(
+            id: "why",
+            label: "Why this matters",
+            kind: .narratedText,
+            status: .ready,
+            sourceFile: "/tmp/why.md",
+            text: "# Why this matters\n\nUseful detail.",
+            audioFile: "/tmp/why.mp3",
+            wordTimings: [timing("Useful", 0, 0.4)],
+            error: nil
+        )
     }
 }

@@ -55,11 +55,34 @@ struct QueueStore {
 
     func save(_ item: TTSItem) throws {
         try prepare()
+        let destination = itemsDirectory.appendingPathComponent("\(item.id).json")
+        var value = item
+        if let data = try? Data(contentsOf: destination),
+           let existing = try? JSONDecoder().decode(TTSItem.self, from: data) {
+            value.attachments = Self.mergingPreparedAttachments(
+                value.attachments,
+                with: existing.attachments
+            )
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(item)
-        let destination = itemsDirectory.appendingPathComponent("\(item.id).json")
+        let data = try encoder.encode(value)
         try data.write(to: destination, options: .atomic)
+    }
+
+    static func mergingPreparedAttachments(
+        _ proposed: [TTSAttachment]?,
+        with persisted: [TTSAttachment]?
+    ) -> [TTSAttachment]? {
+        guard let proposed else { return persisted }
+        guard let persisted else { return proposed }
+        let persistedByID = Dictionary(uniqueKeysWithValues: persisted.map { ($0.id, $0) })
+        return proposed.map { attachment in
+            guard attachment.status == .preparing,
+                  let durable = persistedByID[attachment.id],
+                  durable.status != .preparing else { return attachment }
+            return durable
+        }
     }
 
     func isGlobalPlaybackPaused() -> Bool {
