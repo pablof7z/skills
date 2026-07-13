@@ -64,12 +64,16 @@ struct TTSItem: Codable, Identifiable, Equatable {
         return URL(fileURLWithPath: workspace).lastPathComponent
     }
 
+    var workspacePath: String? {
+        nonempty(workspace)
+    }
+
     var nowSpeakingTitle: String {
         subjectLabel ?? text
     }
 
     var nowSpeakingContext: String {
-        [displayAgent, workspaceName]
+        [displayAgent, workspacePath]
             .compactMap { $0 }
             .joined(separator: " · ")
     }

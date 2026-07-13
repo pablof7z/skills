@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import TTSMenuBar
 
@@ -73,14 +74,15 @@ struct QueueStoreTests {
     }
 
     @Test
-    func buildsNowSpeakingContextFromAgentAndWorkspace() {
+    func buildsNowSpeakingContextFromAgentAndFullWorkspacePath() {
         var value = item(id: "hud", createdAt: 10)
         value.subject = "The passive speaking cue is ready"
         value.agentName = "river-codex"
         value.workspace = "/Users/pablofernandez/Work/skills"
 
         #expect(value.nowSpeakingTitle == "The passive speaking cue is ready")
-        #expect(value.nowSpeakingContext == "river-codex · skills")
+        #expect(value.workspacePath == "/Users/pablofernandez/Work/skills")
+        #expect(value.nowSpeakingContext == "river-codex · /Users/pablofernandez/Work/skills")
     }
 
     @Test
@@ -89,6 +91,62 @@ struct QueueStoreTests {
         value.subject = nil
 
         #expect(value.nowSpeakingTitle == value.text)
+    }
+
+    @Test
+    func derivesStableAccentFromGitProjectRoot() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = directory.appendingPathComponent("recognizable-project", isDirectory: true)
+        let nested = project.appendingPathComponent("Sources/Feature", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: project.appendingPathComponent(".git", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+
+        #expect(WorkspaceAccent.projectLabel(forWorkspacePath: nested.path) == "recognizable-project")
+        #expect(
+            WorkspaceAccent.paletteIndex(forWorkspacePath: nested.path)
+                == WorkspaceAccent.paletteIndex(forWorkspacePath: project.path)
+        )
+    }
+
+    @Test
+    func recognizesGitWorktreeMarkerFile() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let worktree = directory.appendingPathComponent("feature-worktree", isDirectory: true)
+        let nested = worktree.appendingPathComponent("src", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Data("gitdir: /tmp/repo/.git/worktrees/feature\n".utf8).write(
+            to: worktree.appendingPathComponent(".git")
+        )
+
+        #expect(WorkspaceAccent.projectLabel(forWorkspacePath: nested.path) == "feature-worktree")
+    }
+
+    @Test
+    func fallsBackToWorkspaceBasenameOutsideGit() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let workspace = directory.appendingPathComponent("standalone-workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let index = WorkspaceAccent.paletteIndex(forWorkspacePath: workspace.path)
+
+        #expect(WorkspaceAccent.projectLabel(forWorkspacePath: workspace.path) == "standalone-workspace")
+        #expect(index >= 0 && index < WorkspaceAccent.count)
+        #expect(index == WorkspaceAccent.paletteIndex(forWorkspacePath: workspace.path))
+    }
+
+    @Test
+    func mapsTranscriptWordsToPlaybackTime() {
+        #expect(TranscriptTiming.activeWordIndex(currentTime: 0, duration: 100, wordCount: 10) == 0)
+        #expect(TranscriptTiming.activeWordIndex(currentTime: 52, duration: 100, wordCount: 10) == 5)
+        #expect(TranscriptTiming.activeWordIndex(currentTime: 100, duration: 100, wordCount: 10) == 9)
+        #expect(TranscriptTiming.time(forWordAt: 5, wordCount: 10, duration: 100) == 50)
+        #expect(TranscriptTiming.time(forWordAt: 99, wordCount: 10, duration: 100) == 90)
     }
 
     @MainActor
@@ -104,6 +162,10 @@ struct QueueStoreTests {
         #expect(!panel.canBecomeKey)
         #expect(!panel.canBecomeMain)
         #expect(panel.styleMask.contains(.nonactivatingPanel))
+        #expect(!panel.ignoresMouseEvents)
+
+        let hostingView = FirstMouseHostingView(rootView: EmptyView())
+        #expect(hostingView.acceptsFirstMouse(for: nil))
     }
 
     @Test

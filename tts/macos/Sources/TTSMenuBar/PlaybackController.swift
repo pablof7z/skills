@@ -92,6 +92,12 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         skip(by: seconds)
     }
 
+    func stop() {
+        guard player != nil else { return }
+        player?.stop()
+        finishCurrent(success: true, error: nil)
+    }
+
     private func skip(by seconds: TimeInterval) {
         guard let player else { return }
         player.currentTime = min(max(0, player.currentTime + seconds), player.duration)
