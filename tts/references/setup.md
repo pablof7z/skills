@@ -13,6 +13,7 @@ Set this environment variable before running `./scripts/tts`:
 - `KOKORO_API_KEY` for bearer-token auth
 - `KOKORO_CAPTIONED_API_ENDPOINT` to override the inferred
   `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
+- `TTS_MEDIA_HANDOFF_DELAY_SECONDS` to change the two-second gap between pausing active media and starting speech
 - Swift from Xcode or the Command Line Tools for the macOS menu-bar app
 
 ## Suggested local env file

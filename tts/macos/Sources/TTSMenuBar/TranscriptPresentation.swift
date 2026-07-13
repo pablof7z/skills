@@ -86,7 +86,10 @@ struct TranscriptDocument: Equatable {
                     high = middle
                 }
             }
-            let resolved = preciseIndices[max(0, low - 1)]
+            guard low > 0 else {
+                return TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
+            }
+            let resolved = preciseIndices[low - 1]
             return TranscriptPlaybackState(
                 activeWordIndex: resolved,
                 activePhraseIndex: words[resolved].phraseIndex
@@ -157,19 +160,45 @@ struct TranscriptDocument: Equatable {
         }
 
         let source = text as NSString
+        let sourceTokens = sourceRanges.map { normalizedToken(source.substring(with: $0)) }
         var result = Array<AlignedTiming?>(repeating: nil, count: sourceRanges.count)
-        var providerIndex = 0
+        let candidateStarts = provider.indices.filter {
+            tokensCorrespond(sourceTokens[0], provider[$0].normalized)
+        }
+        var providerIndex = candidateStarts.max { left, right in
+            let leftScore = alignmentScore(sourceTokens: sourceTokens, provider: provider, startingAt: left)
+            let rightScore = alignmentScore(sourceTokens: sourceTokens, provider: provider, startingAt: right)
+            return leftScore == rightScore ? left < right : leftScore < rightScore
+        } ?? 0
         for (sourceIndex, range) in sourceRanges.enumerated() where providerIndex < provider.count {
             let normalizedSource = normalizedToken(source.substring(with: range))
             let searchEnd = min(provider.count, providerIndex + 5)
             let match = (providerIndex..<searchEnd).first {
                 tokensCorrespond(normalizedSource, provider[$0].normalized)
             }
-            let resolved = match ?? providerIndex
+            guard let resolved = match else { continue }
             result[sourceIndex] = provider[resolved].timing
             providerIndex = resolved + 1
         }
         return result
+    }
+
+    private static func alignmentScore(
+        sourceTokens: [String],
+        provider: [(normalized: String, timing: AlignedTiming)],
+        startingAt start: Int
+    ) -> Int {
+        var providerIndex = start
+        var score = 0
+        for sourceToken in sourceTokens where providerIndex < provider.count {
+            let searchEnd = min(provider.count, providerIndex + 5)
+            guard let match = (providerIndex..<searchEnd).first(where: {
+                tokensCorrespond(sourceToken, provider[$0].normalized)
+            }) else { continue }
+            score += 1
+            providerIndex = match + 1
+        }
+        return score
     }
 
     private static func buildPhrases(

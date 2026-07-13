@@ -66,12 +66,16 @@ playback queue, shows queued/current/recent speech, and provides pause, resume,
 uses a podcast-style player with a stable read-along transcript. When the
 endpoint supports captioned speech, a softly focused phrase preserves context
 while an exact word playhead follows synthesis timestamps; clicking a word
-seeks to its real audio boundary.
+seeks to its real audio boundary. The transcript shows only the agent's message,
+not the spoken introduction or subject, and preserves paragraphs, lists,
+headings, emphasis, links, and code-oriented Markdown styling.
 While an item is playing or paused, the popup focuses on its full player and
 transcript; the queue and recent history return when playback becomes idle.
 Queue rows include the text, voice, agent name, and any harness, full session
 identifier, subject, and workspace metadata available in the calling
-environment.
+environment. In linked Git worktrees, the base repository is the primary
+project label and a differing checkout name appears as secondary context; the
+accent color remains stable across all worktrees of that project.
 
 Use `scripts/tts-menu status` to check whether TTS is playing and inspect queue
 counts. Use `scripts/tts-menu status --json` for structured status. Use
@@ -81,14 +85,15 @@ If the native app is disabled or cannot start, background playback workers use
 the speech gate so only one audible TTS job speaks at a time. Set
 `TTS_MACOS_MENU=0` to force this fallback.
 
-On macOS, the script checks scriptable media apps before generation and the
-active playback backend checks again before playback. If Music or Spotify is
-already playing, it pauses them and resumes them a few seconds after playback
-ends.
+On macOS, media keeps playing while audio is generated. Once the MP3 has fully
+arrived, the playback backend checks Music and Spotify. If it actually pauses
+one of them, it leaves a two-second handoff before speech begins, then resumes
+the paused apps a few seconds after playback ends.
 
 - Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
 - Use `--voice-id voice` to choose an explicit voice.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
+- Use `--handoff-delay seconds` or `TTS_MEDIA_HANDOFF_DELAY_SECONDS=seconds` to change the post-pause handoff.
 - Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
 - Use `TTS_MEDIA_APPS="Music,Spotify"` to customize the checked apps.
 

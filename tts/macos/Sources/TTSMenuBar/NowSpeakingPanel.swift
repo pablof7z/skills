@@ -423,13 +423,24 @@ private struct NowSpeakingHUDView: View {
                                 .foregroundStyle(accent.opacity(0.9))
                                 .accessibilityHidden(true)
                             Text(workspaceLabel)
+                                .fontWeight(.semibold)
                                 .truncationMode(.middle)
+                            if let worktreeLabel = item.workspaceWorktreeLabel {
+                                Text("·")
+                                    .foregroundStyle(.tertiary)
+                                Text(worktreeLabel)
+                                    .truncationMode(.middle)
+                            }
                         }
                         .font(presentation.isExpanded ? .caption : .caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Workspace \(workspaceLabel)")
+                        .accessibilityLabel(
+                            item.workspaceWorktreeLabel.map {
+                                "Project \(workspaceLabel), worktree \($0)"
+                            } ?? "Project \(workspaceLabel)"
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

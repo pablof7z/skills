@@ -1,6 +1,12 @@
 import Foundation
 import SwiftUI
 
+struct WorkspaceIdentity: Equatable {
+    let project: String
+    let worktree: String?
+    let display: String
+}
+
 enum WorkspaceAccent {
     private static let palette: [Color] = [
         Color(red: 0.35, green: 0.67, blue: 1.00),
@@ -30,19 +36,36 @@ enum WorkspaceAccent {
     }
 
     static func projectLabel(forWorkspacePath path: String?) -> String {
-        guard let workspaceURL = workspaceURL(for: path) else { return "unknown" }
-        if let projectRoot = nearestGitRoot(from: workspaceURL) {
-            return projectRoot.lastPathComponent
-        }
-        return workspaceURL.lastPathComponent
+        identity(forWorkspacePath: path)?.project ?? "unknown"
     }
 
     static func displayLabel(forWorkspacePath path: String?) -> String? {
+        identity(forWorkspacePath: path)?.display
+    }
+
+    static func worktreeLabel(forWorkspacePath path: String?) -> String? {
+        identity(forWorkspacePath: path)?.worktree
+    }
+
+    static func identity(
+        forWorkspacePath path: String?,
+        fileManager: FileManager = .default
+    ) -> WorkspaceIdentity? {
         guard let workspaceURL = workspaceURL(for: path) else { return nil }
-        if let projectRoot = nearestGitRoot(from: workspaceURL) {
-            return projectRoot.lastPathComponent
+        if let projectRoot = nearestGitRoot(from: workspaceURL, fileManager: fileManager) {
+            let checkout = projectRoot.lastPathComponent
+            let project = commonProjectName(forGitRoot: projectRoot, fileManager: fileManager) ?? checkout
+            return WorkspaceIdentity(
+                project: project,
+                worktree: project == checkout ? nil : checkout,
+                display: project
+            )
         }
-        return path?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WorkspaceIdentity(
+            project: workspaceURL.lastPathComponent,
+            worktree: nil,
+            display: path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? workspaceURL.path
+        )
     }
 
     static func nearestGitRoot(
@@ -67,6 +90,48 @@ enum WorkspaceAccent {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return URL(fileURLWithPath: trimmed, isDirectory: true).standardizedFileURL
+    }
+
+    private static func commonProjectName(
+        forGitRoot root: URL,
+        fileManager: FileManager
+    ) -> String? {
+        let marker = root.appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: marker.path, isDirectory: &isDirectory) else { return nil }
+        if isDirectory.boolValue { return root.lastPathComponent }
+
+        guard let markerText = try? String(contentsOf: marker, encoding: .utf8),
+              let gitdirLine = markerText.split(whereSeparator: \.isNewline).first,
+              gitdirLine.lowercased().hasPrefix("gitdir:") else { return nil }
+        let rawGitDirectory = gitdirLine.dropFirst("gitdir:".count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawGitDirectory.isEmpty else { return nil }
+        let gitDirectory = resolvedURL(rawGitDirectory, relativeTo: root)
+
+        let commonDirectory: URL
+        let commonMarker = gitDirectory.appendingPathComponent("commondir")
+        if let commonText = try? String(contentsOf: commonMarker, encoding: .utf8) {
+            let rawCommon = commonText.trimmingCharacters(in: .whitespacesAndNewlines)
+            commonDirectory = resolvedURL(rawCommon, relativeTo: gitDirectory)
+        } else if gitDirectory.deletingLastPathComponent().lastPathComponent == "worktrees" {
+            commonDirectory = gitDirectory.deletingLastPathComponent().deletingLastPathComponent()
+        } else {
+            commonDirectory = gitDirectory
+        }
+
+        if commonDirectory.lastPathComponent == ".git" {
+            return commonDirectory.deletingLastPathComponent().lastPathComponent
+        }
+        let name = commonDirectory.lastPathComponent
+        return name.hasSuffix(".git") ? String(name.dropLast(4)) : name
+    }
+
+    private static func resolvedURL(_ path: String, relativeTo base: URL) -> URL {
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+        }
+        return base.appendingPathComponent(path, isDirectory: true).standardizedFileURL
     }
 }
 

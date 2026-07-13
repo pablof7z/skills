@@ -172,12 +172,14 @@ usage() {
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
   echo "  --no-play                  Print target MP3 path and generate it without playback." >&2
   echo "  --no-media-pause           Do not pause/resume media apps." >&2
+  echo "  --handoff-delay seconds    Gap after pausing active media before speech (default: 2)." >&2
   echo "  --resume-delay seconds     Delay before resuming paused media." >&2
   echo "Example: ./scripts/tts --agent-name quinn-delta-306 --introduction 'Agent Quinn here, working on TTS.' --subject 'Playback queue ownership is now explicit' 'The fix is ready.'" >&2
 }
 
 NO_PLAY=0
 MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
+HANDOFF_DELAY="${TTS_MEDIA_HANDOFF_DELAY_SECONDS:-2}"
 RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
 INTRODUCTION=""
 SUBJECT=""
@@ -305,7 +307,7 @@ queue_macos_playback() {
   if ! python3 - \
     "$temporary_file" \
     "$item_id" \
-    "$TEXT" \
+    "$DISPLAY_TEXT" \
     "$SUBJECT" \
     "$inferred_agent" \
     "$harness" \
@@ -314,6 +316,7 @@ queue_macos_playback() {
     "$VOICE" \
     "$OUTPUT_FILE" \
     "$TIMESTAMPS_FILE" \
+    "$HANDOFF_DELAY" \
     "$(date +%s)" <<'PY'
 import json
 import os
@@ -331,6 +334,7 @@ import sys
     voice,
     output_file,
     timestamps_file,
+    media_handoff_delay,
     created_at,
 ) = sys.argv[1:]
 
@@ -364,6 +368,7 @@ item = {
     "duration": None,
     "error": None,
     "word_timings": word_timings,
+    "media_handoff_delay": float(media_handoff_delay),
 }
 
 with open(destination, "w", encoding="utf-8") as handle:
@@ -379,6 +384,7 @@ PY
   mv "$temporary_file" "$item_file"
   if env \
     TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
+    TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
     TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
     "$menu_command" start >/dev/null; then
     record_agent_spoken
@@ -400,6 +406,14 @@ while [ "$#" -gt 0 ]; do
     --no-media-pause)
       MEDIA_CONTROL=0
       shift
+      ;;
+    --handoff-delay)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --handoff-delay requires a value in seconds." >&2
+        exit 1
+      fi
+      HANDOFF_DELAY="$2"
+      shift 2
       ;;
     --resume-delay)
       if [ -z "${2:-}" ]; then
@@ -496,7 +510,13 @@ if [ -n "$VOICE_ID" ] && [ -n "${POSITIONAL[1]:-}" ]; then
   exit 1
 fi
 
-TEXT=$(normalize_space "${POSITIONAL[0]:-}")
+if ! [[ "$HANDOFF_DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "Error: --handoff-delay must be a non-negative number of seconds." >&2
+  exit 1
+fi
+
+DISPLAY_TEXT="${POSITIONAL[0]:-}"
+TEXT=$(normalize_space "$DISPLAY_TEXT")
 INTRODUCTION=$(normalize_space "$INTRODUCTION")
 SUBJECT=$(normalize_space "$SUBJECT")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
@@ -639,6 +659,9 @@ if [ -n "$PLAY_EXISTING_FILE" ]; then
   acquire_speech_gate
   record_agent_spoken
   pause_media_if_playing
+  if [ "${#PAUSED_MEDIA_APPS[@]}" -gt 0 ]; then
+    sleep "$HANDOFF_DELAY" 2>/dev/null || true
+  fi
 
   PLAYED=0
   if command -v afplay >/dev/null 2>&1; then
@@ -701,8 +724,6 @@ if [ -n "${KOKORO_API_KEY:-}" ]; then
 elif [ -n "${KOKORO_API_USERNAME:-}" ] && [ -n "${KOKORO_API_PASSWORD:-}" ]; then
   AUTH_OPTS+=( -u "$KOKORO_API_USERNAME:$KOKORO_API_PASSWORD" )
 fi
-
-pause_media_if_playing
 
 set +e
 HTTP_CODE=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
@@ -832,6 +853,7 @@ fi
 nohup env \
   TTS_CALLER_PPID="${TTS_CALLER_PPID:-$PPID}" \
   TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
+  TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
   TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
   "$0" "${playback_args[@]}" \
   </dev/null >>"$log_file" 2>&1 &
