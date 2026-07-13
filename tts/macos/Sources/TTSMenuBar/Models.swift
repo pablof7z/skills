@@ -16,6 +16,18 @@ enum PlaybackStatus: String, Codable, CaseIterable {
     }
 }
 
+struct TTSWordTiming: Codable, Equatable {
+    var word: String
+    var startTime: Double
+    var endTime: Double
+
+    enum CodingKeys: String, CodingKey {
+        case word
+        case startTime = "start_time"
+        case endTime = "end_time"
+    }
+}
+
 struct TTSItem: Codable, Identifiable, Equatable {
     var id: String
     var text: String
@@ -33,6 +45,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var duration: Double?
     var error: String?
     var playbackOffset: Double? = nil
+    var wordTimings: [TTSWordTiming]? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -51,6 +64,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case duration
         case error
         case playbackOffset = "playback_offset"
+        case wordTimings = "word_timings"
     }
 
     var displayAgent: String {
@@ -112,7 +126,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
             completedAt: nil,
             duration: duration,
             error: nil,
-            playbackOffset: playbackOffset
+            playbackOffset: playbackOffset,
+            wordTimings: wordTimings
         )
     }
 }

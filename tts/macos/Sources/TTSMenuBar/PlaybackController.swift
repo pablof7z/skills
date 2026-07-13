@@ -136,10 +136,18 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private func refresh() {
         do {
             let loaded = try store.loadItems()
-            items = loaded
+            if loaded != items {
+                items = loaded
+            }
             if let player {
-                currentTime = player.currentTime
-                duration = player.duration
+                let nextTime = player.currentTime
+                let nextDuration = player.duration
+                if abs(currentTime - nextTime) > 0.001 {
+                    currentTime = nextTime
+                }
+                if abs(duration - nextDuration) > 0.001 {
+                    duration = nextDuration
+                }
             } else if let next = loaded.first(where: { $0.status == .queued }) {
                 play(next)
             }

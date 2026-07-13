@@ -63,7 +63,10 @@ command returns.
 On macOS, the first audible request starts a resident menu-bar app. It owns the
 playback queue, shows queued/current/recent speech, and provides pause, resume,
 15-second skip controls, and replay by clicking a recent row. The current item
-uses a podcast-style player with an approximate word-progress transcript.
+uses a podcast-style player with a stable read-along transcript. When the
+endpoint supports captioned speech, a softly focused phrase preserves context
+while an exact word playhead follows synthesis timestamps; clicking a word
+seeks to its real audio boundary.
 While an item is playing or paused, the popup focuses on its full player and
 transcript; the queue and recent history return when playback becomes idle.
 Queue rows include the text, voice, agent name, and any harness, full session

@@ -78,7 +78,9 @@ final class NowSpeakingPanelController {
         if presentation.lingeringItem != nil || lingerTask != nil || isFading {
             cancelLingerDismissal(resetCountdown: true, restoreOpacity: true)
         }
-        presentation.lingeringItem = nil
+        if presentation.lingeringItem != nil {
+            presentation.lingeringItem = nil
+        }
         lastCurrentItem = item
         lastDuration = max(playbackController.duration, item.duration ?? 0)
 
@@ -128,6 +130,7 @@ final class NowSpeakingPanelController {
         presentation.isProminent = true
         positionPanel(size: Layout.playerSize)
         panel.alphaValue = 0
+        NSApp.unhideWithoutActivation()
         panel.orderFrontRegardless()
 
         NSAnimationContext.runAnimationGroup { context in
@@ -162,6 +165,12 @@ final class NowSpeakingPanelController {
         }
         let frame = frameFor(size: size)
         let alpha: CGFloat = presentation.isExpanded ? 1 : 0.84
+        guard HUDLayoutUpdate.isNeeded(
+            currentFrame: panel.frame,
+            targetFrame: frame,
+            currentAlpha: panel.alphaValue,
+            targetAlpha: alpha
+        ) else { return }
 
         guard animated else {
             panel.setFrame(frame, display: true)
@@ -171,8 +180,12 @@ final class NowSpeakingPanelController {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.24
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(frame, display: true)
-            panel.animator().alphaValue = alpha
+            if !panel.frame.equalTo(frame) {
+                panel.animator().setFrame(frame, display: true)
+            }
+            if abs(panel.alphaValue - alpha) > 0.001 {
+                panel.animator().alphaValue = alpha
+            }
         }
     }
 
@@ -357,8 +370,9 @@ private struct NowSpeakingHUDView: View {
 
                 if presentation.isTranscriptVisible {
                     Divider().overlay(Color.white.opacity(0.11))
-                    WordTranscriptView(
+                    ReadAlongTranscriptView(
                         text: item.text,
+                        timings: item.wordTimings,
                         currentTime: playbackTime,
                         duration: playbackDuration,
                         accent: accent,
@@ -573,154 +587,6 @@ private struct NowSpeakingHUDView: View {
         guard seconds.isFinite else { return "0:00" }
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
-
-private struct WordTranscriptView: View {
-    let text: String
-    let currentTime: TimeInterval
-    let duration: TimeInterval
-    let accent: Color
-    let onSeek: (TimeInterval) -> Void
-    @State private var hoveredIndex: Int?
-
-    private var words: [String] {
-        text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
-    }
-
-    private var activeIndex: Int? {
-        TranscriptTiming.activeWordIndex(
-            currentTime: currentTime,
-            duration: duration,
-            wordCount: words.count
-        )
-    }
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                WordFlowLayout(horizontalSpacing: 4, verticalSpacing: 3) {
-                    ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                        let decoration = TranscriptWordDecoration.resolve(
-                            isCurrent: index == activeIndex,
-                            isHovered: index == hoveredIndex
-                        )
-                        Button {
-                            onSeek(TranscriptTiming.time(
-                                forWordAt: index,
-                                wordCount: words.count,
-                                duration: duration
-                            ))
-                        } label: {
-                            Text(word)
-                                .font(.body.weight(index == activeIndex ? .semibold : .regular))
-                                .foregroundStyle(wordColor(at: index))
-                                .background {
-                                    if decoration.accentOpacity > 0 {
-                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                            .fill(accent.opacity(decoration.accentOpacity))
-                                            .padding(.horizontal, -3)
-                                            .padding(.vertical, -2)
-                                    }
-                                }
-                                .scaleEffect(decoration.scale)
-                                .offset(y: decoration.verticalOffset)
-                                .contentShape(Rectangle().inset(by: -2))
-                        }
-                        .buttonStyle(.plain)
-                        .onHover { isHovered in
-                            if isHovered {
-                                hoveredIndex = index
-                                NSCursor.pointingHand.set()
-                            } else if hoveredIndex == index {
-                                hoveredIndex = nil
-                                NSCursor.arrow.set()
-                            }
-                        }
-                        .animation(.easeOut(duration: 0.12), value: decoration)
-                        .id(index)
-                        .accessibilityLabel("Seek to \(word)")
-                    }
-                }
-                .padding(.horizontal, 3)
-                .padding(.vertical, 4)
-            }
-            .scrollIndicators(.hidden)
-            .onAppear {
-                guard let activeIndex else { return }
-                proxy.scrollTo(activeIndex, anchor: .center)
-            }
-            .onChange(of: activeIndex) { newIndex in
-                guard let newIndex else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(newIndex, anchor: .center)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .accessibilityLabel("Interactive transcript")
-        .onDisappear {
-            NSCursor.arrow.set()
-        }
-    }
-
-    private func wordColor(at index: Int) -> Color {
-        guard let activeIndex else { return .secondary }
-        if index < activeIndex { return .primary.opacity(0.88) }
-        if index == activeIndex { return accent }
-        return .secondary.opacity(0.62)
-    }
-}
-
-private struct WordFlowLayout: Layout {
-    let horizontalSpacing: CGFloat
-    let verticalSpacing: CGFloat
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) -> CGSize {
-        let maximumWidth = proposal.width ?? .infinity
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > maximumWidth {
-                x = 0
-                y += rowHeight + verticalSpacing
-                rowHeight = 0
-            }
-            x += size.width + horizontalSpacing
-            rowHeight = max(rowHeight, size.height)
-        }
-
-        return CGSize(width: proposal.width ?? max(0, x - horizontalSpacing), height: y + rowHeight)
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + verticalSpacing
-                rowHeight = 0
-            }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + horizontalSpacing
-            rowHeight = max(rowHeight, size.height)
-        }
     }
 }
 
