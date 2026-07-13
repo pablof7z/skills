@@ -28,6 +28,53 @@ struct TTSWordTiming: Codable, Equatable {
     }
 }
 
+enum TTSAttachmentKind: String, Codable, Equatable {
+    case narratedText = "narrated_text"
+    case image
+    case audio
+    case file
+}
+
+enum TTSAttachmentStatus: String, Codable, Equatable {
+    case preparing
+    case ready
+    case failed
+}
+
+struct TTSAttachment: Codable, Identifiable, Equatable {
+    var id: String
+    var label: String
+    var kind: TTSAttachmentKind
+    var status: TTSAttachmentStatus
+    var sourceFile: String
+    var text: String? = nil
+    var audioFile: String? = nil
+    var wordTimings: [TTSWordTiming]? = nil
+    var error: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case kind
+        case status
+        case sourceFile = "source_file"
+        case text
+        case audioFile = "audio_file"
+        case wordTimings = "word_timings"
+        case error
+    }
+
+    var isPlayable: Bool {
+        status == .ready && audioFile != nil
+    }
+
+    var displayText: String? {
+        if let text, !text.isEmpty { return text }
+        guard kind == .narratedText else { return nil }
+        return try? String(contentsOfFile: sourceFile, encoding: .utf8)
+    }
+}
+
 struct TTSItem: Codable, Identifiable, Equatable {
     var id: String
     var text: String
@@ -47,6 +94,11 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var playbackOffset: Double? = nil
     var wordTimings: [TTSWordTiming]? = nil
     var mediaHandoffDelay: Double? = nil
+    var attachments: [TTSAttachment]? = nil
+    var assetDirectory: String? = nil
+    var parentItemID: String? = nil
+    var attachmentID: String? = nil
+    var returnToPlaybackOffset: Double? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -67,6 +119,11 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case playbackOffset = "playback_offset"
         case wordTimings = "word_timings"
         case mediaHandoffDelay = "media_handoff_delay"
+        case attachments
+        case assetDirectory = "asset_directory"
+        case parentItemID = "parent_item_id"
+        case attachmentID = "attachment_id"
+        case returnToPlaybackOffset = "return_to_playback_offset"
     }
 
     var displayAgent: String {
@@ -112,6 +169,14 @@ struct TTSItem: Codable, Identifiable, Equatable {
         Date(timeIntervalSince1970: TimeInterval(createdAt))
     }
 
+    var briefAttachments: [TTSAttachment] {
+        attachments ?? []
+    }
+
+    var isAttachmentPlayback: Bool {
+        parentItemID != nil && attachmentID != nil
+    }
+
     func replayCopy(
         now: Int64 = Int64(Date().timeIntervalSince1970),
         startingAt playbackOffset: TimeInterval? = nil
@@ -134,7 +199,42 @@ struct TTSItem: Codable, Identifiable, Equatable {
             error: nil,
             playbackOffset: playbackOffset,
             wordTimings: wordTimings,
-            mediaHandoffDelay: mediaHandoffDelay
+            mediaHandoffDelay: mediaHandoffDelay,
+            attachments: attachments,
+            assetDirectory: assetDirectory
+        )
+    }
+
+    func attachmentPlaybackItem(
+        _ attachment: TTSAttachment,
+        now: Int64 = Int64(Date().timeIntervalSince1970),
+        returnTo playbackOffset: TimeInterval?
+    ) -> TTSItem? {
+        guard attachment.isPlayable, let audioFile = attachment.audioFile else { return nil }
+        return TTSItem(
+            id: "attachment-\(UUID().uuidString.lowercased())",
+            text: attachment.displayText ?? attachment.label,
+            subject: attachment.label,
+            agentName: agentName,
+            harness: harness,
+            sessionID: sessionID,
+            workspace: workspace,
+            voice: voice,
+            outputFile: audioFile,
+            status: .queued,
+            createdAt: now,
+            startedAt: nil,
+            completedAt: nil,
+            duration: nil,
+            error: nil,
+            playbackOffset: nil,
+            wordTimings: attachment.wordTimings,
+            mediaHandoffDelay: mediaHandoffDelay,
+            attachments: attachments,
+            assetDirectory: assetDirectory,
+            parentItemID: id,
+            attachmentID: attachment.id,
+            returnToPlaybackOffset: playbackOffset
         )
     }
 }

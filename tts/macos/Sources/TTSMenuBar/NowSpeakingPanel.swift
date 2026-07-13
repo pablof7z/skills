@@ -558,6 +558,9 @@ private final class NowSpeakingPresentation: ObservableObject {
     @Published var lingeringItem: TTSItem?
     @Published var lingeringTime: TimeInterval = 0
     @Published var lingeringDuration: TimeInterval = 0
+    @Published var selectedAttachmentID: String?
+    @Published private(set) var selectedAttachmentText: String?
+    @Published private(set) var selectedAttachmentImage: NSImage?
     private var hoverExitTask: Task<Void, Never>?
 
     init(isMiniPlayer: Bool) {
@@ -593,6 +596,16 @@ private final class NowSpeakingPresentation: ObservableObject {
         hoverExitTask = nil
         isHovered = false
     }
+
+    func selectAttachment(
+        _ attachmentID: String?,
+        text: String? = nil,
+        image: NSImage? = nil
+    ) {
+        selectedAttachmentID = attachmentID
+        selectedAttachmentText = attachmentID == nil ? nil : text
+        selectedAttachmentImage = attachmentID == nil ? nil : image
+    }
 }
 
 private struct NowSpeakingHUDView: View {
@@ -608,16 +621,24 @@ private struct NowSpeakingHUDView: View {
                 summary(item: item, accent: accent)
 
                 if presentation.isExpanded {
+                    if !item.briefAttachments.isEmpty {
+                        attachmentStrip(item: item, accent: accent)
+                    }
                     Divider().overlay(Color.white.opacity(0.11))
-                    ReadAlongTranscriptView(
-                        text: item.text,
-                        timings: item.wordTimings,
-                        currentTime: playbackTime,
-                        duration: playbackDuration,
-                        accent: accent,
-                        onSeek: { seek(item: item, to: $0) }
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    if let attachment = selectedAttachment(for: item) {
+                        attachmentPreview(attachment, item: item, accent: accent)
+                            .transition(.opacity)
+                    } else {
+                        ReadAlongTranscriptView(
+                            text: item.text,
+                            timings: item.wordTimings,
+                            currentTime: playbackTime,
+                            duration: playbackDuration,
+                            accent: accent,
+                            onSeek: { seek(item: item, to: $0) }
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                     Divider().overlay(Color.white.opacity(0.11))
                     timeline(accent: accent)
                     controls(item: item, accent: accent)
@@ -705,6 +726,16 @@ private struct NowSpeakingHUDView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            if !presentation.isExpanded, !item.briefAttachments.isEmpty {
+                Label("\(item.briefAttachments.count)", systemImage: "paperclip")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.07), in: Capsule())
+                    .accessibilityLabel("\(item.briefAttachments.count) attachments")
+            }
+
             Button(action: onToggleMiniPlayer) {
                 Image(
                     systemName: presentation.isExpanded
@@ -729,6 +760,228 @@ private struct NowSpeakingHUDView: View {
             .help("Hide player")
             .accessibilityLabel("Hide player")
         }
+    }
+
+    private func attachmentStrip(item: TTSItem, accent: Color) -> some View {
+        HStack(spacing: 8) {
+            if item.isAttachmentPlayback {
+                Button {
+                    presentation.selectAttachment(nil)
+                    controller.returnToParent(from: item)
+                } label: {
+                    Label("Main update", systemImage: "arrow.turn.up.left")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+                .help("Return to the main message")
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(item.briefAttachments) { attachment in
+                        attachmentButton(attachment, item: item, accent: accent)
+                    }
+                }
+                .padding(.vertical, 1)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Attachments")
+    }
+
+    private func attachmentButton(
+        _ attachment: TTSAttachment,
+        item: TTSItem,
+        accent: Color
+    ) -> some View {
+        let selected = presentation.selectedAttachmentID == attachment.id
+            || item.attachmentID == attachment.id
+        return Button {
+            switch attachment.kind {
+            case .image:
+                presentation.selectAttachment(
+                    selected ? nil : attachment.id,
+                    image: selected ? nil : NSImage(contentsOfFile: attachment.sourceFile)
+                )
+            case .narratedText, .audio:
+                if attachment.isPlayable {
+                    presentation.selectAttachment(nil)
+                    controller.playAttachment(attachment, from: item)
+                } else {
+                    presentation.selectAttachment(
+                        attachment.id,
+                        text: attachment.displayText
+                    )
+                }
+            case .file:
+                controller.openAttachment(attachment)
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: attachmentSymbol(attachment))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? Color.black.opacity(0.76) : accent)
+
+                Text(attachment.label)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+
+                if attachment.status == .preparing {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.66)
+                        .frame(width: 10, height: 10)
+                } else if attachment.status == .failed {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .foregroundStyle(selected ? Color.black.opacity(0.82) : Color.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                selected ? accent : Color.white.opacity(0.075),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(selected ? accent.opacity(0) : accent.opacity(0.18), lineWidth: 0.75)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(attachmentHelp(attachment))
+        .accessibilityLabel(attachment.label)
+        .accessibilityValue(attachment.status.rawValue)
+    }
+
+    @ViewBuilder
+    private func attachmentPreview(
+        _ attachment: TTSAttachment,
+        item: TTSItem,
+        accent: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    presentation.selectAttachment(nil)
+                } label: {
+                    Label("Main transcript", systemImage: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(accent)
+
+                Text(attachment.label)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button {
+                    controller.openAttachment(attachment)
+                } label: {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open attachment")
+            }
+
+            if attachment.kind == .image,
+               let image = presentation.selectedAttachmentImage {
+                GeometryReader { proxy in
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            } else if let text = presentation.selectedAttachmentText ?? attachment.text {
+                ScrollView {
+                    Text(markdownPreview(text))
+                        .font(.body)
+                        .foregroundStyle(.primary.opacity(0.9))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                }
+                .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+
+                if attachment.status == .preparing {
+                    Label("Preparing narration…", systemImage: "waveform")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else if attachment.isPlayable {
+                    Button {
+                        presentation.selectAttachment(nil)
+                        controller.playAttachment(attachment, from: item)
+                    } label: {
+                        Label("Play narration", systemImage: "play.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.black.opacity(0.8))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(accent, in: RoundedRectangle(cornerRadius: 9))
+                    }
+                    .buttonStyle(.plain)
+                } else if let error = attachment.error {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.orange)
+                }
+            } else {
+                VStack(spacing: 9) {
+                    Image(systemName: "doc")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(accent)
+                    Text("Preview unavailable")
+                        .font(.headline)
+                    Text("Open the attachment in its default app.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func selectedAttachment(for item: TTSItem) -> TTSAttachment? {
+        guard let selectedID = presentation.selectedAttachmentID else { return nil }
+        return item.briefAttachments.first(where: { $0.id == selectedID })
+    }
+
+    private func attachmentSymbol(_ attachment: TTSAttachment) -> String {
+        switch attachment.kind {
+        case .narratedText: return attachment.isPlayable ? "waveform" : "doc.text"
+        case .image: return "photo"
+        case .audio: return "speaker.wave.2"
+        case .file: return "paperclip"
+        }
+    }
+
+    private func attachmentHelp(_ attachment: TTSAttachment) -> String {
+        switch (attachment.kind, attachment.status) {
+        case (_, .failed): return attachment.error ?? "Attachment preparation failed"
+        case (.narratedText, .preparing): return "Read while narration is prepared"
+        case (.narratedText, .ready), (.audio, .ready): return "Play \(attachment.label)"
+        case (.image, _): return "Preview \(attachment.label)"
+        case (.file, _): return "Open \(attachment.label)"
+        case (.audio, .preparing): return "Preparing audio"
+        }
+    }
+
+    private func markdownPreview(_ value: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: value,
+            options: .init(interpretedSyntax: .full)
+        )) ?? AttributedString(value)
     }
 
     private func timeline(accent: Color) -> some View {

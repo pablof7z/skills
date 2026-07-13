@@ -42,11 +42,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     var queuedItems: [TTSItem] {
-        items.filter { $0.status.isPending }
+        items.filter { $0.status.isPending && !$0.isAttachmentPlayback }
     }
 
     var recentItems: [TTSItem] {
-        items.filter { $0.status.isRecent }
+        items.filter { $0.status.isRecent && !$0.isAttachmentPlayback }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -135,6 +135,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     func stop() {
         guard player != nil else { return }
+        if var item = currentItem, item.isAttachmentPlayback {
+            item.returnToPlaybackOffset = nil
+            try? store.save(item)
+            replaceItem(item)
+        }
         playbackStartTask?.cancel()
         playbackStartTask = nil
         player?.stop()
@@ -189,6 +194,63 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     func reveal(_ item: TTSItem) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.outputFile)])
+    }
+
+    func playAttachment(_ attachment: TTSAttachment, from displayedItem: TTSItem) {
+        let brief = displayedItem.parentItemID
+            .flatMap { parentID in items.first(where: { $0.id == parentID }) }
+            ?? displayedItem
+        guard let audioFile = attachment.audioFile,
+              FileManager.default.fileExists(atPath: audioFile) else { return }
+
+        var returnOffset: TimeInterval?
+        if let current = currentItem, let player {
+            if current.isAttachmentPlayback {
+                returnOffset = current.returnToPlaybackOffset
+            } else if current.id == brief.id {
+                returnOffset = player.currentTime
+            }
+            finishCurrentForReplacement()
+        }
+
+        guard let child = brief.attachmentPlaybackItem(
+            attachment,
+            returnTo: returnOffset
+        ) else { return }
+        do {
+            try store.save(child)
+            replaceItem(child)
+            play(child)
+        } catch {
+            NSLog("Unable to play TTS attachment: %@", error.localizedDescription)
+        }
+    }
+
+    func openAttachment(_ attachment: TTSAttachment) {
+        let url = URL(fileURLWithPath: attachment.sourceFile)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func returnToParent(from displayedItem: TTSItem) {
+        guard let parentID = displayedItem.parentItemID,
+              let parent = items.first(where: { $0.id == parentID }) else { return }
+        let offset = displayedItem.returnToPlaybackOffset ?? 0
+        if currentItem?.id == displayedItem.id {
+            finishCurrentForReplacement()
+        }
+        let resumed = parent.replayCopy(startingAt: offset)
+        do {
+            try store.save(resumed)
+            replaceItem(resumed)
+            if isPlaybackBlocked {
+                refresh()
+            } else {
+                play(resumed)
+            }
+        } catch {
+            NSLog("Unable to return to parent TTS item: %@", error.localizedDescription)
+        }
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -329,6 +391,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     private func finishCurrent(success: Bool, error: String?) {
         guard var item = currentItem else { return }
+        let parentReturn = success
+            ? item.parentItemID.flatMap { parentID in
+                item.returnToPlaybackOffset.map { (parentID, $0) }
+            }
+            : nil
         playbackStartTask?.cancel()
         playbackStartTask = nil
         item.status = success ? .played : .failed
@@ -344,6 +411,23 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         duration = 0
         replaceItem(item)
 
+        if let (parentID, offset) = parentReturn,
+           let parent = (try? store.loadItems())?.first(where: { $0.id == parentID }) {
+            let resumed = parent.replayCopy(startingAt: offset)
+            do {
+                try store.save(resumed)
+                replaceItem(resumed)
+                if isPlaybackBlocked {
+                    refresh()
+                } else {
+                    play(resumed)
+                }
+                return
+            } catch {
+                NSLog("Unable to resume parent TTS item: %@", error.localizedDescription)
+            }
+        }
+
         let hasQueuedItem = (try? store.loadItems().contains { $0.status == .queued }) ?? false
         if hasQueuedItem {
             refresh()
@@ -351,6 +435,25 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             let delay = TimeInterval(ProcessInfo.processInfo.environment["TTS_RESUME_DELAY_SECONDS"] ?? "3") ?? 3
             mediaController.resumePausedApps(after: delay)
         }
+    }
+
+    private func finishCurrentForReplacement() {
+        guard var item = currentItem else { return }
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        player?.stop()
+        item.status = .played
+        item.completedAt = Int64(Date().timeIntervalSince1970)
+        item.duration = player?.duration ?? item.duration
+        item.error = nil
+        try? store.save(item)
+
+        player = nil
+        currentItemID = nil
+        automaticallyPausedItemID = nil
+        currentTime = 0
+        duration = 0
+        replaceItem(item)
     }
 
     private func fail(_ item: TTSItem, message: String) {

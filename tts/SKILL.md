@@ -54,6 +54,30 @@ any introduction, before the message body.
 Skip `--subject` when it would add ceremony without useful context, such as a
 brief conversational response, acknowledgement, or follow-up question.
 
+## Attachments
+
+Use repeatable `--attach "Label" path` arguments when a concise spoken update
+has genuinely useful supporting material. Prefer short, human labels such as
+`Why this matters`, `Screenshot`, or `Detailed findings`; never expose a raw
+filename as the label when a clearer description is available.
+
+Pass the primary body with `--message` when attachments are present:
+
+```bash
+./scripts/tts \
+  --message "The implementation is ready. I attached the rationale and a screenshot." \
+  --attach "Why this matters" ./why-this-matters.md \
+  --attach "Screenshot" ./screenshot.png
+```
+
+Markdown and text attachments are copied into durable session storage, shown
+with their structure preserved, and narrated in the background using the same
+voice as the primary update. Images preview inline, existing audio is playable,
+and other files can be opened in their default app. Attachments are optional
+branches: they do not count as queued speech until the user selects them. Do
+not attach routine logs, duplicate the primary message, or create supplemental
+files only to make an update look more substantial.
+
 ## Playback behavior
 
 By default, `scripts/tts` generates the MP3 in the foreground, then queues
@@ -100,6 +124,13 @@ environment. In linked Git worktrees, the base repository is the primary
 project label and a differing checkout name appears as secondary context; the
 accent color remains stable across all worktrees of that project.
 
+The generated message MP3, timing data, copied attachment sources, and prepared
+attachment narration live together under
+`~/.agents/skills/tts/sessions/<session-id>/briefs/<item-id>/`. Set
+`TTS_SESSIONS_ROOT` only when an alternate durable root is required. Source
+worktrees may disappear after the command returns; always rely on the copied
+brief assets rather than the original attachment path.
+
 Use `scripts/tts-menu status` to check whether TTS is playing and inspect queue
 counts. Use `scripts/tts-menu status --json` for structured status. Use
 `scripts/tts-menu start`, `stop`, or `restart` to manage the menu-bar process.
@@ -114,6 +145,8 @@ one of them, it leaves a two-second handoff before speech begins, then resumes
 the paused apps a few seconds after playback ends.
 
 - Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
+- Use `--message text` for an explicit primary message; the original positional message remains supported.
+- Use repeatable `--attach "Label" path` pairs to add durable supporting material.
 - Use `--voice-id voice` to choose an explicit voice.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
 - Use `--handoff-delay seconds` or `TTS_MEDIA_HANDOFF_DELAY_SECONDS=seconds` to change the post-pause handoff.
