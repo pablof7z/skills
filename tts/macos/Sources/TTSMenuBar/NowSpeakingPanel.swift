@@ -10,7 +10,8 @@ final class NowSpeakingPanelController {
         static let transcriptSize = NSSize(width: 540, height: 470)
         static let screenInset: CGFloat = 20
         static let prominentSeconds: UInt64 = 5
-        static let lingerSeconds: UInt64 = 8
+        static let lingerSeconds: TimeInterval = 8
+        static let fadeSeconds: TimeInterval = 0.34
     }
 
     private let playbackController: PlaybackController
@@ -21,9 +22,13 @@ final class NowSpeakingPanelController {
     private var screenObservation: AnyCancellable?
     private var collapseTask: Task<Void, Never>?
     private var lingerTask: Task<Void, Never>?
+    private var fadeTask: Task<Void, Never>?
     private var activeItemID: String?
     private var lastCurrentItem: TTSItem?
     private var lastDuration: TimeInterval = 0
+    private var lingerCountdown = LingerCountdown(duration: Layout.lingerSeconds)
+    private var observedHover = false
+    private var isFading = false
 
     init(controller: PlaybackController) {
         playbackController = controller
@@ -52,7 +57,7 @@ final class NowSpeakingPanelController {
         }
         presentationObservation = presentation.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
-                self?.updateLayout(animated: true)
+                self?.presentationDidChange()
             }
         }
         screenObservation = NotificationCenter.default.publisher(
@@ -70,8 +75,9 @@ final class NowSpeakingPanelController {
             return
         }
 
-        lingerTask?.cancel()
-        lingerTask = nil
+        if presentation.lingeringItem != nil || lingerTask != nil || isFading {
+            cancelLingerDismissal(resetCountdown: true, restoreOpacity: true)
+        }
         presentation.lingeringItem = nil
         lastCurrentItem = item
         lastDuration = max(playbackController.duration, item.duration ?? 0)
@@ -91,6 +97,7 @@ final class NowSpeakingPanelController {
         screenObservation?.cancel()
         collapseTask?.cancel()
         lingerTask?.cancel()
+        fadeTask?.cancel()
         panel.orderOut(nil)
     }
 
@@ -169,12 +176,29 @@ final class NowSpeakingPanelController {
         }
     }
 
+    private func presentationDidChange() {
+        updateLayout(animated: true)
+
+        let isHovered = presentation.isHovered
+        guard isHovered != observedHover else { return }
+        observedHover = isHovered
+        guard playbackController.currentItem == nil, presentation.lingeringItem != nil else { return }
+
+        if isHovered {
+            lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
+            lingerTask?.cancel()
+            lingerTask = nil
+            cancelFade(restoreOpacity: true)
+        } else {
+            scheduleLingerDismissal()
+        }
+    }
+
     private func hide() {
         guard activeItemID != nil || panel.isVisible else { return }
         collapseTask?.cancel()
-        lingerTask?.cancel()
+        cancelLingerDismissal(resetCountdown: true, restoreOpacity: false)
         collapseTask = nil
-        lingerTask = nil
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0
@@ -198,20 +222,74 @@ final class NowSpeakingPanelController {
         presentation.lingeringItem = lastCurrentItem
         presentation.lingeringDuration = duration
         presentation.lingeringTime = duration
-        scheduleLingerHide()
+        lingerCountdown.start(at: ProcessInfo.processInfo.systemUptime)
+        if presentation.isHovered {
+            lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
+        } else {
+            scheduleLingerDismissal()
+        }
     }
 
-    private func scheduleLingerHide() {
+    private func scheduleLingerDismissal() {
         lingerTask?.cancel()
+        cancelFade(restoreOpacity: true)
+        let now = ProcessInfo.processInfo.systemUptime
+        lingerCountdown.resume(at: now)
+        let remaining = lingerCountdown.timeRemaining(at: now)
+
+        guard remaining > 0 else {
+            beginFadeOut()
+            return
+        }
         lingerTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Layout.lingerSeconds * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             guard self.playbackController.currentItem == nil else { return }
-            if self.presentation.isHovered {
-                self.scheduleLingerHide()
-            } else {
-                self.hide()
-            }
+            self.lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
+            self.beginFadeOut()
+        }
+    }
+
+    private func beginFadeOut() {
+        guard !presentation.isHovered,
+              playbackController.currentItem == nil,
+              presentation.lingeringItem != nil else { return }
+        lingerTask?.cancel()
+        lingerTask = nil
+        fadeTask?.cancel()
+        isFading = true
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Layout.fadeSeconds
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().alphaValue = 0
+        }
+        fadeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Layout.fadeSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, self.isFading else { return }
+            guard self.playbackController.currentItem == nil,
+                  !self.presentation.isHovered else { return }
+            self.hide()
+        }
+    }
+
+    private func cancelLingerDismissal(resetCountdown: Bool, restoreOpacity: Bool) {
+        lingerTask?.cancel()
+        lingerTask = nil
+        cancelFade(restoreOpacity: restoreOpacity)
+        if resetCountdown {
+            lingerCountdown.cancel()
+        }
+    }
+
+    private func cancelFade(restoreOpacity: Bool) {
+        fadeTask?.cancel()
+        fadeTask = nil
+        isFading = false
+        guard restoreOpacity, panel.isVisible else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.1
+            panel.animator().alphaValue = 1
         }
     }
 
@@ -504,6 +582,7 @@ private struct WordTranscriptView: View {
     let duration: TimeInterval
     let accent: Color
     let onSeek: (TimeInterval) -> Void
+    @State private var hoveredIndex: Int?
 
     private var words: [String] {
         text.split(whereSeparator: { $0.isWhitespace }).map(String.init)
@@ -522,6 +601,10 @@ private struct WordTranscriptView: View {
             ScrollView {
                 WordFlowLayout(horizontalSpacing: 4, verticalSpacing: 3) {
                     ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                        let decoration = TranscriptWordDecoration.resolve(
+                            isCurrent: index == activeIndex,
+                            isHovered: index == hoveredIndex
+                        )
                         Button {
                             onSeek(TranscriptTiming.time(
                                 forWordAt: index,
@@ -533,16 +616,28 @@ private struct WordTranscriptView: View {
                                 .font(.body.weight(index == activeIndex ? .semibold : .regular))
                                 .foregroundStyle(wordColor(at: index))
                                 .background {
-                                    if index == activeIndex {
+                                    if decoration.accentOpacity > 0 {
                                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                            .fill(accent.opacity(0.24))
+                                            .fill(accent.opacity(decoration.accentOpacity))
                                             .padding(.horizontal, -3)
                                             .padding(.vertical, -2)
                                     }
                                 }
+                                .scaleEffect(decoration.scale)
+                                .offset(y: decoration.verticalOffset)
                                 .contentShape(Rectangle().inset(by: -2))
                         }
                         .buttonStyle(.plain)
+                        .onHover { isHovered in
+                            if isHovered {
+                                hoveredIndex = index
+                                NSCursor.pointingHand.set()
+                            } else if hoveredIndex == index {
+                                hoveredIndex = nil
+                                NSCursor.arrow.set()
+                            }
+                        }
+                        .animation(.easeOut(duration: 0.12), value: decoration)
                         .id(index)
                         .accessibilityLabel("Seek to \(word)")
                     }
@@ -564,6 +659,9 @@ private struct WordTranscriptView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .accessibilityLabel("Interactive transcript")
+        .onDisappear {
+            NSCursor.arrow.set()
+        }
     }
 
     private func wordColor(at index: Int) -> Color {

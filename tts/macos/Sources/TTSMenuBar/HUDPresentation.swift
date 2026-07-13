@@ -87,3 +87,54 @@ enum TranscriptTiming {
         return duration * Double(boundedIndex) / Double(wordCount)
     }
 }
+
+struct TranscriptWordDecoration: Equatable {
+    let accentOpacity: Double
+    let scale: CGFloat
+    let verticalOffset: CGFloat
+
+    static func resolve(isCurrent: Bool, isHovered: Bool) -> TranscriptWordDecoration {
+        TranscriptWordDecoration(
+            accentOpacity: isCurrent ? (isHovered ? 0.32 : 0.24) : (isHovered ? 0.13 : 0),
+            scale: isHovered ? 1.015 : 1,
+            verticalOffset: isHovered ? -0.5 : 0
+        )
+    }
+}
+
+struct LingerCountdown: Equatable {
+    let duration: TimeInterval
+    private(set) var remaining: TimeInterval
+    private(set) var deadline: TimeInterval?
+
+    init(duration: TimeInterval) {
+        self.duration = duration
+        remaining = duration
+    }
+
+    mutating func start(at time: TimeInterval) {
+        remaining = duration
+        deadline = time + duration
+    }
+
+    mutating func pause(at time: TimeInterval) {
+        guard let deadline else { return }
+        remaining = max(0, deadline - time)
+        self.deadline = nil
+    }
+
+    mutating func resume(at time: TimeInterval) {
+        guard deadline == nil else { return }
+        deadline = time + remaining
+    }
+
+    mutating func cancel() {
+        remaining = duration
+        deadline = nil
+    }
+
+    func timeRemaining(at time: TimeInterval) -> TimeInterval {
+        guard let deadline else { return remaining }
+        return max(0, deadline - time)
+    }
+}
