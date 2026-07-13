@@ -38,6 +38,82 @@ struct QueueStoreTests {
     }
 
     @Test
+    func persistsGlobalPlaybackPauseAcrossProcesses() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+
+        #expect(!store.isGlobalPlaybackPaused())
+        try store.setGlobalPlaybackPaused(true)
+        #expect(store.isGlobalPlaybackPaused())
+        #expect(FileManager.default.fileExists(atPath: store.globalPlaybackPauseFile.path))
+
+        let reloaded = QueueStore(stateDirectory: directory)
+        #expect(reloaded.isGlobalPlaybackPaused())
+        try reloaded.setGlobalPlaybackPaused(false)
+        #expect(!store.isGlobalPlaybackPaused())
+    }
+
+    @Test @MainActor
+    func mutedOutputKeepsPendingSpeechQueued() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        try store.save(item(id: "muted", createdAt: 10))
+        let controller = PlaybackController(
+            store: store,
+            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            outputIsMuted: { true }
+        )
+        defer { controller.shutdown() }
+
+        controller.start()
+
+        #expect(controller.isSystemOutputMuted)
+        #expect(controller.currentItem == nil)
+        #expect(try store.loadItems().map(\.status) == [.queued])
+    }
+
+    @Test
+    func storesIndependentPlaybackRatesForEachVoice() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = VoicePlaybackRateStore(stateDirectory: directory)
+
+        #expect(store.rate(for: "af_bella") == 1.0)
+
+        try store.save(1.5, for: "af_bella")
+        try store.save(0.75, for: "am_michael")
+
+        let reloaded = VoicePlaybackRateStore(stateDirectory: directory)
+        #expect(reloaded.rate(for: "af_bella") == 1.5)
+        #expect(reloaded.rate(for: "am_michael") == 0.75)
+        #expect(reloaded.rate(for: "af_nova") == 1.0)
+    }
+
+    @Test
+    func cyclesThroughCompactPlayerRatesAndWraps() {
+        #expect(VoicePlaybackRateStore.nextRate(after: 0.75) == 1.0)
+        #expect(VoicePlaybackRateStore.nextRate(after: 1.0) == 1.25)
+        #expect(VoicePlaybackRateStore.nextRate(after: 1.25) == 1.5)
+        #expect(VoicePlaybackRateStore.nextRate(after: 1.5) == 2.0)
+        #expect(VoicePlaybackRateStore.nextRate(after: 2.0) == 0.75)
+        #expect(VoicePlaybackRateStore.nextRate(after: 1.1) == 1.0)
+        #expect(VoicePlaybackRateStore.label(for: 1.25) == "1.25×")
+    }
+
+    @Test
+    func ignoresUnsupportedStoredPlaybackRate() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let store = VoicePlaybackRateStore(stateDirectory: directory)
+        try Data(#"{"af_bella":1.1}"#.utf8).write(to: store.fileURL)
+
+        #expect(store.rate(for: "af_bella") == 1.0)
+    }
+
+    @Test
     func replayCopiesMetadataAndReturnsToQueue() {
         var original = item(id: "done", createdAt: 10)
         original.status = .played

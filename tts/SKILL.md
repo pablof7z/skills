@@ -61,16 +61,29 @@ playback in the background so the agent sees endpoint/setup failures before the
 command returns.
 
 On macOS, the first audible request starts a resident menu-bar app. It owns the
-playback queue, shows queued/current/recent speech, and provides pause, resume,
-15-second skip controls, and replay by clicking a recent row. The current item
-uses a podcast-style player with a stable read-along transcript. When the
+playback queue and shows queued/current/recent speech. Playback lives in the
+floating bottom-left player, which provides pause, resume, 15-second skip
+controls, a per-voice speed control, and a stable read-along transcript. The
+expanded HUD always shows the transcript without a separate toggle. When the
 endpoint supports captioned speech, a softly focused phrase preserves context
 while an exact word playhead follows synthesis timestamps; clicking a word
 seeks to its real audio boundary. The transcript shows only the agent's message,
 not the spoken introduction or subject, and preserves paragraphs, lists,
 headings, emphasis, links, and code-oriented Markdown styling.
-While an item is playing or paused, the popup focuses on its full player and
-transcript; the queue and recent history return when playback becomes idle.
+Clicking the speed label cycles through `0.75×`, `1×`, `1.25×`, `1.5×`, and
+`2×`; the selected rate applies immediately and is remembered for that voice.
+The menu-bar popup remains a queue overview while speech is active: it lists
+the current item, upcoming items, and recent history without duplicating the
+player or transcript. Its Pause All toggle keeps current and newly generated
+speech waiting until resumed, and the menu-bar badge shows the queued count.
+After generation, the command reports the current queue count. If global TTS
+playback is paused, it explicitly says that the audio was generated and queued
+but will not play until resumed; relay that state accurately rather than
+claiming the user heard it.
+Muted macOS system output also pauses playback automatically. Generation reports
+that muted state so the agent knows the speech was not audible. Playback resumes
+after unmute only when mute itself caused the pause; a user-paused item stays
+paused.
 Queue rows include the text, voice, agent name, and any harness, full session
 identifier, subject, and workspace metadata available in the calling
 environment. In linked Git worktrees, the base repository is the primary
@@ -92,7 +105,6 @@ the paused apps a few seconds after playback ends.
 
 - Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
 - Use `--voice-id voice` to choose an explicit voice.
-- Use `--speed multiplier` for a one-off generation speed from `0.25` to `4.0`. Persistent per-voice speeds come from `TTS_VOICE_SPEEDS`, with `1.0` as the default.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
 - Use `--handoff-delay seconds` or `TTS_MEDIA_HANDOFF_DELAY_SECONDS=seconds` to change the post-pause handoff.
 - Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.

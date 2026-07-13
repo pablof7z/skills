@@ -15,7 +15,8 @@ let package = Package(
             name: "TTSMenuBar",
             linkerSettings: [
                 .linkedFramework("AppKit"),
-                .linkedFramework("AVFoundation")
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("CoreAudio")
             ]
         ),
         .testTarget(

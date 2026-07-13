@@ -20,6 +20,10 @@ struct QueueStore {
         stateDirectory.appendingPathComponent("menu.flock")
     }
 
+    var globalPlaybackPauseFile: URL {
+        stateDirectory.appendingPathComponent("playback-paused")
+    }
+
     func prepare() throws {
         try FileManager.default.createDirectory(
             at: itemsDirectory,
@@ -56,6 +60,19 @@ struct QueueStore {
         let data = try encoder.encode(item)
         let destination = itemsDirectory.appendingPathComponent("\(item.id).json")
         try data.write(to: destination, options: .atomic)
+    }
+
+    func isGlobalPlaybackPaused() -> Bool {
+        FileManager.default.fileExists(atPath: globalPlaybackPauseFile.path)
+    }
+
+    func setGlobalPlaybackPaused(_ paused: Bool) throws {
+        try prepare()
+        if paused {
+            try Data("paused\n".utf8).write(to: globalPlaybackPauseFile, options: .atomic)
+        } else if FileManager.default.fileExists(atPath: globalPlaybackPauseFile.path) {
+            try FileManager.default.removeItem(at: globalPlaybackPauseFile)
+        }
     }
 
     func recoverInterruptedItems() throws {
