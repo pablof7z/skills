@@ -55,6 +55,17 @@ struct QueueStoreTests {
         #expect(replay.createdAt == 20)
         #expect(replay.startedAt == nil)
         #expect(replay.completedAt == nil)
+        #expect(replay.playbackOffset == nil)
+    }
+
+    @Test
+    func replayCanStartAtRequestedPlaybackOffset() {
+        let original = item(id: "done", createdAt: 10)
+
+        let replay = original.replayCopy(now: 20, startingAt: 42.5)
+
+        #expect(replay.status == .queued)
+        #expect(replay.playbackOffset == 42.5)
     }
 
     @Test
@@ -74,15 +85,15 @@ struct QueueStoreTests {
     }
 
     @Test
-    func buildsNowSpeakingContextFromAgentAndFullWorkspacePath() {
+    func buildsNowSpeakingContextFromAgentAndNonGitDirectoryPath() {
         var value = item(id: "hud", createdAt: 10)
         value.subject = "The passive speaking cue is ready"
         value.agentName = "river-codex"
-        value.workspace = "/Users/pablofernandez/Work/skills"
+        value.workspace = "/not-a-repository/example-workspace"
 
         #expect(value.nowSpeakingTitle == "The passive speaking cue is ready")
-        #expect(value.workspacePath == "/Users/pablofernandez/Work/skills")
-        #expect(value.nowSpeakingContext == "river-codex · /Users/pablofernandez/Work/skills")
+        #expect(value.workspaceDisplayLabel == "/not-a-repository/example-workspace")
+        #expect(value.nowSpeakingContext == "river-codex · /not-a-repository/example-workspace")
     }
 
     @Test
@@ -106,6 +117,7 @@ struct QueueStoreTests {
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
 
         #expect(WorkspaceAccent.projectLabel(forWorkspacePath: nested.path) == "recognizable-project")
+        #expect(WorkspaceAccent.displayLabel(forWorkspacePath: nested.path) == "recognizable-project")
         #expect(
             WorkspaceAccent.paletteIndex(forWorkspacePath: nested.path)
                 == WorkspaceAccent.paletteIndex(forWorkspacePath: project.path)
@@ -124,6 +136,7 @@ struct QueueStoreTests {
         )
 
         #expect(WorkspaceAccent.projectLabel(forWorkspacePath: nested.path) == "feature-worktree")
+        #expect(WorkspaceAccent.displayLabel(forWorkspacePath: nested.path) == "feature-worktree")
     }
 
     @Test
@@ -136,6 +149,7 @@ struct QueueStoreTests {
         let index = WorkspaceAccent.paletteIndex(forWorkspacePath: workspace.path)
 
         #expect(WorkspaceAccent.projectLabel(forWorkspacePath: workspace.path) == "standalone-workspace")
+        #expect(WorkspaceAccent.displayLabel(forWorkspacePath: workspace.path) == workspace.path)
         #expect(index >= 0 && index < WorkspaceAccent.count)
         #expect(index == WorkspaceAccent.paletteIndex(forWorkspacePath: workspace.path))
     }
@@ -169,15 +183,17 @@ struct QueueStoreTests {
     }
 
     @Test
-    func decodesExistingQueueItemsWithoutSubject() throws {
+    func decodesExistingQueueItemsWithoutNewOptionalFields() throws {
         let data = try JSONEncoder().encode(item(id: "legacy", createdAt: 10))
         var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         object.removeValue(forKey: "subject")
+        object.removeValue(forKey: "playback_offset")
 
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TTSItem.self, from: legacyData)
 
         #expect(decoded.subject == nil)
+        #expect(decoded.playbackOffset == nil)
     }
 
     @Test
