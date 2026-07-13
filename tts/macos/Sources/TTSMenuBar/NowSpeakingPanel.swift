@@ -128,6 +128,10 @@ final class NowSpeakingPanelController: ObservableObject {
         if presentation.lingeringItem != nil {
             presentation.lingeringItem = nil
         }
+        if item.isAttachmentPlayback,
+           presentation.selectedAttachmentID == item.attachmentID {
+            presentation.selectAttachment(nil)
+        }
         lastCurrentItem = item
         lastDuration = max(playbackController.duration, item.duration ?? 0)
 
@@ -808,8 +812,16 @@ private struct NowSpeakingHUDView: View {
                 )
             case .narratedText, .audio:
                 if attachment.isPlayable {
-                    presentation.selectAttachment(nil)
-                    controller.playAttachment(attachment, from: item)
+                    if item.isAttachmentPlayback,
+                       item.attachmentID == attachment.id {
+                        presentation.selectAttachment(nil)
+                    } else {
+                        presentation.selectAttachment(
+                            attachment.id,
+                            text: attachment.displayText
+                        )
+                        controller.playAttachment(attachment, from: item)
+                    }
                 } else {
                     presentation.selectAttachment(
                         attachment.id,
@@ -919,7 +931,6 @@ private struct NowSpeakingHUDView: View {
                         .foregroundStyle(.secondary)
                 } else if attachment.isPlayable {
                     Button {
-                        presentation.selectAttachment(nil)
                         controller.playAttachment(attachment, from: item)
                     } label: {
                         Label("Play narration", systemImage: "play.fill")
