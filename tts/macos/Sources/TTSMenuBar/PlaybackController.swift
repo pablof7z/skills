@@ -192,6 +192,36 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         }
     }
 
+    func playNow(_ item: TTSItem) {
+        guard FileManager.default.fileExists(atPath: item.outputFile) else {
+            if item.status == .queued {
+                fail(item, message: "Audio file is no longer available.")
+            }
+            return
+        }
+        guard clearGlobalPauseForExplicitPlayback() else { return }
+
+        if currentItem?.id == item.id, let player {
+            resumeCurrentItem(player)
+            return
+        }
+
+        if currentItem != nil {
+            finishCurrentForReplacement()
+        }
+
+        let requested = item.status == .queued ? item : item.replayCopy()
+        do {
+            if requested.id != item.id {
+                try store.save(requested)
+                replaceItem(requested)
+            }
+            play(requested)
+        } catch {
+            NSLog("Unable to play selected TTS item: %@", error.localizedDescription)
+        }
+    }
+
     func reveal(_ item: TTSItem) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.outputFile)])
     }
@@ -357,6 +387,30 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         } catch {
             fail(queuedItem, message: error.localizedDescription)
         }
+    }
+
+    private func clearGlobalPauseForExplicitPlayback() -> Bool {
+        guard isGloballyPaused else { return true }
+        do {
+            try store.setGlobalPlaybackPaused(false)
+            isGloballyPaused = false
+            return true
+        } catch {
+            NSLog("Unable to resume TTS for selected playback: %@", error.localizedDescription)
+            return false
+        }
+    }
+
+    private func resumeCurrentItem(_ audioPlayer: AVAudioPlayer) {
+        guard var item = currentItem else { return }
+        guard item.status == .paused else { return }
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        automaticallyPausedItemID = nil
+        item.status = .playing
+        try? store.save(item)
+        replaceItem(item)
+        beginPlayback(audioPlayer, for: item)
     }
 
     private func applyGlobalPlaybackPause(_ paused: Bool) {
