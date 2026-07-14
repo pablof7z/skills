@@ -124,6 +124,9 @@ loaded.
 - Use `wtg actions -f` to follow allowed, denied, and repair decisions live.
 - Use `wtg denials -f` to follow new denials live. Human output is colorized
   automatically on terminals; use `--color always` or `--no-color` to override.
+- Denials tell agents to report suspected WorktreeGuard bugs in
+  `skills.worktree-guard` when tenex-edge fabric is available. Reports are
+  untagged channel notes, so they do not interrupt another agent.
 - Run `python3 scripts/probe_worktreeguard_lite.py` before reinstalling or
   changing the hook. It creates temporary Git repos and linked worktrees, calls
   the shared hook JSON surface directly for both the Codex and Claude Code
