@@ -33,7 +33,20 @@ struct TranscriptDocument: Equatable {
         timings: [TTSWordTiming]?,
         duration: TimeInterval
     ) -> TranscriptDocument {
-        let sourceRanges = sourceWordRanges(in: text)
+        build(
+            attributedText: NSAttributedString(string: text),
+            timings: timings,
+            duration: duration
+        )
+    }
+
+    static func build(
+        attributedText: NSAttributedString,
+        timings: [TTSWordTiming]?,
+        duration: TimeInterval
+    ) -> TranscriptDocument {
+        let text = attributedText.string
+        let sourceRanges = sourceWordRanges(in: attributedText)
         guard !sourceRanges.isEmpty else {
             return TranscriptDocument(text: text, words: [], phrases: [])
         }
@@ -90,6 +103,9 @@ struct TranscriptDocument: Equatable {
                 return TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
             }
             let resolved = preciseIndices[low - 1]
+            guard let endTime = words[resolved].endTime, time <= endTime else {
+                return TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
+            }
             return TranscriptPlaybackState(
                 activeWordIndex: resolved,
                 activePhraseIndex: words[resolved].phraseIndex
@@ -122,11 +138,15 @@ struct TranscriptDocument: Equatable {
         var endTime: TimeInterval
     }
 
-    private static func sourceWordRanges(in text: String) -> [NSRange] {
+    private static func sourceWordRanges(in text: NSAttributedString) -> [NSRange] {
         let pattern = #"[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*"#
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(location: 0, length: (text as NSString).length)
-        return expression.matches(in: text, range: range).map(\.range)
+        let range = NSRange(location: 0, length: (text.string as NSString).length)
+        return expression.matches(in: text.string, range: range)
+            .map(\.range)
+            .filter { wordRange in
+                text.attribute(.transcriptNonSpoken, at: wordRange.location, effectiveRange: nil) == nil
+            }
     }
 
     private static func align(
@@ -172,8 +192,7 @@ struct TranscriptDocument: Equatable {
         } ?? 0
         for (sourceIndex, range) in sourceRanges.enumerated() where providerIndex < provider.count {
             let normalizedSource = normalizedToken(source.substring(with: range))
-            let searchEnd = min(provider.count, providerIndex + 5)
-            let match = (providerIndex..<searchEnd).first {
+            let match = (providerIndex..<provider.count).first {
                 tokensCorrespond(normalizedSource, provider[$0].normalized)
             }
             guard let resolved = match else { continue }
@@ -191,8 +210,7 @@ struct TranscriptDocument: Equatable {
         var providerIndex = start
         var score = 0
         for sourceToken in sourceTokens where providerIndex < provider.count {
-            let searchEnd = min(provider.count, providerIndex + 5)
-            guard let match = (providerIndex..<searchEnd).first(where: {
+            guard let match = (providerIndex..<provider.count).first(where: {
                 tokensCorrespond(sourceToken, provider[$0].normalized)
             }) else { continue }
             score += 1
@@ -258,6 +276,8 @@ struct TranscriptDocument: Equatable {
 
     private static func tokensCorrespond(_ source: String, _ provider: String) -> Bool {
         guard !source.isEmpty, !provider.isEmpty else { return false }
-        return source == provider || source.contains(provider) || provider.contains(source)
+        if source == provider { return true }
+        guard min(source.count, provider.count) >= 3 else { return false }
+        return source.contains(provider) || provider.contains(source)
     }
 }

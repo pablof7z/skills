@@ -1,6 +1,10 @@
 import AppKit
 import Foundation
 
+extension NSAttributedString.Key {
+    static let transcriptNonSpoken = NSAttributedString.Key("TTSMenuBarTranscriptNonSpoken")
+}
+
 enum TranscriptMarkdown {
     static func render(_ markdown: String, accent: NSColor) -> NSAttributedString {
         let result = NSMutableAttributedString()
@@ -20,6 +24,10 @@ enum TranscriptMarkdown {
 
             let rawLine = lines[index]
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+            if !inCodeBlock, isSpeechOnlyDescription(trimmed) {
+                index += 1
+                continue
+            }
             if trimmed.hasPrefix("```") {
                 if inCodeBlock {
                     inCodeBlock = false
@@ -39,6 +47,7 @@ enum TranscriptMarkdown {
                             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
                             .foregroundColor: accent.withAlphaComponent(0.85),
                             .backgroundColor: accent.withAlphaComponent(0.10),
+                            .transcriptNonSpoken: true,
                         ]
                     ))
                     let labelParagraph = NSMutableParagraphStyle()
@@ -57,11 +66,17 @@ enum TranscriptMarkdown {
             let lineStart = result.length
             if descriptor.isCode {
                 if let language = codeBlockLanguage {
+                    let codeStart = result.length
                     result.append(SyntaxHighlighter.render(
                         descriptor.text,
                         language: language,
                         font: NSFont.monospacedSystemFont(ofSize: 16, weight: .regular)
                     ))
+                    result.addAttribute(
+                        .transcriptNonSpoken,
+                        value: true,
+                        range: NSRange(location: codeStart, length: result.length - codeStart)
+                    )
                 } else {
                     result.append(NSAttributedString(
                         string: descriptor.text,
@@ -98,6 +113,15 @@ enum TranscriptMarkdown {
         }
 
         return result
+    }
+
+    private static func isSpeechOnlyDescription(_ line: String) -> Bool {
+        guard line.hasPrefix("["), line.hasSuffix("]"),
+              let data = line.data(using: .utf8),
+              let values = try? JSONSerialization.jsonObject(with: data) as? [Any],
+              values.count == 1,
+              values[0] is String else { return false }
+        return true
     }
 
     private struct LineDescriptor {

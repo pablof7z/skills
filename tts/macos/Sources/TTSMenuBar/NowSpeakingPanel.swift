@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 @MainActor
-final class NowSpeakingPanelController: ObservableObject {
+final class NowSpeakingPanelController: NSObject, ObservableObject {
     private enum Layout {
         static let compactSize = NSSize(width: 400, height: 120)
         static let expandedSize = NSSize(width: 540, height: 470)
@@ -11,6 +11,9 @@ final class NowSpeakingPanelController: ObservableObject {
         static let lingerSeconds: TimeInterval = 8
         static let fadeSeconds: TimeInterval = 0.34
     }
+
+    private static let historyToolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
+    private static let historyFilterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
 
     private let playbackController: PlaybackController
     private let preferencesStore: HUDPreferencesStore
@@ -36,6 +39,7 @@ final class NowSpeakingPanelController: ObservableObject {
     private var observedHover = false
     private var observedMiniPlayer: Bool
     private var isFading = false
+    private var historyFilterToolbarItem: NSMenuToolbarItem?
 
     /// Whether the controller drives the floating-HUD chrome. When `true` the
     /// controller owns the panel's frame and lifetime: custom edge-resize,
@@ -62,6 +66,7 @@ final class NowSpeakingPanelController: ObservableObject {
         isPlayerVisible = preferencesStore.preferences.isPlayerVisible
         observedMiniPlayer = windowed ? false : preferencesStore.preferences.isMiniPlayer
         panel = Self.makeWindow(windowed: windowed, initialSize: Layout.expandedSize)
+        super.init()
 
         configurePanel()
         attachContentView()
@@ -204,6 +209,7 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     func refresh() {
+        updateHistoryFilterMenu()
         guard isPlayerVisible else {
             if panel.isVisible || activeItemID != nil {
                 hide()
@@ -297,6 +303,7 @@ final class NowSpeakingPanelController: ObservableObject {
             panel.collectionBehavior = [.fullScreenAuxiliary]
             panel.minSize = Layout.expandedSize
             panel.setAccessibilityLabel("TTS Player")
+            configureHistoryToolbar()
         } else {
             panel.level = .floating
             panel.collectionBehavior = [
@@ -318,6 +325,55 @@ final class NowSpeakingPanelController: ObservableObject {
             panel.setAccessibilityLabel("Now speaking")
             configureResizeLimits(expanded: true)
         }
+    }
+
+    private func configureHistoryToolbar() {
+        let toolbar = NSToolbar(identifier: Self.historyToolbarIdentifier)
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        panel.toolbarStyle = .unified
+        panel.toolbar = toolbar
+    }
+
+    private func updateHistoryFilterMenu() {
+        guard windowedMode, let item = historyFilterToolbarItem else { return }
+        let projects = Array(Set(playbackController.playerListItems.compactMap(\.workspaceName))).sorted()
+        if let selected = presentation.historyProjectFilter, !projects.contains(selected) {
+            presentation.historyProjectFilter = nil
+        }
+
+        let menu = NSMenu(title: "Filter History")
+        let allProjects = NSMenuItem(
+            title: "All Projects",
+            action: #selector(selectHistoryProject(_:)),
+            keyEquivalent: ""
+        )
+        allProjects.target = self
+        allProjects.state = presentation.historyProjectFilter == nil ? .on : .off
+        menu.addItem(allProjects)
+        if !projects.isEmpty {
+            menu.addItem(.separator())
+        }
+        for project in projects {
+            let projectItem = NSMenuItem(
+                title: project,
+                action: #selector(selectHistoryProject(_:)),
+                keyEquivalent: ""
+            )
+            projectItem.target = self
+            projectItem.representedObject = project
+            projectItem.state = presentation.historyProjectFilter == project ? .on : .off
+            menu.addItem(projectItem)
+        }
+        item.menu = menu
+        item.toolTip = presentation.historyProjectFilter.map { "History: \($0)" } ?? "Filter history by project"
+    }
+
+    @objc private func selectHistoryProject(_ sender: NSMenuItem) {
+        presentation.historyProjectFilter = sender.representedObject as? String
+        updateHistoryFilterMenu()
     }
 
     private func showIdleIfNeeded() {
@@ -602,6 +658,35 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 }
 
+extension NowSpeakingPanelController: NSToolbarDelegate {
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, Self.historyFilterItemIdentifier]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, Self.historyFilterItemIdentifier]
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard itemIdentifier == Self.historyFilterItemIdentifier else { return nil }
+        let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = "Filter"
+        item.paletteLabel = "Filter History"
+        item.image = NSImage(
+            systemSymbolName: "line.3.horizontal.decrease",
+            accessibilityDescription: "Filter history by project"
+        )
+        item.showsIndicator = true
+        historyFilterToolbarItem = item
+        updateHistoryFilterMenu()
+        return item
+    }
+}
+
 final class PassiveHUDPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -723,6 +808,7 @@ private final class NowSpeakingPresentation: ObservableObject {
     @Published var selectedAttachmentID: String?
     @Published private(set) var selectedAttachmentText: String?
     @Published private(set) var selectedAttachmentImage: NSImage?
+    @Published var historyProjectFilter: String?
     private var hoverExitTask: Task<Void, Never>?
 
     init(isMiniPlayer: Bool) {
@@ -836,7 +922,7 @@ private struct NowSpeakingHUDView: View {
             }
             .accessibilityLabel("Now speaking. \(item.nowSpeakingTitle). \(item.nowSpeakingContext)")
         } else if isWindowedMode {
-            PlayerHistoryView(controller: controller, onHide: onHide)
+            PlayerHistoryView(controller: controller, presentation: presentation)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
@@ -1072,7 +1158,15 @@ private struct NowSpeakingHUDView: View {
                 .help("Open attachment")
             }
 
-            if attachment.kind == .image,
+            if attachment.kind == .diagram,
+               let source = presentation.selectedAttachmentText ?? attachment.text {
+                MermaidDiagramView(
+                    source: source,
+                    accentHue: WorkspaceAccent.paletteIndex(forWorkspacePath: item.workspacePath)
+                )
+                .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else if attachment.kind == .image,
                let image = presentation.selectedAttachmentImage {
                 GeometryReader { proxy in
                     Image(nsImage: image)
@@ -1334,14 +1428,10 @@ private struct NowSpeakingHUDView: View {
 
 private struct PlayerHistoryView: View {
     @ObservedObject var controller: PlaybackController
-    let onHide: () -> Void
-    @State private var projectFilter: String?
+    @ObservedObject var presentation: NowSpeakingPresentation
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-
+        Group {
             if filteredItems.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "waveform")
@@ -1361,47 +1451,13 @@ private struct PlayerHistoryView: View {
         }
     }
 
-    private var header: some View {
-        HStack {
-            Text("History")
-                .font(.headline)
-            Spacer()
-            if availableProjects.count > 1 {
-                Picker("Project", selection: $projectFilter) {
-                    Text("All Projects").tag(String?.none)
-                    ForEach(availableProjects, id: \.self) { project in
-                        Text(project).tag(String?.some(project))
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: 180)
-            }
-            Button(action: onHide) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .help("Hide player")
-            .accessibilityLabel("Hide player")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
     private var historyItems: [TTSItem] {
         controller.playerListItems
     }
 
     private var filteredItems: [TTSItem] {
-        guard let projectFilter else { return historyItems }
+        guard let projectFilter = presentation.historyProjectFilter else { return historyItems }
         return historyItems.filter { $0.workspaceName == projectFilter }
-    }
-
-    private var availableProjects: [String] {
-        Array(Set(historyItems.compactMap(\.workspaceName))).sorted()
     }
 }
 
@@ -1417,10 +1473,22 @@ private struct PlayerHistoryRow: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(item.status == .generating ? .secondary : .primary)
                         .lineLimit(1)
-                    Text(subtitle)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if let workspace = item.workspaceName {
+                            Circle()
+                                .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath))
+                                .frame(width: 6, height: 6)
+                            Text(workspace)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(WorkspaceAccent.color(forWorkspacePath: item.workspacePath))
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(detail)
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
@@ -1445,19 +1513,13 @@ private struct PlayerHistoryRow: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private var subtitle: String {
-        var parts: [String] = []
-        if let workspace = item.workspaceName {
-            parts.append(workspace)
-        }
+    private var detail: String {
         if item.status == .generating {
-            parts.append("Generating audio…")
+            return "Generating audio…"
         } else if item.status == .failed {
-            parts.append("Failed")
-        } else {
-            parts.append(item.text)
+            return "Failed"
         }
-        return parts.joined(separator: " · ")
+        return item.text
     }
 
     private var accessibilityLabel: String {

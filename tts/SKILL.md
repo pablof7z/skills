@@ -76,12 +76,12 @@ Pass the primary body with `--message` when attachments are present:
 
 Markdown and text attachments are copied into durable session storage, shown
 with their structure preserved, and narrated in the background using the same
-voice as the primary update. Images and SVGs preview inline, Mermaid source
-previews with a diagram affordance, existing audio is playable, and other files
-can be opened in their default app. Attachments are optional branches: they do
-not count as queued speech until the user selects them. Do not attach routine
-logs, duplicate the primary message, or create supplemental files only to make
-an update look more substantial.
+voice as the primary update. Images and SVGs preview inline, Mermaid attachments
+render as diagrams with a readable source fallback, existing audio is playable,
+and other files can be opened in their default app. Attachments are optional
+branches: they do not count as queued speech until the user selects them. Do not
+attach routine logs, duplicate the primary message, or create supplemental files
+only to make an update look more substantial.
 
 ## Code blocks
 
@@ -104,7 +104,7 @@ Rules:
 - ` ```lang ` blocks (with a language like `ts`, `swift`, `rs`, `py`) are
   rendered with syntax highlighting in the transcript and **skipped** in speech.
   Follow the block with a `["…"]` spoken description in brackets — that
-  description is what gets read aloud and is also shown in the transcript.
+  description is speech-only and is not shown in the transcript.
 - ` ``` ` blocks (no language tag) are read aloud as plain text and rendered as
   plain monospace code. Use this for short snippets, paths, or commands where
   hearing the literal text is the point.
