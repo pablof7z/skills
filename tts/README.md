@@ -15,6 +15,7 @@ Agent work is increasingly parallel, but attention is still serial. Important up
 The workflow owns more than text generation:
 
 - The HTTP request stays in the foreground until the endpoint accepts it and the audio file exists, so setup and generation failures remain visible to the agent.
+- Audible macOS requests appear in the windowed player as soon as synthesis starts. The pending row is dimmed, disabled, and marked with a progress indicator until the same item becomes playable; failures become disabled failed entries instead of getting stuck as pending.
 - Successful audio moves into background playback only after that handshake.
 - Every update is retained as a durable brief under `~/.agents/skills/tts/sessions/<session-id>/briefs/<item-id>/`, including its MP3, timing data, and any copied attachments.
 - One resident macOS process serializes updates from every agent session.

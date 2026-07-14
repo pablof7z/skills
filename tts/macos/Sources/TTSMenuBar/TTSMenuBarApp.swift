@@ -13,6 +13,7 @@ struct TTSMenuBarApp {
     }
 }
 
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = QueueStore()
@@ -145,6 +146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if controller.currentItem != nil {
             symbolName = "waveform.circle.fill"
             accessibilityLabel = "TTS playing"
+        } else if controller.isGenerating {
+            symbolName = "ellipsis.circle"
+            accessibilityLabel = "TTS generating"
         } else if !controller.queuedItems.isEmpty {
             symbolName = "text.line.first.and.arrowtriangle.forward"
             accessibilityLabel = "TTS queued"
@@ -208,4 +212,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ownsLock = false
     }
 }
-

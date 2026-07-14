@@ -401,36 +401,24 @@ record_agent_spoken() {
   fi
 }
 
-queue_macos_playback() {
-  local state_dir items_dir item_id item_file temporary_file
-  local harness session_id workspace inferred_agent menu_command
+MACOS_GENERATION_ACTIVE=0
+MACOS_ITEM_FILE=""
 
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "Warning: python3 is unavailable; using fallback TTS playback." >&2
-    return 1
-  fi
+write_macos_item_record() {
+  local destination="$1"
+  local status="$2"
+  local completed_at="${3:-}"
+  local error_message="${4:-}"
+  local harness session_id workspace inferred_agent
 
-  menu_command="${TTS_MENU_COMMAND:-$SCRIPT_DIR/tts-menu}"
-  if [ ! -x "$menu_command" ]; then
-    echo "Warning: TTS menu launcher is unavailable; using fallback playback." >&2
-    return 1
-  fi
-
-  state_dir="$(tts_state_dir)"
-  items_dir="$state_dir/items"
-  mkdir -p "$items_dir" || return 1
-
-  item_id="$ITEM_ID"
-  item_file="$items_dir/$item_id.json"
-  temporary_file="$items_dir/.$item_id.tmp"
   harness="$(infer_harness)"
   session_id="$(infer_session_id)"
   workspace="${TTS_WORKSPACE:-${WTG_WORKTREE_PATH:-$(pwd -P)}}"
   inferred_agent="${AGENT_NAME:-${TTS_AGENT_NAME:-${TENEX_AGENT_NAME:-}}}"
 
-  if ! python3 - \
-    "$temporary_file" \
-    "$item_id" \
+  python3 - \
+    "$destination" \
+    "$ITEM_ID" \
     "$DISPLAY_TEXT" \
     "$SUBJECT" \
     "$inferred_agent" \
@@ -443,7 +431,10 @@ queue_macos_playback() {
     "$ATTACHMENT_MANIFEST" \
     "$ITEM_DIRECTORY" \
     "$HANDOFF_DELAY" \
-    "$(date +%s)" <<'PY'
+    "$ITEM_CREATED_AT" \
+    "$status" \
+    "$completed_at" \
+    "$error_message" <<'PY'
 import json
 import os
 import sys
@@ -464,6 +455,9 @@ import sys
     asset_directory,
     media_handoff_delay,
     created_at,
+    status,
+    completed_at,
+    error,
 ) = sys.argv[1:]
 
 def optional(value):
@@ -499,12 +493,12 @@ item = {
     "workspace": optional(workspace),
     "voice": voice,
     "output_file": output_file,
-    "status": "queued",
+    "status": status,
     "created_at": int(created_at),
     "started_at": None,
-    "completed_at": None,
+    "completed_at": int(completed_at) if completed_at else None,
     "duration": None,
-    "error": None,
+    "error": optional(error),
     "word_timings": word_timings,
     "media_handoff_delay": float(media_handoff_delay),
     "attachments": attachments,
@@ -515,8 +509,101 @@ with open(destination, "w", encoding="utf-8") as handle:
     json.dump(item, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-  then
+}
+
+begin_macos_generation() {
+  local state_dir items_dir item_id item_file temporary_file
+  local menu_command
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  menu_command="${TTS_MENU_COMMAND:-$SCRIPT_DIR/tts-menu}"
+  if [ ! -x "$menu_command" ]; then
+    return 1
+  fi
+
+  state_dir="$(tts_state_dir)"
+  items_dir="$state_dir/items"
+  mkdir -p "$items_dir" || return 1
+
+  item_id="$ITEM_ID"
+  item_file="$items_dir/$item_id.json"
+  temporary_file="$items_dir/.$item_id.tmp"
+  if ! write_macos_item_record "$temporary_file" "generating"; then
     rm -f "$temporary_file"
+    return 1
+  fi
+
+  mv "$temporary_file" "$item_file"
+  if env \
+    TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
+    TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
+    TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
+    "$menu_command" start >/dev/null; then
+    MACOS_GENERATION_ACTIVE=1
+    MACOS_ITEM_FILE="$item_file"
+    return 0
+  fi
+
+  rm -f "$item_file"
+  return 1
+}
+
+mark_macos_generation_failed() {
+  local completed_at temporary_file
+  [ "$MACOS_GENERATION_ACTIVE" -eq 1 ] || return 0
+  [ -n "$MACOS_ITEM_FILE" ] || return 0
+  MACOS_GENERATION_ACTIVE=0
+  completed_at="$(date +%s)"
+  temporary_file="${MACOS_ITEM_FILE%/*}/.${ITEM_ID}.failed.tmp"
+  if write_macos_item_record \
+    "$temporary_file" \
+    "failed" \
+    "$completed_at" \
+    "Speech generation failed."; then
+    mv "$temporary_file" "$MACOS_ITEM_FILE"
+  else
+    rm -f "$temporary_file"
+  fi
+}
+
+discard_macos_generation() {
+  if [ "$MACOS_GENERATION_ACTIVE" -eq 1 ] && [ -n "$MACOS_ITEM_FILE" ]; then
+    rm -f "$MACOS_ITEM_FILE"
+  fi
+  MACOS_GENERATION_ACTIVE=0
+}
+
+queue_macos_playback() {
+  local state_dir items_dir item_id item_file temporary_file
+  local menu_command
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "Warning: python3 is unavailable; using fallback TTS playback." >&2
+    discard_macos_generation
+    return 1
+  fi
+
+  menu_command="${TTS_MENU_COMMAND:-$SCRIPT_DIR/tts-menu}"
+  if [ ! -x "$menu_command" ]; then
+    echo "Warning: TTS menu launcher is unavailable; using fallback playback." >&2
+    discard_macos_generation
+    return 1
+  fi
+
+  state_dir="$(tts_state_dir)"
+  items_dir="$state_dir/items"
+  mkdir -p "$items_dir" || return 1
+
+  item_id="$ITEM_ID"
+  item_file="$items_dir/$item_id.json"
+  temporary_file="$items_dir/.$item_id.tmp"
+
+  if ! write_macos_item_record "$temporary_file" "queued"; then
+    rm -f "$temporary_file"
+    discard_macos_generation
     return 1
   fi
 
@@ -527,6 +614,8 @@ PY
     TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
     TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
     "$menu_command" start >/dev/null; then
+    MACOS_GENERATION_ACTIVE=0
+    MACOS_ITEM_FILE="$item_file"
     record_agent_spoken
     if python3 - "$item_file" <<'PY'
 import json
@@ -591,6 +680,7 @@ PY
   fi
 
   rm -f "$item_file"
+  MACOS_GENERATION_ACTIVE=0
   echo "Warning: native TTS queue failed to start; using fallback playback." >&2
   return 1
 }
@@ -786,7 +876,8 @@ if [ -z "$SESSION_STORAGE_SOURCE" ]; then
 fi
 SESSION_STORAGE_ID="$(safe_path_component "$SESSION_STORAGE_SOURCE")"
 SESSIONS_ROOT="${TTS_SESSIONS_ROOT:-$HOME/.agents/skills/tts/sessions}"
-ITEM_ID="$(date +%s)-$$-$RANDOM"
+ITEM_CREATED_AT="$(date +%s)"
+ITEM_ID="$ITEM_CREATED_AT-$$-$RANDOM"
 if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
   ITEM_DIRECTORY="$(dirname -- "${TTS_OUTPUT_FILE:?TTS_OUTPUT_FILE is required for attachment generation}")"
 else
@@ -892,6 +983,9 @@ cleanup() {
   local exit_code=$?
   trap - EXIT
   set +e
+  if [ "$exit_code" -ne 0 ]; then
+    mark_macos_generation_failed
+  fi
   rm -f "$TMP_ERR" "$CAPTION_RESPONSE_FILE"
   resume_paused_media
   release_speech_gate
@@ -947,6 +1041,10 @@ if [[ "$API_URL" != */v1/audio/speech ]]; then
   API_URL="${API_URL%/}/v1/audio/speech"
 fi
 CAPTIONED_API_URL="${KOKORO_CAPTIONED_API_ENDPOINT:-${API_URL%/v1/audio/speech}/dev/captioned_speech}"
+
+if [ "$NO_PLAY" -ne 1 ] && macos_menu_enabled; then
+  begin_macos_generation || true
+fi
 
 if command -v python3 >/dev/null 2>&1; then
   PAYLOAD=$(python3 - "$TEXT" "$VOICE" <<'PY'

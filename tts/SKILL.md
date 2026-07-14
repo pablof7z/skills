@@ -141,6 +141,10 @@ without stopping speech. Display changes clamp the whole frame onto a remaining
 visible screen and reduce an oversized saved frame to fit. Right-clicking the
 TTS status item also exposes Show/Hide Player and Pause/Resume All; left-click
 still opens the queue popup.
+When an audible macOS request begins, the windowed player immediately shows the
+new update as a dimmed, disabled row with a progress indicator. This generating
+row does not enter the playable queue or inflate its badge. The same row becomes
+queued when audio is ready, or failed if synthesis exits unsuccessfully.
 After generation, the command reports the current queue count. If global TTS
 playback is paused, it explicitly says that the audio was generated and queued
 but will not play until resumed; relay that state accurately rather than
