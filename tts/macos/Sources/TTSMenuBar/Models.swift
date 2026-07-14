@@ -84,6 +84,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var agentName: String?
     var harness: String?
     var sessionID: String?
+    var iTermSessionID: String? = nil
     var workspace: String?
     var voice: String
     var outputFile: String
@@ -109,6 +110,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case agentName = "agent_name"
         case harness
         case sessionID = "session_id"
+        case iTermSessionID = "iterm_session_id"
         case workspace
         case voice
         case outputFile = "output_file"
@@ -190,6 +192,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
             agentName: agentName,
             harness: harness,
             sessionID: sessionID,
+            iTermSessionID: iTermSessionID,
             workspace: workspace,
             voice: voice,
             outputFile: outputFile,
@@ -220,6 +223,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
             agentName: agentName,
             harness: harness,
             sessionID: sessionID,
+            iTermSessionID: iTermSessionID,
             workspace: workspace,
             voice: voice,
             outputFile: audioFile,

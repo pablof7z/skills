@@ -158,6 +158,10 @@ identifier, subject, and workspace metadata available in the calling
 environment. In linked Git worktrees, the base repository is the primary
 project label and a differing checkout name appears as secondary context; the
 accent color remains stable across all worktrees of that project.
+When the speaking item came from a currently reachable iTerm session, the
+player header offers an Open agent session control that selects the exact tab or
+split and activates iTerm. The control stays absent when no supported terminal
+locator was captured and disappears if the original session ends.
 
 The generated message MP3, timing data, copied attachment sources, and prepared
 attachment narration live together under

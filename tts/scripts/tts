@@ -67,6 +67,11 @@ infer_session_id() {
     2>/dev/null || true
 }
 
+infer_iterm_session_id() {
+  [ "${TERM_PROGRAM:-}" = "iTerm.app" ] || return 0
+  printf '%s\n' "${ITERM_SESSION_ID:-}"
+}
+
 macos_menu_enabled() {
   [ "$(uname -s)" = "Darwin" ] && truthy "${TTS_MACOS_MENU:-1}"
 }
@@ -409,10 +414,11 @@ write_macos_item_record() {
   local status="$2"
   local completed_at="${3:-}"
   local error_message="${4:-}"
-  local harness session_id workspace inferred_agent
+  local harness session_id iterm_session_id workspace inferred_agent
 
   harness="$(infer_harness)"
   session_id="$(infer_session_id)"
+  iterm_session_id="$(infer_iterm_session_id)"
   workspace="${TTS_WORKSPACE:-${WTG_WORKTREE_PATH:-$(pwd -P)}}"
   inferred_agent="${AGENT_NAME:-${TTS_AGENT_NAME:-${TENEX_AGENT_NAME:-}}}"
 
@@ -424,6 +430,7 @@ write_macos_item_record() {
     "$inferred_agent" \
     "$harness" \
     "$session_id" \
+    "$iterm_session_id" \
     "$workspace" \
     "$VOICE" \
     "$OUTPUT_FILE" \
@@ -447,6 +454,7 @@ import sys
     agent_name,
     harness,
     session_id,
+    iterm_session_id,
     workspace,
     voice,
     output_file,
@@ -490,6 +498,7 @@ item = {
     "agent_name": optional(agent_name),
     "harness": optional(harness),
     "session_id": optional(session_id),
+    "iterm_session_id": optional(iterm_session_id),
     "workspace": optional(workspace),
     "voice": voice,
     "output_file": output_file,

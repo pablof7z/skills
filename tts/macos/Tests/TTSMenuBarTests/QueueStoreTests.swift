@@ -300,6 +300,7 @@ struct QueueStoreTests {
         original.wordTimings = [timing("A", 0, 0.2)]
         original.attachments = [attachment()]
         original.assetDirectory = "/tmp/brief"
+        original.iTermSessionID = "w1t2p3:9473B74C-9371-4C44-B34C-84F40E3D2F04"
 
         let replay = original.replayCopy(now: 20)
 
@@ -308,6 +309,7 @@ struct QueueStoreTests {
         #expect(replay.subject == original.subject)
         #expect(replay.agentName == original.agentName)
         #expect(replay.sessionID == original.sessionID)
+        #expect(replay.iTermSessionID == original.iTermSessionID)
         #expect(replay.status == .queued)
         #expect(replay.createdAt == 20)
         #expect(replay.startedAt == nil)
@@ -867,6 +869,7 @@ struct QueueStoreTests {
         object.removeValue(forKey: "parent_item_id")
         object.removeValue(forKey: "attachment_id")
         object.removeValue(forKey: "return_to_playback_offset")
+        object.removeValue(forKey: "iterm_session_id")
 
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TTSItem.self, from: legacyData)
@@ -876,7 +879,54 @@ struct QueueStoreTests {
         #expect(decoded.wordTimings == nil)
         #expect(decoded.attachments == nil)
         #expect(decoded.assetDirectory == nil)
+        #expect(decoded.iTermSessionID == nil)
         #expect(!decoded.isAttachmentPlayback)
+    }
+
+    @Test
+    func parsesOnlyCanonicalITermSessionTargets() throws {
+        let prefixed = try #require(
+            AgentSessionTarget(rawIdentifier: "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04")
+        )
+        let plain = try #require(
+            AgentSessionTarget(rawIdentifier: "9473b74c-9371-4c44-b34c-84f40e3d2f04")
+        )
+
+        #expect(prefixed.uniqueID == "9473B74C-9371-4C44-B34C-84F40E3D2F04")
+        #expect(plain == prefixed)
+        #expect(AgentSessionTarget(rawIdentifier: nil) == nil)
+        #expect(AgentSessionTarget(rawIdentifier: "not-a-session") == nil)
+    }
+
+    @Test @MainActor
+    func exposesSessionControlOnlyWhileTargetIsReachable() {
+        let scripting = TestITermSessionScripting()
+        let opener = AgentSessionOpener(scripting: scripting, probeInterval: 1)
+        let identifier = "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04"
+
+        opener.refresh(rawIdentifier: nil, force: true, uptime: 1)
+        #expect(!opener.canOpen(rawIdentifier: identifier))
+
+        scripting.existingSessionIDs.insert("9473B74C-9371-4C44-B34C-84F40E3D2F04")
+        opener.refresh(rawIdentifier: identifier, force: true, uptime: 2)
+        #expect(opener.canOpen(rawIdentifier: identifier))
+
+        scripting.existingSessionIDs.removeAll()
+        opener.refresh(rawIdentifier: identifier, force: true, uptime: 3)
+        #expect(!opener.canOpen(rawIdentifier: identifier))
+    }
+
+    @Test @MainActor
+    func opensOnlyTheResolvedSession() {
+        let scripting = TestITermSessionScripting()
+        let identifier = "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04"
+        scripting.existingSessionIDs.insert("9473B74C-9371-4C44-B34C-84F40E3D2F04")
+        let opener = AgentSessionOpener(scripting: scripting, probeInterval: 1)
+
+        opener.refresh(rawIdentifier: identifier, force: true, uptime: 1)
+        opener.open(rawIdentifier: identifier)
+
+        #expect(scripting.selectedSessionIDs == ["9473B74C-9371-4C44-B34C-84F40E3D2F04"])
     }
 
     @Test
@@ -943,5 +993,19 @@ struct QueueStoreTests {
             wordTimings: [timing("Useful", 0, 0.4)],
             error: nil
         )
+    }
+}
+
+private final class TestITermSessionScripting: ITermSessionScripting {
+    var existingSessionIDs = Set<String>()
+    var selectedSessionIDs = [String]()
+
+    func sessionExists(uniqueID: String) -> Bool {
+        existingSessionIDs.contains(uniqueID)
+    }
+
+    func selectSession(uniqueID: String) -> Bool {
+        selectedSessionIDs.append(uniqueID)
+        return existingSessionIDs.contains(uniqueID)
     }
 }
