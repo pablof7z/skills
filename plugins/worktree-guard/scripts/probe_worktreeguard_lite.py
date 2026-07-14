@@ -29,6 +29,7 @@ class Case:
     name: str
     expected: str
     payload: dict[str, Any]
+    claude_expected: str | None = None
 
 
 def main() -> int:
@@ -46,7 +47,7 @@ def main() -> int:
         for index, case in enumerate(cases, start=1):
             payload = dict(case.payload)
             payload["session_id"] = "probe"
-            payload["turn_id"] = f"case-{index}"
+            payload.setdefault("turn_id", f"case-{index}")
             actual, stdout, stderr = hook_decision(payload, env)
             print(f"{actual.upper():5} {case.name}")
             if actual != case.expected:
@@ -55,11 +56,19 @@ def main() -> int:
         for index, case in enumerate(cases, start=1):
             payload = dict(case.payload)
             payload["session_id"] = "probe-claude"
-            payload["turn_id"] = f"claude-case-{index}"
+            payload.setdefault("turn_id", f"claude-case-{index}")
             actual, stdout, stderr = hook_decision(payload, env, harness="claude")
             print(f"{actual.upper():5} [claude] {case.name}")
-            if actual != case.expected:
-                failures.append((case, actual, stdout, stderr))
+            claude_expected = case.claude_expected or case.expected
+            if actual != claude_expected:
+                failures.append(
+                    (
+                        Case(case.name, claude_expected, case.payload),
+                        actual,
+                        stdout,
+                        stderr,
+                    )
+                )
 
         records = read_jsonl(Path(env["WTG_ACTION_LOG_FILE"]))
         if len(records) != len(cases) * 2:
@@ -132,6 +141,20 @@ def build_cases(paths: dict[str, Path]) -> list[Case]:
     external_dir = paths["external_dir"]
     external_file = paths["external_file"]
     missing = paths["missing"]
+    codex_outside_turn = "codex-flattened-outside"
+    codex_outside_transcript = codex_exec_transcript(
+        temp / "codex-outside.jsonl",
+        command="git switch task-out",
+        workdir=outside,
+        turn_id=codex_outside_turn,
+    )
+    codex_base_turn = "codex-flattened-base"
+    codex_base_transcript = codex_exec_transcript(
+        temp / "codex-base.jsonl",
+        command="git switch -c denied",
+        workdir=base,
+        turn_id=codex_base_turn,
+    )
 
     cases: list[Case] = [
         bash("deny base reset", "deny", base, "git reset --hard HEAD"),
@@ -196,6 +219,24 @@ def build_cases(paths: dict[str, Path]) -> list[Case]:
             "git checkout task-nested",
             workdir=nested,
         ),
+        flattened_codex_bash(
+            "flattened Codex workdir outside worktree",
+            "allow",
+            base,
+            "git switch task-out",
+            transcript_path=codex_outside_transcript,
+            turn_id=codex_outside_turn,
+            claude_expected="deny",
+        ),
+        flattened_codex_bash(
+            "flattened Codex workdir targeting base",
+            "deny",
+            external_dir,
+            "git switch -c denied",
+            transcript_path=codex_base_transcript,
+            turn_id=codex_base_turn,
+            claude_expected="allow",
+        ),
         bash("deny missing cd fallback reset", "deny", base, f"cd {missing} || git reset --hard HEAD"),
         bash("deny pipe does not carry cd cwd", "deny", base, f"cd {outside} | git reset --hard HEAD"),
         bash("deny or does not carry cd cwd", "deny", base, f"cd {outside} || git reset --hard HEAD"),
@@ -256,6 +297,49 @@ def bash(name: str, expected: str, cwd: Path, command: str, *, workdir: Path | N
     if workdir is not None:
         tool_input["workdir"] = str(workdir)
     return Case(name, expected, {"cwd": str(cwd), "tool_name": "Bash", "tool_input": tool_input})
+
+
+def flattened_codex_bash(
+    name: str,
+    expected: str,
+    cwd: Path,
+    command: str,
+    *,
+    transcript_path: Path,
+    turn_id: str,
+    claude_expected: str,
+) -> Case:
+    return Case(
+        name,
+        expected,
+        {
+            "cwd": str(cwd),
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "transcript_path": str(transcript_path),
+            "turn_id": turn_id,
+        },
+        claude_expected=claude_expected,
+    )
+
+
+def codex_exec_transcript(path: Path, *, command: str, workdir: Path, turn_id: str) -> Path:
+    source = (
+        "const r = await tools.exec_command("
+        + json.dumps({"cmd": command, "workdir": str(workdir)})
+        + ");\ntext(r.output);\n"
+    )
+    record = {
+        "type": "response_item",
+        "payload": {
+            "type": "custom_tool_call",
+            "name": "exec",
+            "input": source,
+            "internal_chat_message_metadata_passthrough": {"turn_id": turn_id},
+        },
+    }
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    return path
 
 
 def patch_case(
