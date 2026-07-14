@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+*.swp
+.claude/worktrees/
+docs/wiki/_citations.log
+tts/macos/.visual-state/

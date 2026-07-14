@@ -1,0 +1,6 @@
+{
+  "id": "019f6-6ad49",
+  "ts": "2026-07-14T11:31:35Z",
+  "session": "019f605a-3fbe-7601-ac55-e5016574213a",
+  "text": "Assistant: The regression suite now passes all 66 policy decisions for both harnesses (132 checked hook outcomes), including exact checks that every denial contains the tenex-edge channel guidance. The initial fixture hiccup was transient and reproduced successfully outside the suite, so it was not a WorktreeGuard bug and I did not post a false report. [...] - Regression suite passed 66 decisions across Codex and Claude—132 outcomes."
+}

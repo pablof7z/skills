@@ -1,0 +1,6 @@
+{
+  "id": "019f6-958a6",
+  "ts": "2026-07-14T11:31:35Z",
+  "session": "019f605a-3fbe-7601-ac55-e5016574213a",
+  "text": "User: add on the worktree thing, when something is blocked that the agent thinks it should have worked (like it's a bug in worktree skill) that it should, if it has access to tenex-edge fabric, to join the skills.worktree-guard to report the bug (without tagging any agent) -- just leaving a note there [...] Assistant: The intended behavior maps to the agent-facing denial guidance: only suspected false positives should be reported; ordinary denials still follow the normal worktree/base-access path. I’ll make the fabric step conditional, name the exact channel, and explicitly prohibit tagging agents so the report is a quiet channel note. [...] - WorktreeGuard denials now direct suspected false positives to `skills.worktree-guard` as untagged notes when tenex-edge is available."
+}

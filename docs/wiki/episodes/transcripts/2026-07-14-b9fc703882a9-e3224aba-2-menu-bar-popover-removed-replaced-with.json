@@ -1,0 +1,26 @@
+[
+  [
+    "assistant",
+    "Let's take a screenshot to confirm the windowed player + idle history list are actually showing on screen."
+  ],
+  [
+    "assistant",
+    "It's playing now. Let's view the screenshot to confirm the windowed player renders the now-playing UI correctly."
+  ],
+  [
+    "assistant",
+    "The window opened on a different Space than the one that was frontmost when I screenshotted — expected since normal windows don't float across Spaces like the HUD did. Let me bring it forward for a proper look."
+  ],
+  [
+    "assistant",
+    "There's a known macOS quirk: `setActivationPolicy(.regular)` alone often doesn't register the Dock icon without an accompanying activation. Let me fix that."
+  ],
+  [
+    "assistant",
+    "Fully synced and preferences reset to a visible on-screen position. Now the final restart:"
+  ],
+  [
+    "assistant",
+    "Deployed and reported back to Pablo. This round (PR #104, merged) fixed position drift from two causes, the Dock icon blocked by static LSUIElement and a policy-check ordering bug, restyled the history list to a native SwiftUI List, simplified the menu bar popover, and had an Engineer subagent audit the controller for remaining HUD-vs-windowed gaps."
+  ]
+]

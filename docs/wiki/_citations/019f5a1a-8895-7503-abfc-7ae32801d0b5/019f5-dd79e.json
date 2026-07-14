@@ -1,0 +1,6 @@
+{
+  "id": "019f5-dd79e",
+  "ts": "2026-07-13T07:49:37Z",
+  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
+  "text": "Assistant: The patch is intentionally one line of runtime behavior: audible invocations print “TTS audio will play in the background after generation completes,” while `--no-play` stays quiet. The subagent is validating that distinction before publishing the PR. [...] Assistant: The original notice change is now merged via [PR #58](https://github.com/pablof7z/skills/pull/58); default runs announce background playback, while `--no-play` does not. For the new HUD idea, my leading recommendation is slightly lighter than a full mini-player: a transient “now speaking” card that stays for 4–6 seconds, then collapses to a tiny waveform/pill while speech continues; hovering re-expands it. That keeps context available without making long narration visually noisy."
+}

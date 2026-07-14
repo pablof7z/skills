@@ -1,0 +1,6 @@
+{
+  "id": "019f6-1db11",
+  "ts": "2026-07-14T10:32:25Z",
+  "session": "019f602b-b99a-7061-8567-f8a022393c67",
+  "text": "• PreToolUse hook (blocked)\n  feedback: Denied by WorktreeGuard.\n\n    You are in the protected base checkout:\n    /Users/pablofernandez/Work/29er-next\n\n    This session may read this checkout, but may not edit files, switch branches, or mutate the protected checkout state here.\n\n    Continue from a Git worktree instead. Use the repository's normal worktree workflow; WorktreeGuard will allow mutations outside this protected base checkout."
+}

@@ -1,0 +1,6 @@
+{
+  "id": "019f5-e0af8",
+  "ts": "2026-07-13T07:49:37Z",
+  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
+  "text": "User: directory/project must be git aware: if it runs from a git repo in ~/src/repo/src the directory/project would be \"repo\" not \"src\" (assuming \"repo\" is where the git repo is)\n\nAssistant: Agreed. Project identity should come from the nearest Git worktree root, not the current folder’s basename. So `~/src/repo/src` displays project `repo`, keeps the full cwd visible as `~/src/repo/src`, and uses `repo` as the deterministic color seed. Outside Git, it falls back to the cwd basename. [...] User: it's showing the full directory -- if the directory is a git repo it should just show the git repo name, not the full path\n\nAssistant: Understood—the display rule is now:\n\n- Inside Git: show only the Git repository root name, such as `repo`.\n- Outside Git: show the recorded directory path.\n- Use that same Git-aware project name for the deterministic color.\n"
+}

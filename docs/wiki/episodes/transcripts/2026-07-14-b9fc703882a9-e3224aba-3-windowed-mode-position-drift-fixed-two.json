@@ -1,0 +1,26 @@
+[
+  [
+    "assistant",
+    "Let's take a screenshot to confirm the windowed player + idle history list are actually showing on screen."
+  ],
+  [
+    "assistant",
+    "It's playing now. Let's view the screenshot to confirm the windowed player renders the now-playing UI correctly."
+  ],
+  [
+    "assistant",
+    "The window opened on a different Space than the frontmost one when screenshotted; let me bring it forward for a proper look."
+  ],
+  [
+    "assistant",
+    "There's a known macOS quirk where setActivationPolicy(.regular) alone doesn't register the Dock icon without accompanying activation; let me fix that."
+  ],
+  [
+    "assistant",
+    "Fully synced and preferences reset to a visible on-screen position. Now the final restart."
+  ],
+  [
+    "assistant",
+    "Ported 29er-next's exact color algorithm into WorkspaceAccent, replacing the old fixed 8-color palette. Build clean, all 40 tests pass, shipped as PR #107, merged, and deployed to the live app."
+  ]
+]
