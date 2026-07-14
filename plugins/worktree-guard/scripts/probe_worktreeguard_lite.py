@@ -22,6 +22,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 WTG = ROOT / "bin" / "wtg"
+HOOKS = ROOT / "hooks" / "hooks.json"
 
 
 @dataclass(frozen=True)
@@ -40,10 +41,9 @@ def main() -> int:
         env["WTG_ACTION_LOG_FILE"] = str(temp / "actions.jsonl")
         env["WTG_DENY_LOG_FILE"] = str(temp / "denials.jsonl")
 
+        failures = hook_routing_failures(temp) + shim_routing_failures(temp)
         paths = make_repo_fixture(temp)
         cases = build_cases(paths)
-
-        failures = []
         for index, case in enumerate(cases, start=1):
             payload = dict(case.payload)
             payload["session_id"] = "probe"
@@ -100,6 +100,95 @@ def main() -> int:
         return 0
     finally:
         shutil.rmtree(temp, ignore_errors=True)
+
+
+def hook_routing_failures(temp: Path) -> list[tuple[Case, str, str, str]]:
+    home = temp / "routing-home"
+    bin_dir = home / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    for harness in ("codex", "claude"):
+        shim = bin_dir / f"wtg-hook-{harness}"
+        shim.write_text(f"#!/bin/sh\necho {harness}\n", encoding="utf-8")
+        shim.chmod(0o755)
+
+    hooks = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]
+    failures: list[tuple[Case, str, str, str]] = []
+    scenarios = (
+        ("both plugin roots", "codex", {"PLUGIN_ROOT": "/codex", "CLAUDE_PLUGIN_ROOT": "/claude"}),
+        ("Codex plugin root", "codex", {"PLUGIN_ROOT": "/codex"}),
+        ("Claude plugin root", "claude", {"CLAUDE_PLUGIN_ROOT": "/claude"}),
+    )
+    for event_name, groups in hooks.items():
+        command = groups[0]["hooks"][0]["command"]
+        for scenario, expected, roots in scenarios:
+            env = os.environ.copy()
+            env["HOME"] = str(home)
+            env.pop("PLUGIN_ROOT", None)
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+            env.update(roots)
+            result = subprocess.run(
+                ["/bin/sh", "-c", command],
+                input=b"{}",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                check=False,
+            )
+            actual = result.stdout.decode().strip()
+            name = f"{event_name} routes {scenario} to {expected}"
+            print(f"{actual.upper():6} {name}")
+            if result.returncode != 0 or actual != expected:
+                failures.append(
+                    (
+                        Case(name=name, expected=expected, payload={}),
+                        actual or f"exit {result.returncode}",
+                        result.stdout.decode(),
+                        result.stderr.decode(),
+                    )
+                )
+    return failures
+
+
+def shim_routing_failures(temp: Path) -> list[tuple[Case, str, str, str]]:
+    fake_wtg = temp / "fake-wtg"
+    fake_wtg.write_text('#!/bin/sh\nprintf "%s\\n" "$*"\n', encoding="utf-8")
+    fake_wtg.chmod(0o755)
+    env = os.environ.copy()
+    env["WTG_BIN"] = str(fake_wtg)
+    payloads = (
+        (
+            "Claude shim recognizes Codex transcript",
+            {"transcript_path": "/tmp/.codex/sessions/session.jsonl", "model": "gpt-5.6-sol"},
+            "hook codex pre-tool-use",
+        ),
+        (
+            "Claude shim preserves Claude transcript",
+            {"transcript_path": "/tmp/.claude/projects/session.jsonl", "model": "claude-opus"},
+            "hook claude pre-tool-use",
+        ),
+    )
+    failures: list[tuple[Case, str, str, str]] = []
+    for name, payload, expected in payloads:
+        result = subprocess.run(
+            [str(ROOT / "bin" / "wtg-hook-claude"), "pre-tool-use"],
+            input=json.dumps(payload).encode(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            check=False,
+        )
+        actual = result.stdout.decode().strip()
+        print(f"{actual.upper():27} {name}")
+        if result.returncode != 0 or actual != expected:
+            failures.append(
+                (
+                    Case(name=name, expected=expected, payload={}),
+                    actual or f"exit {result.returncode}",
+                    result.stdout.decode(),
+                    result.stderr.decode(),
+                )
+            )
+    return failures
 
 
 def make_repo_fixture(temp: Path) -> dict[str, Path]:

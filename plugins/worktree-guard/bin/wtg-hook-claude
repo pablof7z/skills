@@ -11,6 +11,7 @@ WorktreeGuard command.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -22,12 +23,13 @@ def main() -> int:
     event = sys.argv[1] if len(sys.argv) > 1 else "hook"
     stdin = sys.stdin.buffer.read()
     wtg_bin = select_wtg_binary()
+    harness = payload_harness(stdin)
 
     env = os.environ.copy()
     env.setdefault("WTG_COMMAND", str(wtg_bin))
 
     result = subprocess.run(
-        [str(wtg_bin), "hook", "claude", event],
+        [str(wtg_bin), "hook", harness, event],
         input=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -37,6 +39,22 @@ def main() -> int:
     sys.stdout.buffer.write(result.stdout)
     sys.stderr.buffer.write(result.stderr)
     return result.returncode
+
+
+def payload_harness(stdin: bytes) -> str:
+    try:
+        payload = json.loads(stdin)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return "claude"
+    if not isinstance(payload, dict):
+        return "claude"
+    transcript_path = str(payload.get("transcript_path") or payload.get("transcriptPath") or "")
+    if "/.codex/" in transcript_path:
+        return "codex"
+    model = str(payload.get("model") or "").lower()
+    if model.startswith("gpt-") and "/.claude/" not in transcript_path:
+        return "codex"
+    return "claude"
 
 
 def select_wtg_binary() -> Path:
