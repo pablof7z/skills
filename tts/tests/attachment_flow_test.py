@@ -99,6 +99,8 @@ class AttachmentFlowTests(unittest.TestCase):
                         "TTS_MENU_COMMAND": str(fake_menu),
                         "TTS_SESSIONS_ROOT": str(sessions),
                         "TTS_STATE_DIR": str(state),
+                        "TERM_PROGRAM": "iTerm.app",
+                        "ITERM_SESSION_ID": "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04",
                     }
                 )
                 process = subprocess.Popen(
@@ -121,6 +123,10 @@ class AttachmentFlowTests(unittest.TestCase):
                 item_path = item_files[0]
                 generating = json.loads(item_path.read_text(encoding="utf-8"))
                 self.assertEqual(generating["status"], "generating")
+                self.assertEqual(
+                    generating["iterm_session_id"],
+                    "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04",
+                )
                 self.assertFalse(Path(generating["output_file"]).exists())
                 self.assertIsNone(process.poll())
 
@@ -129,6 +135,7 @@ class AttachmentFlowTests(unittest.TestCase):
                 self.assertEqual(process.returncode, 0, stderr)
                 queued = json.loads(item_path.read_text(encoding="utf-8"))
                 self.assertEqual(queued["status"], "queued")
+                self.assertEqual(queued["iterm_session_id"], generating["iterm_session_id"])
                 self.assertTrue(Path(queued["output_file"]).is_file())
             finally:
                 BlockingKokoroHandler.release_response.set()

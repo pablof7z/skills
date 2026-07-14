@@ -75,6 +75,8 @@ stage_app_bundle() {
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Open the iTerm session associated with a TTS update and manage supported media playback.</string>
 </dict>
 </plist>
 PLIST

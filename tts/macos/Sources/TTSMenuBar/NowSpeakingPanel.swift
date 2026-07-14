@@ -18,6 +18,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     private let playbackController: PlaybackController
     private let preferencesStore: HUDPreferencesStore
     private let presentation: NowSpeakingPresentation
+    private let sessionOpener: AgentSessionOpener
     private var panel: NSWindow
     private var windowedMode: Bool
     @Published private(set) var isPlayerVisible: Bool
@@ -54,9 +55,14 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     /// history, Dock activation, in-place `orderFront`).
     private var usesFloatingHUD: Bool { !windowedMode }
 
-    init(controller: PlaybackController, preferencesStore: HUDPreferencesStore) {
+    init(
+        controller: PlaybackController,
+        preferencesStore: HUDPreferencesStore,
+        sessionOpener: AgentSessionOpener = AgentSessionOpener()
+    ) {
         playbackController = controller
         self.preferencesStore = preferencesStore
+        self.sessionOpener = sessionOpener
         let windowed = preferencesStore.preferences.isWindowedModeEnabled
         windowedMode = windowed
         isWindowedMode = windowed
@@ -119,6 +125,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         let content = NowSpeakingHUDView(
             controller: playbackController,
             presentation: presentation,
+            sessionOpener: sessionOpener,
             isWindowedMode: windowedMode,
             onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
             onHide: { [weak self] in self?.setPlayerVisible(false) }
@@ -211,6 +218,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     func refresh() {
         updateHistoryFilterMenu()
         guard isPlayerVisible else {
+            sessionOpener.clear()
             if panel.isVisible || activeItemID != nil {
                 hide()
             }
@@ -218,8 +226,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
         guard let item = playbackController.currentItem else {
             if windowedMode {
+                sessionOpener.clear()
                 showIdleIfNeeded()
             } else {
+                sessionOpener.refresh(rawIdentifier: lastCurrentItem?.iTermSessionID)
                 beginLingerIfNeeded()
             }
             return
@@ -237,6 +247,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
         lastCurrentItem = item
         lastDuration = max(playbackController.duration, item.duration ?? 0)
+        sessionOpener.refresh(rawIdentifier: item.iTermSessionID)
 
         if activeItemID != item.id {
             activeItemID = item.id
@@ -477,6 +488,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0
+        sessionOpener.clear()
         panel.orderOut(nil)
         panel.alphaValue = 1
         presentation.clearHover()
@@ -859,6 +871,7 @@ private final class NowSpeakingPresentation: ObservableObject {
 private struct NowSpeakingHUDView: View {
     @ObservedObject var controller: PlaybackController
     @ObservedObject var presentation: NowSpeakingPresentation
+    @ObservedObject var sessionOpener: AgentSessionOpener
     let isWindowedMode: Bool
     let onToggleMiniPlayer: () -> Void
     let onHide: () -> Void
@@ -1002,6 +1015,20 @@ private struct NowSpeakingHUDView: View {
                 .buttonStyle(.plain)
                 .help(presentation.isExpanded ? "Use mini player" : "Expand player")
                 .accessibilityLabel(presentation.isExpanded ? "Use mini player" : "Expand player")
+            }
+
+            if sessionOpener.canOpen(rawIdentifier: item.iTermSessionID) {
+                Button {
+                    sessionOpener.open(rawIdentifier: item.iTermSessionID)
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("Open agent session")
+                .accessibilityLabel("Open agent session")
             }
 
             Button(action: isWindowedMode ? stopPlayback : onHide) {
