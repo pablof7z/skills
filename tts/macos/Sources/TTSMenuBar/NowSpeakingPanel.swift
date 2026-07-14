@@ -918,15 +918,15 @@ private struct NowSpeakingHUDView: View {
                 .accessibilityLabel(presentation.isExpanded ? "Use mini player" : "Expand player")
             }
 
-            Button(action: onHide) {
+            Button(action: isWindowedMode ? stopPlayback : onHide) {
                 Image(systemName: "xmark")
                     .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
-            .help("Hide player")
-            .accessibilityLabel("Hide player")
+            .help(isWindowedMode ? "Stop" : "Hide player")
+            .accessibilityLabel(isWindowedMode ? "Stop" : "Hide player")
         }
     }
 
@@ -1308,6 +1308,14 @@ private struct NowSpeakingHUDView: View {
             controller.replay(item, startingAt: time)
         } else {
             controller.seek(to: time)
+        }
+    }
+
+    private func stopPlayback() {
+        if isLingering {
+            presentation.lingeringItem = nil
+        } else {
+            controller.stop()
         }
     }
 
