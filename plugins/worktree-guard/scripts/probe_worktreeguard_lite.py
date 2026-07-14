@@ -23,6 +23,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 WTG = ROOT / "bin" / "wtg"
 HOOKS = ROOT / "hooks" / "hooks.json"
+DENIAL_GUIDANCE = (
+    "WorktreeGuard bug",
+    "tenex-edge fabric",
+    "skills.worktree-guard",
+    "without tagging any agent",
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +58,8 @@ def main() -> int:
             print(f"{actual.upper():5} {case.name}")
             if actual != case.expected:
                 failures.append((case, actual, stdout, stderr))
+            elif actual == "deny":
+                failures.extend(denial_guidance_failures(case, stdout, stderr))
 
         for index, case in enumerate(cases, start=1):
             payload = dict(case.payload)
@@ -69,6 +77,8 @@ def main() -> int:
                         stderr,
                     )
                 )
+            elif actual == "deny":
+                failures.extend(denial_guidance_failures(case, stdout, stderr))
 
         records = read_jsonl(Path(env["WTG_ACTION_LOG_FILE"]))
         if len(records) != len(cases) * 2:
@@ -147,6 +157,22 @@ def hook_routing_failures(temp: Path) -> list[tuple[Case, str, str, str]]:
                     )
                 )
     return failures
+
+
+def denial_guidance_failures(
+    case: Case, stdout: str, stderr: str
+) -> list[tuple[Case, str, str, str]]:
+    missing = [snippet for snippet in DENIAL_GUIDANCE if snippet not in stdout]
+    if not missing:
+        return []
+    return [
+        (
+            Case(f"{case.name} includes bug-report guidance", "all guidance", case.payload),
+            f"missing: {', '.join(missing)}",
+            stdout,
+            stderr,
+        )
+    ]
 
 
 def shim_routing_failures(temp: Path) -> list[tuple[Case, str, str, str]]:

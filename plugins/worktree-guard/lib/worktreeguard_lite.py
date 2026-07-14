@@ -1623,7 +1623,10 @@ def denial_message(base_path: Path) -> str:
         "If base access is truly required, ask for a human approval:\n\n"
         f"  {command} request-base-access --repo {shlex.quote(str(base_path))} \\\n"
         "    --reason \"<why this cannot be done in a worktree>\" \\\n"
-        "    --scope session"
+        "    --scope session\n\n"
+        "If this denial appears to be a WorktreeGuard bug because the operation "
+        "should have been allowed, and tenex-edge fabric is available, join "
+        "`skills.worktree-guard` and leave a bug note there without tagging any agent."
     )
 
 
