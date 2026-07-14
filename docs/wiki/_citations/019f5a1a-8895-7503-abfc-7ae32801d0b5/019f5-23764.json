@@ -1,0 +1,6 @@
+{
+  "id": "019f5-23764",
+  "ts": "2026-07-13T07:49:36Z",
+  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
+  "text": "* there should be controls to pause/stop/ and tts prev/skip\n* the progressbar should allow me to scrub to that point of the timeline [...] Assistant: Got it. This supersedes the passive/click-through treatment: the HUD should be a real non-activating mini-player—larger typography, hover expansion, pause/resume, stop, 15-second back/forward, and a scrubbable timeline—while still never stealing focus. I’m folding all of that into the directory-path follow-up before it ships."
+}

@@ -16,9 +16,14 @@ import unittest
 
 
 class KokoroHandler(BaseHTTPRequestHandler):
+    received_inputs: list[str] = []
+    received_inputs_lock = threading.Lock()
+
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         length = int(self.headers.get("Content-Length", "0"))
-        self.rfile.read(length)
+        request = json.loads(self.rfile.read(length))
+        with self.received_inputs_lock:
+            self.received_inputs.append(request["input"])
         payload = json.dumps(
             {
                 "audio": base64.b64encode(b"test-mp3-audio").decode("ascii"),
@@ -36,6 +41,10 @@ class KokoroHandler(BaseHTTPRequestHandler):
 
 
 class AttachmentFlowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        with KokoroHandler.received_inputs_lock:
+            KokoroHandler.received_inputs = []
+
     def test_builds_durable_brief_and_prepares_narration(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         tts_command = repository / "tts" / "scripts" / "tts"
@@ -49,6 +58,10 @@ class AttachmentFlowTests(unittest.TestCase):
             markdown.write_text("# Why this matters\n\n- Durable context stays nearby.\n", encoding="utf-8")
             image = root / "screen.png"
             image.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+            vector = root / "mockup.svg"
+            vector.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>', encoding="utf-8")
+            diagram = root / "flow.mmd"
+            diagram.write_text("flowchart LR\n  A --> B\n", encoding="utf-8")
             fake_menu = root / "tts-menu"
             fake_menu.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             fake_menu.chmod(0o755)
@@ -81,6 +94,12 @@ class AttachmentFlowTests(unittest.TestCase):
                         "--attach",
                         "Screenshot",
                         str(image),
+                        "--attach",
+                        "Vector mockup",
+                        str(vector),
+                        "--attach",
+                        "Architecture flow",
+                        str(diagram),
                     ],
                     env=environment,
                     text=True,
@@ -111,6 +130,67 @@ class AttachmentFlowTests(unittest.TestCase):
                 self.assertTrue(Path(narrated["audio_file"]).is_file())
                 self.assertEqual(item["attachments"][1]["kind"], "image")
                 self.assertTrue(Path(item["attachments"][1]["source_file"]).is_file())
+                self.assertEqual(item["attachments"][2]["kind"], "image")
+                self.assertTrue(Path(item["attachments"][2]["source_file"]).is_file())
+                self.assertEqual(item["attachments"][3]["kind"], "diagram")
+                self.assertEqual(item["attachments"][3]["text"], "flowchart LR\n  A --> B\n")
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
+
+    def test_language_tagged_code_is_kept_visual_but_omitted_from_speech(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+        message = """Before the sample.
+
+```swift
+let visualOnly = 42
+```
+[\"The sample assigns a value.\"]
+
+After the sample."""
+
+        with tempfile.TemporaryDirectory(prefix="tts-code-speech-") as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            home.mkdir()
+            server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "KOKORO_API_ENDPOINT": f"http://127.0.0.1:{server.server_port}/v1/audio/speech",
+                        "TTS_SESSIONS_ROOT": str(root / "sessions"),
+                        "TTS_STATE_DIR": str(root / "state"),
+                    }
+                )
+                subprocess.run(
+                    [
+                        str(tts_command),
+                        "--no-play",
+                        "--voice-id",
+                        "af_nova",
+                        "--message",
+                        message,
+                    ],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+
+                with KokoroHandler.received_inputs_lock:
+                    spoken = KokoroHandler.received_inputs[-1]
+                self.assertNotIn("visualOnly", spoken)
+                self.assertNotIn("```", spoken)
+                self.assertIn("The sample assigns a value.", spoken)
+                self.assertIn("Before the sample.", spoken)
+                self.assertIn("After the sample.", spoken)
             finally:
                 server.shutdown()
                 thread.join(timeout=2)

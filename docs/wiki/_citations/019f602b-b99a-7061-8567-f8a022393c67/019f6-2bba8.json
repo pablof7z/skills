@@ -1,0 +1,6 @@
+{
+  "id": "019f6-2bba8",
+  "ts": "2026-07-14T10:45:01Z",
+  "session": "019f602b-b99a-7061-8567-f8a022393c67",
+  "text": "Assistant: The isolated regression matrix passes all 66 decisions for both harnesses. The new Codex-only cases prove both safety directions: it recovers a linked-worktree target from the real flattened transcript shape, and it still denies when that recovered target is the protected base. Syntax and diff checks are clean; I’m publishing the PR now.\n\nAssistant: Fixed and merged via [issue #102](https://github.com/pablof7z/skills/issues/102) and [PR #103](https://github.com/pablof7z/skills/pull/103), commit `0c26b6e`.\n\nWorktreeGuard now securely recovers the missing Codex `workdir`; ambiguous cases remain conservatively denied. All 66 decisions passed across both harnesses."
+}

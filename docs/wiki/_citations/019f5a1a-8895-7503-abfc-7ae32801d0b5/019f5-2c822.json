@@ -1,0 +1,6 @@
+{
+  "id": "019f5-2c822",
+  "ts": "2026-07-13T07:49:36Z",
+  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
+  "text": "* on mouseover it should animate to be bigger [...] Assistant: Got it. This supersedes the passive/click-through treatment: the HUD should be a real non-activating mini-player—larger typography, hover expansion, pause/resume, stop, 15-second back/forward, and a scrubbable timeline—while still never stealing focus. I’m folding all of that into the directory-path follow-up before it ships."
+}

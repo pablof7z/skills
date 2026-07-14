@@ -51,12 +51,19 @@ def update_attachment(item_path: Path, attachment_id: str, **changes: object) ->
 
 
 def markdown_for_speech(value: str) -> str:
-    value = re.sub(r"```.*?```", " Code sample omitted. ", value, flags=re.DOTALL)
+    value = re.sub(r"```([^\n`]*)\n.*?```", _replace_lang_block_for_speech, value, flags=re.DOTALL)
     value = re.sub(r"!\[([^]]*)\]\([^)]+\)", r"\1", value)
     value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
     value = re.sub(r"^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+", "", value, flags=re.MULTILINE)
     value = re.sub(r"[`*_~]", "", value)
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _replace_lang_block_for_speech(match: re.Match) -> str:
+    fence = match.group(1).strip()
+    if not fence:
+        return match.group(0)
+    return " "
 
 
 def prepare(item_path: Path, attachment: dict, voice: str, tts_command: Path) -> None:

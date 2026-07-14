@@ -1,0 +1,6 @@
+{
+  "id": "019f5-30578",
+  "ts": "2026-07-13T07:49:37Z",
+  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
+  "text": "Assistant: Root cause found. Every 250ms playback refresh assigns `lingeringItem = nil` even when it is already nil. That publishes a presentation change, which starts another frame/opacity animation with the same target. The overlapping no-op animations produce the flicker and drive SwiftUI/AppKit rendering CPU.\n\nI’m fixing this at two boundaries: make the state update idempotent, and refuse layout animation when frame/opacity are already at their target. I’ll ship it separately from the paused speed-profile branch.\n\nAssistant: The regression patch is in the CPU-fix worktree. It suppresses unchanged presentation publishes, skips identical frame/opacity animations, and stops republishing unchanged queue/duration state. Swift tests and a release build are running now. [...] I’m tightening that boundary now: render the word tree only when the active word actually changes, auto-scroll in stable chunks instead of every word, and explicitly unhide the accessory app without activation before ordering the HUD onscreen."
+}

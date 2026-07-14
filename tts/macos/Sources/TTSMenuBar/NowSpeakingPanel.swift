@@ -974,6 +974,11 @@ private struct NowSpeakingHUDView: View {
                     selected ? nil : attachment.id,
                     image: selected ? nil : NSImage(contentsOfFile: attachment.sourceFile)
                 )
+            case .diagram:
+                presentation.selectAttachment(
+                    selected ? nil : attachment.id,
+                    text: selected ? nil : (attachment.displayText ?? attachment.text)
+                )
             case .narratedText, .audio:
                 if attachment.isPlayable {
                     if item.isAttachmentPlayback,
@@ -1136,6 +1141,7 @@ private struct NowSpeakingHUDView: View {
         switch attachment.kind {
         case .narratedText: return attachment.isPlayable ? "waveform" : "doc.text"
         case .image: return "photo"
+        case .diagram: return "flowchart"
         case .audio: return "speaker.wave.2"
         case .file: return "paperclip"
         }
@@ -1146,7 +1152,7 @@ private struct NowSpeakingHUDView: View {
         case (_, .failed): return attachment.error ?? "Attachment preparation failed"
         case (.narratedText, .preparing): return "Read while narration is prepared"
         case (.narratedText, .ready), (.audio, .ready): return "Play \(attachment.label)"
-        case (.image, _): return "Preview \(attachment.label)"
+        case (.image, _), (.diagram, _): return "Preview \(attachment.label)"
         case (.file, _): return "Open \(attachment.label)"
         case (.audio, .preparing): return "Preparing audio"
         }

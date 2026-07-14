@@ -31,6 +31,7 @@ struct TTSWordTiming: Codable, Equatable {
 enum TTSAttachmentKind: String, Codable, Equatable {
     case narratedText = "narrated_text"
     case image
+    case diagram
     case audio
     case file
 }

@@ -199,6 +199,27 @@ normalize_space() {
   printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
+strip_spoken_code_blocks() {
+  python3 - "$1" <<'PY'
+import re
+import sys
+
+text = sys.argv[1]
+pattern = re.compile(r"```([^\n`]*)\n.*?```", re.DOTALL)
+
+def replace(match):
+    fence = match.group(1).strip()
+    if not fence:
+        return match.group(0)
+    return " "
+
+result = pattern.sub(replace, text)
+result = re.sub(r"[ \t]+", " ", result)
+result = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", result)
+sys.stdout.write(result.strip())
+PY
+}
+
 safe_path_component() {
   python3 - "$1" <<'PY'
 import hashlib
@@ -233,7 +254,8 @@ values = sys.argv[2:]
 if len(values) % 2:
     raise SystemExit("attachment labels and paths must be paired")
 
-image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif", ".tiff"}
+image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif", ".tiff", ".svg"}
+diagram_extensions = {".mmd"}
 audio_extensions = {".mp3", ".m4a", ".wav", ".aac", ".aiff", ".caf"}
 text_extensions = {".md", ".markdown", ".txt"}
 attachments = []
@@ -264,6 +286,9 @@ for index in range(0, len(values), 2):
         audio_file = str(directory / "narration.mp3")
     elif extension in image_extensions:
         kind = "image"
+    elif extension in diagram_extensions:
+        kind = "diagram"
+        text = copied.read_text(encoding="utf-8")
     elif extension in audio_extensions:
         kind = "audio"
         audio_file = str(copied)
@@ -716,7 +741,8 @@ if ! [[ "$HANDOFF_DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 
 DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
-TEXT=$(normalize_space "$DISPLAY_TEXT")
+TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
+TEXT=$(normalize_space "$TEXT")
 INTRODUCTION=$(normalize_space "$INTRODUCTION")
 SUBJECT=$(normalize_space "$SUBJECT")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")

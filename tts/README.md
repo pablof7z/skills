@@ -41,12 +41,12 @@ Configure a Kokoro-compatible endpoint, then run:
 ```bash
 export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
 ./scripts/tts \
-  --agent-name nova-summit-482 \
-  --introduction "Agent Nova here, working on the repository launch." \
+  --agent-name "<your-agent-id>" \
+  --introduction "Agent <name> here, working on the repository launch." \
   --subject "The repository launch update is ready" \
-  --message "The README update is ready for review. I attached the rationale and a screenshot." \
-  --attach "Why this matters" ./why-this-matters.md \
-  --attach "Screenshot" ./screenshot.png
+  --message "The README update is ready for review. I attached the proposal and a mockup." \
+  --attach "Architectural proposal" ./proposal.md \
+  --attach "Mockup A" ./mockup-a.svg
 ```
 
 On macOS 13 or later with Swift available, the first audible request builds and starts the menu-bar player. The command returns after generation succeeds and the item has been accepted for playback.

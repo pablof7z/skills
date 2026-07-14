@@ -1,0 +1,6 @@
+{
+  "id": "019f5-9b7ce",
+  "ts": "2026-07-13T06:08:12Z",
+  "session": "019f5a0e-b266-7f52-aa62-74683239dab4",
+  "text": "Every non-trivial change must point to a GitHub issue that clarifies the need or want, not the implementation plan, and must be delivered through a PR that is merged."
+}
