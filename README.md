@@ -69,6 +69,15 @@ The result is a useful mental model, not a file tour, glossary dump, or performa
 
 [See what a good high-level explanation should accomplish →](high-level/README.md)
 
+### [Home Directory: Keep Agent-Private State Together](home-directory/SKILL.md)
+
+Session handles come and go, but an agent's private notes, helper scripts,
+drafts, and lightweight caches should not scatter across a new directory every
+time. `home-directory` resolves one durable `~/.agents/home/{identifier}` path
+from the stable agent identity and keeps session identity out of that choice.
+
+[See the private-state boundary and resolver →](home-directory/SKILL.md)
+
 ### [NIP-60: Keep Nostr Cashu Wallet State Coherent](nip60/README.md)
 
 In a Cashu wallet, the hard part is not drawing a balance. It is keeping proofs, mints, encrypted Nostr events, pending operations, nutzaps, and recovery coherent when the network is partial and money is in motion.
@@ -88,6 +97,7 @@ Most skill folders contain instructions and reference material only. The excepti
 - `tts` sends supplied text to the Kokoro-compatible endpoint you configure, writes generated audio under `/tmp`, stores queue state under `~/.local/state/tts`, and may control Music or Spotify on macOS unless disabled.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
 - `design-exploration-capture` may create or update local exploration notes while a design session is active.
+- `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
 - The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
 

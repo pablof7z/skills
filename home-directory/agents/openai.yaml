@@ -1,0 +1,4 @@
+interface:
+  display_name: "Home Directory"
+  short_description: "Keep private state across agent sessions"
+  default_prompt: "Use $home-directory to resolve a durable private directory for this agent's persistent state."
