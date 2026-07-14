@@ -111,6 +111,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playerItem.target = self
         menu.addItem(playerItem)
 
+        let windowedItem = NSMenuItem(
+            title: nowSpeakingPanel.isWindowedMode ? "Use Floating HUD" : "Use Windowed Player",
+            action: #selector(toggleWindowedModeFromQuickMenu),
+            keyEquivalent: ""
+        )
+        windowedItem.image = NSImage(
+            systemSymbolName: nowSpeakingPanel.isWindowedMode ? "pip" : "macwindow",
+            accessibilityDescription: nil
+        )
+        windowedItem.target = self
+        menu.addItem(windowedItem)
+
         let pauseItem = NSMenuItem(
             title: controller.isGloballyPaused ? "Resume All TTS" : "Pause All TTS",
             action: #selector(toggleGlobalPlaybackFromQuickMenu),
@@ -129,6 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func togglePlayerFromQuickMenu() {
         nowSpeakingPanel.togglePlayerVisibility()
+    }
+
+    @objc
+    private func toggleWindowedModeFromQuickMenu() {
+        nowSpeakingPanel.toggleWindowedMode()
     }
 
     @objc
@@ -299,6 +316,22 @@ private struct QueueView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .help(playerController.isPlayerVisible ? "Hide the floating player" : "Show the floating player")
+            Button {
+                playerController.toggleWindowedMode()
+            } label: {
+                Image(systemName: playerController.isWindowedMode ? "pip" : "macwindow")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help(
+                playerController.isWindowedMode
+                    ? "Switch to the floating HUD player"
+                    : "Show the player as a normal window"
+            )
+            .accessibilityLabel(
+                playerController.isWindowedMode ? "Use floating HUD player" : "Use windowed player"
+            )
             Button {
                 controller.toggleGlobalPlaybackPause()
             } label: {

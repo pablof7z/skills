@@ -15,14 +15,17 @@ final class NowSpeakingPanelController: ObservableObject {
     private let playbackController: PlaybackController
     private let preferencesStore: HUDPreferencesStore
     private let presentation: NowSpeakingPresentation
-    private let panel: PassiveHUDPanel
+    private var panel: NSWindow
+    private var windowedMode: Bool
     @Published private(set) var isPlayerVisible: Bool
+    @Published private(set) var isWindowedMode: Bool
     private var playbackObservation: AnyCancellable?
     private var presentationObservation: AnyCancellable?
     private var screenObservation: AnyCancellable?
     private var moveObservation: AnyCancellable?
     private var resizeObservation: AnyCancellable?
     private var liveResizeEndObservation: AnyCancellable?
+    private var closeObservation: AnyCancellable?
     private var lingerTask: Task<Void, Never>?
     private var fadeTask: Task<Void, Never>?
     private var geometrySaveTask: Task<Void, Never>?
@@ -37,30 +40,18 @@ final class NowSpeakingPanelController: ObservableObject {
     init(controller: PlaybackController, preferencesStore: HUDPreferencesStore) {
         playbackController = controller
         self.preferencesStore = preferencesStore
+        let windowed = preferencesStore.preferences.isWindowedModeEnabled
+        windowedMode = windowed
+        isWindowedMode = windowed
         presentation = NowSpeakingPresentation(
-            isMiniPlayer: preferencesStore.preferences.isMiniPlayer
+            isMiniPlayer: windowed ? false : preferencesStore.preferences.isMiniPlayer
         )
         isPlayerVisible = preferencesStore.preferences.isPlayerVisible
-        observedMiniPlayer = preferencesStore.preferences.isMiniPlayer
-        panel = PassiveHUDPanel(
-            contentRect: NSRect(origin: .zero, size: Layout.expandedSize),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
+        observedMiniPlayer = windowed ? false : preferencesStore.preferences.isMiniPlayer
+        panel = Self.makeWindow(windowed: windowed, initialSize: Layout.expandedSize)
 
         configurePanel()
-        let hostingView = FirstMouseHostingView(
-            rootView: NowSpeakingHUDView(
-                controller: controller,
-                presentation: presentation,
-                onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
-                onHide: { [weak self] in self?.setPlayerVisible(false) }
-            )
-            .environment(\.colorScheme, .dark)
-        )
-        hostingView.autoresizingMask = [.width, .height]
-        panel.contentView = hostingView
+        attachContentView()
 
         playbackObservation = controller.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
@@ -84,6 +75,44 @@ final class NowSpeakingPanelController: ObservableObject {
                 self.positionPanel(size: size)
             }
         }
+        setUpPanelObservations()
+    }
+
+    private static func makeWindow(windowed: Bool, initialSize: NSSize) -> NSWindow {
+        if windowed {
+            let window = NSWindow(
+                contentRect: NSRect(origin: .zero, size: initialSize),
+                styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "TTS Player"
+            return window
+        }
+        return PassiveHUDPanel(
+            contentRect: NSRect(origin: .zero, size: initialSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+    }
+
+    private func attachContentView() {
+        let hostingView = FirstMouseHostingView(
+            rootView: NowSpeakingHUDView(
+                controller: playbackController,
+                presentation: presentation,
+                isWindowedMode: windowedMode,
+                onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
+                onHide: { [weak self] in self?.setPlayerVisible(false) }
+            )
+            .environment(\.colorScheme, .dark)
+        )
+        hostingView.autoresizingMask = [.width, .height]
+        panel.contentView = hostingView
+    }
+
+    private func setUpPanelObservations() {
         moveObservation = NotificationCenter.default.publisher(
             for: NSWindow.didMoveNotification,
             object: panel
@@ -108,6 +137,52 @@ final class NowSpeakingPanelController: ObservableObject {
                 self?.clampCurrentFrameToVisibleScreen()
             }
         }
+        closeObservation = NotificationCenter.default.publisher(
+            for: NSWindow.willCloseNotification,
+            object: panel
+        ).sink { [weak self] _ in
+            Task { @MainActor in
+                self?.setPlayerVisible(false)
+            }
+        }
+    }
+
+    func toggleWindowedMode() {
+        setWindowedMode(!windowedMode)
+    }
+
+    func setWindowedMode(_ windowed: Bool) {
+        guard windowed != windowedMode else { return }
+        let wasVisible = panel.isVisible
+
+        cancelLingerDismissal(resetCountdown: true, restoreOpacity: false)
+        presentation.lingeringItem = nil
+        presentation.lingeringTime = 0
+        presentation.lingeringDuration = 0
+        presentation.setMiniPlayer(windowed ? false : preferencesStore.preferences.isMiniPlayer)
+        observedMiniPlayer = presentation.isMiniPlayer
+
+        moveObservation?.cancel()
+        resizeObservation?.cancel()
+        liveResizeEndObservation?.cancel()
+        closeObservation?.cancel()
+        panel.contentView = nil
+        panel.orderOut(nil)
+
+        windowedMode = windowed
+        isWindowedMode = windowed
+        preferencesStore.setWindowedMode(windowed)
+
+        panel = Self.makeWindow(windowed: windowed, initialSize: preferredExpandedSize)
+        configurePanel()
+        attachContentView()
+        setUpPanelObservations()
+
+        activeItemID = nil
+        lastCurrentItem = nil
+        if wasVisible {
+            refresh()
+        }
     }
 
     func refresh() {
@@ -118,7 +193,11 @@ final class NowSpeakingPanelController: ObservableObject {
             return
         }
         guard let item = playbackController.currentItem else {
-            beginLingerIfNeeded()
+            if windowedMode {
+                showIdleIfNeeded()
+            } else {
+                beginLingerIfNeeded()
+            }
             return
         }
 
@@ -187,43 +266,69 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func configurePanel() {
-        panel.level = .floating
-        panel.collectionBehavior = [
-            .canJoinAllSpaces,
-            .fullScreenAuxiliary,
-            .ignoresCycle,
-            .stationary,
-        ]
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        panel.ignoresMouseEvents = false
-        panel.acceptsMouseMovedEvents = true
-        panel.isMovable = true
-        panel.isMovableByWindowBackground = true
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.animationBehavior = .utilityWindow
         panel.isReleasedWhenClosed = false
-        panel.setAccessibilityLabel("Now speaking")
-        configureResizeLimits(expanded: true)
+        if windowedMode {
+            panel.isOpaque = true
+            panel.hasShadow = true
+            panel.level = .normal
+            panel.collectionBehavior = [.fullScreenAuxiliary]
+            panel.minSize = Layout.expandedSize
+            panel.setAccessibilityLabel("TTS Player")
+        } else {
+            panel.level = .floating
+            panel.collectionBehavior = [
+                .canJoinAllSpaces,
+                .fullScreenAuxiliary,
+                .ignoresCycle,
+                .stationary,
+            ]
+            (panel as? NSPanel)?.isFloatingPanel = true
+            panel.hidesOnDeactivate = false
+            panel.ignoresMouseEvents = false
+            panel.acceptsMouseMovedEvents = true
+            panel.isMovable = true
+            panel.isMovableByWindowBackground = true
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = false
+            panel.animationBehavior = .utilityWindow
+            panel.setAccessibilityLabel("Now speaking")
+            configureResizeLimits(expanded: true)
+        }
+    }
+
+    private func showIdleIfNeeded() {
+        if presentation.lingeringItem != nil || lingerTask != nil || isFading {
+            cancelLingerDismissal(resetCountdown: true, restoreOpacity: true)
+        }
+        presentation.lingeringItem = nil
+        lastCurrentItem = nil
+        activeItemID = nil
+        guard !panel.isVisible else { return }
+        showPlayer()
     }
 
     private func showPlayer() {
         configureResizeLimits(expanded: presentation.isExpanded)
         positionPanel(size: presentation.isExpanded ? preferredExpandedSize : Layout.compactSize)
-        panel.alphaValue = 0
-        NSApp.unhideWithoutActivation()
-        panel.orderFrontRegardless()
+        if windowedMode {
+            panel.alphaValue = 1
+            NSApp.unhideWithoutActivation()
+            panel.orderFront(nil)
+        } else {
+            panel.alphaValue = 0
+            NSApp.unhideWithoutActivation()
+            panel.orderFrontRegardless()
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
-            panel.animator().alphaValue = 1
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                panel.animator().alphaValue = 1
+            }
         }
     }
 
     private func updateLayout(animated: Bool) {
-        if playbackController.currentItem == nil && presentation.lingeringItem == nil {
+        if !windowedMode, playbackController.currentItem == nil, presentation.lingeringItem == nil {
             hide()
             return
         }
@@ -232,7 +337,7 @@ final class NowSpeakingPanelController: ObservableObject {
         configureResizeLimits(expanded: expanded)
         let size = expanded ? preferredExpandedSize : Layout.compactSize
         let frame = frameFor(size: size)
-        let alpha: CGFloat = presentation.isExpanded ? 1 : 0.84
+        let alpha: CGFloat = windowedMode ? 1 : (presentation.isExpanded ? 1 : 0.84)
         guard HUDLayoutUpdate.isNeeded(
             currentFrame: panel.frame,
             targetFrame: frame,
@@ -396,6 +501,7 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func configureResizeLimits(expanded: Bool) {
+        guard !windowedMode else { return }
         let maximumSize = HUDPlacement.frame(
             size: CGSize(width: 100_000, height: 100_000),
             preferredOrigin: preferencesStore.preferences.origin,
@@ -615,6 +721,7 @@ private final class NowSpeakingPresentation: ObservableObject {
 private struct NowSpeakingHUDView: View {
     @ObservedObject var controller: PlaybackController
     @ObservedObject var presentation: NowSpeakingPresentation
+    let isWindowedMode: Bool
     let onToggleMiniPlayer: () -> Void
     let onHide: () -> Void
 
@@ -662,12 +769,12 @@ private struct NowSpeakingHUDView: View {
             .onHover { presentation.updateHover($0) }
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .overlay {
-                if presentation.isExpanded {
+                if presentation.isExpanded, !isWindowedMode {
                     PlayerResizeRegions()
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if presentation.isExpanded {
+                if presentation.isExpanded, !isWindowedMode {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.tertiary)
@@ -677,6 +784,13 @@ private struct NowSpeakingHUDView: View {
                 }
             }
             .accessibilityLabel("Now speaking. \(item.nowSpeakingTitle). \(item.nowSpeakingContext)")
+        } else if isWindowedMode {
+            PlayerHistoryView(controller: controller, onHide: onHide)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .hudSurface(accent: .accentColor)
+                .padding(8)
         }
     }
 
@@ -740,19 +854,21 @@ private struct NowSpeakingHUDView: View {
                     .accessibilityLabel("\(item.briefAttachments.count) attachments")
             }
 
-            Button(action: onToggleMiniPlayer) {
-                Image(
-                    systemName: presentation.isExpanded
-                        ? "arrow.down.right.and.arrow.up.left"
-                        : "arrow.up.left.and.arrow.down.right"
-                )
-                .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
+            if !isWindowedMode {
+                Button(action: onToggleMiniPlayer) {
+                    Image(
+                        systemName: presentation.isExpanded
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right"
+                    )
+                    .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help(presentation.isExpanded ? "Use mini player" : "Expand player")
+                .accessibilityLabel(presentation.isExpanded ? "Use mini player" : "Expand player")
             }
-            .buttonStyle(.plain)
-            .help(presentation.isExpanded ? "Use mini player" : "Expand player")
-            .accessibilityLabel(presentation.isExpanded ? "Use mini player" : "Expand player")
 
             Button(action: onHide) {
                 Image(systemName: "xmark")
@@ -1151,6 +1267,121 @@ private struct NowSpeakingHUDView: View {
         guard seconds.isFinite else { return "0:00" }
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+private struct PlayerHistoryView: View {
+    @ObservedObject var controller: PlaybackController
+    let onHide: () -> Void
+    @State private var projectFilter: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("History", systemImage: "clock.arrow.circlepath")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                if availableProjects.count > 1 {
+                    Picker("Project", selection: $projectFilter) {
+                        Text("All Projects").tag(String?.none)
+                        ForEach(availableProjects, id: \.self) { project in
+                            Text(project).tag(String?.some(project))
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 180)
+                }
+                Button(action: onHide) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("Hide player")
+                .accessibilityLabel("Hide player")
+            }
+
+            if filteredItems.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    Text(historyItems.isEmpty ? "No recent speech" : "No speech for this project")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(filteredItems.prefix(60)) { item in
+                            PlayerHistoryRow(item: item, action: { controller.playNow(item) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var historyItems: [TTSItem] {
+        controller.recentItems
+    }
+
+    private var filteredItems: [TTSItem] {
+        guard let projectFilter else { return historyItems }
+        return historyItems.filter { $0.workspaceName == projectFilter }
+    }
+
+    private var availableProjects: [String] {
+        Array(Set(historyItems.compactMap(\.workspaceName))).sorted()
+    }
+}
+
+private struct PlayerHistoryRow: View {
+    let item: TTSItem
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 9) {
+                let accent = WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
+                Circle()
+                    .fill(accent)
+                    .frame(width: 7, height: 7)
+                    .padding(.top, 5)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.nowSpeakingTitle)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        if let workspace = item.workspaceName {
+                            Text(workspace)
+                        }
+                        Text(item.createdDate.formatted(date: .omitted, time: .shortened))
+                        if item.status == .failed {
+                            Text("Failed").foregroundStyle(.red)
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "play.circle")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(!FileManager.default.fileExists(atPath: item.outputFile))
+        .help("Play now")
+        .accessibilityLabel("Play now " + (item.subjectLabel ?? item.text))
     }
 }
 
