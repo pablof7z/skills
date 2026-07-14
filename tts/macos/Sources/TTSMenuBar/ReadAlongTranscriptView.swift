@@ -92,7 +92,11 @@ final class InteractiveTranscriptTextView: NSTextView {
         if contentChanged {
             sourceText = text
             let rendered = TranscriptMarkdown.render(text, accent: accent)
-            document = TranscriptDocument.build(text: rendered.string, timings: timings, duration: duration)
+            document = TranscriptDocument.build(
+                attributedText: rendered,
+                timings: timings,
+                duration: duration
+            )
             installText(rendered)
             lastScrolledPhraseIndex = nil
         }
@@ -147,11 +151,10 @@ final class InteractiveTranscriptTextView: NSTextView {
 
         if let activeWordIndex = playbackState.activeWordIndex,
            document.words.indices.contains(activeWordIndex) {
-            let completedEnd = document.words[activeWordIndex].range.location
-            if completedEnd > 0 {
+            for completedWord in document.words[..<activeWordIndex] {
                 layoutManager.addTemporaryAttributes(
                     [.foregroundColor: NSColor.labelColor.withAlphaComponent(0.86)],
-                    forCharacterRange: NSRange(location: 0, length: completedEnd)
+                    forCharacterRange: completedWord.range
                 )
             }
         }

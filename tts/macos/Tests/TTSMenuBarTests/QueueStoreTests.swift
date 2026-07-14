@@ -721,6 +721,67 @@ struct QueueStoreTests {
     }
 
     @Test
+    func hidesSpeechOnlyCodeDescriptionFromTranscript() {
+        let rendered = TranscriptMarkdown.render(
+            """
+            ```swift
+            let passed = true
+            ```
+            ["The Swift sample returns true."]
+            """,
+            accent: .systemPink
+        )
+
+        #expect(rendered.string.contains("let passed = true"))
+        #expect(!rendered.string.contains("The Swift sample returns true"))
+    }
+
+    @Test
+    func excludesLanguageTaggedCodeFromReadAlongTiming() throws {
+        let rendered = TranscriptMarkdown.render(
+            """
+            Before code.
+            ```swift
+            let passed = true
+            ```
+            ["The Swift sample describes a true result in detail."]
+            After code.
+            """,
+            accent: .systemPink
+        )
+        let timings = [
+            timing("Before", 0.0, 0.3),
+            timing("code", 0.3, 0.5),
+            timing("The", 0.7, 0.9),
+            timing("Swift", 0.9, 1.2),
+            timing("sample", 1.2, 1.5),
+            timing("describes", 1.5, 1.9),
+            timing("a", 1.9, 2.0),
+            timing("true", 2.0, 2.2),
+            timing("result", 2.2, 2.5),
+            timing("in", 2.5, 2.6),
+            timing("detail", 2.6, 3.0),
+            timing("After", 3.2, 3.5),
+            timing("code", 3.5, 3.8),
+        ]
+
+        let document = TranscriptDocument.build(
+            attributedText: rendered,
+            timings: timings,
+            duration: 3.8
+        )
+        let codeRange = (rendered.string as NSString).range(of: "passed")
+        let afterRange = (rendered.string as NSString).range(of: "After")
+
+        #expect(document.words.count == 4)
+        #expect(document.wordIndex(at: codeRange.location) == nil)
+        #expect(document.playbackState(at: 1.5, duration: 3.8).activeWordIndex == nil)
+        #expect(document.wordIndex(at: afterRange.location) == 2)
+        #expect(document.playbackState(at: 3.3, duration: 3.8).activeWordIndex == 2)
+        #expect(document.seekTime(forWordAt: 2, duration: 3.8) == 3.2)
+    }
+
+    @Test
     func rendersBareCodeBlockWithoutLabel() {
         let source = """
         Run this:
@@ -733,6 +794,12 @@ struct QueueStoreTests {
         let rendered = TranscriptMarkdown.render(source, accent: .systemPink)
 
         #expect(rendered.string == "Run this:\n\n\necho hello\n\nDone.")
+        let codeRange = (rendered.string as NSString).range(of: "echo")
+        #expect(rendered.attribute(
+            .transcriptNonSpoken,
+            at: codeRange.location,
+            effectiveRange: nil
+        ) == nil)
     }
 
     @Test
@@ -761,6 +828,23 @@ struct QueueStoreTests {
             }
         }
         #expect(foundKeywordColor)
+        let codeRange = (rendered.string as NSString).range(of: "let")
+        #expect(rendered.attribute(
+            .transcriptNonSpoken,
+            at: codeRange.location,
+            effectiveRange: nil
+        ) as? Bool == true)
+    }
+
+    @Test
+    func mermaidPreviewLoadsRendererAndKeepsReadableFallback() {
+        let source = "flowchart LR\nA[Message] --> B{Type}"
+        let document = MermaidHTML.document(source: source, darkMode: true, accentHue: 87)
+
+        #expect(document.contains("mermaid@11"))
+        #expect(document.contains("mermaid.render"))
+        #expect(document.contains("Diagram preview unavailable"))
+        #expect(document.contains("flowchart LR\\nA[Message] --> B{Type}"))
     }
 
     @Test
