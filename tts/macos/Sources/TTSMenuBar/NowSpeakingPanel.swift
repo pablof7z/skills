@@ -37,6 +37,19 @@ final class NowSpeakingPanelController: ObservableObject {
     private var observedMiniPlayer: Bool
     private var isFading = false
 
+    /// Whether the controller drives the floating-HUD chrome. When `true` the
+    /// controller owns the panel's frame and lifetime: custom edge-resize,
+    /// screen-inset clamping, auto-positioning on screen changes, alpha fades,
+    /// the mini/expanded toggle, and the linger auto-hide. When `false`
+    /// (windowed mode) all of that is delegated to a standard OS window that the
+    /// user moves, resizes, and closes, so none of those routines may run.
+    ///
+    /// Gate every HUD-only frame/visibility routine on this so windowed mode can
+    /// never be repositioned, resized, faded, or auto-hidden underneath the
+    /// user. Use `windowedMode` directly only for windowed-only features (idle
+    /// history, Dock activation, in-place `orderFront`).
+    private var usesFloatingHUD: Bool { !windowedMode }
+
     init(controller: PlaybackController, preferencesStore: HUDPreferencesStore) {
         playbackController = controller
         self.preferencesStore = preferencesStore
@@ -67,7 +80,7 @@ final class NowSpeakingPanelController: ObservableObject {
             for: NSApplication.didChangeScreenParametersNotification
         ).sink { [weak self] _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.usesFloatingHUD else { return }
                 let size = self.presentation.isExpanded
                     ? self.preferredExpandedSize
                     : Layout.compactSize
@@ -98,16 +111,19 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func attachContentView() {
-        let hostingView = FirstMouseHostingView(
-            rootView: NowSpeakingHUDView(
-                controller: playbackController,
-                presentation: presentation,
-                isWindowedMode: windowedMode,
-                onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
-                onHide: { [weak self] in self?.setPlayerVisible(false) }
-            )
-            .environment(\.colorScheme, .dark)
+        let content = NowSpeakingHUDView(
+            controller: playbackController,
+            presentation: presentation,
+            isWindowedMode: windowedMode,
+            onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
+            onHide: { [weak self] in self?.setPlayerVisible(false) }
         )
+        // The floating HUD is always a dark glass overlay by design; a normal
+        // window should instead follow the system's light/dark appearance.
+        let rootView: AnyView = windowedMode
+            ? AnyView(content)
+            : AnyView(content.environment(\.colorScheme, .dark))
+        let hostingView = FirstMouseHostingView(rootView: rootView)
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
     }
@@ -182,6 +198,8 @@ final class NowSpeakingPanelController: ObservableObject {
         lastCurrentItem = nil
         if wasVisible {
             refresh()
+        } else {
+            updateActivationPolicy()
         }
     }
 
@@ -216,7 +234,12 @@ final class NowSpeakingPanelController: ObservableObject {
 
         if activeItemID != item.id {
             activeItemID = item.id
-            showPlayer()
+            if windowedMode, panel.isVisible {
+                // Leave the window exactly where the user placed/sized it; just surface it.
+                panel.orderFront(nil)
+            } else {
+                showPlayer()
+            }
         } else if !panel.isVisible {
             showPlayer()
         }
@@ -311,11 +334,8 @@ final class NowSpeakingPanelController: ObservableObject {
     private func showPlayer() {
         configureResizeLimits(expanded: presentation.isExpanded)
         positionPanel(size: presentation.isExpanded ? preferredExpandedSize : Layout.compactSize)
-        if windowedMode {
-            panel.alphaValue = 1
-            NSApp.unhideWithoutActivation()
-            panel.orderFront(nil)
-        } else {
+        if usesFloatingHUD {
+            // Fade the floating panel in above every space.
             panel.alphaValue = 0
             NSApp.unhideWithoutActivation()
             panel.orderFrontRegardless()
@@ -324,11 +344,22 @@ final class NowSpeakingPanelController: ObservableObject {
                 context.duration = 0.18
                 panel.animator().alphaValue = 1
             }
+        } else {
+            // Windowed mode is a normal window: show it opaque, no fade.
+            panel.alphaValue = 1
+            NSApp.unhideWithoutActivation()
+            panel.orderFront(nil)
         }
+        // panel.isVisible only flips true once ordered front, so this must run last.
+        updateActivationPolicy()
     }
 
     private func updateLayout(animated: Bool) {
-        if !windowedMode, playbackController.currentItem == nil, presentation.lingeringItem == nil {
+        // HUD-only: this drives the floating panel's frame and alpha as the
+        // mini/expanded state changes. Windowed mode never resizes or repositions
+        // itself programmatically, so it must not run through here.
+        guard usesFloatingHUD else { return }
+        if playbackController.currentItem == nil, presentation.lingeringItem == nil {
             hide()
             return
         }
@@ -337,7 +368,7 @@ final class NowSpeakingPanelController: ObservableObject {
         configureResizeLimits(expanded: expanded)
         let size = expanded ? preferredExpandedSize : Layout.compactSize
         let frame = frameFor(size: size)
-        let alpha: CGFloat = windowedMode ? 1 : (presentation.isExpanded ? 1 : 0.84)
+        let alpha: CGFloat = presentation.isExpanded ? 1 : 0.84
         guard HUDLayoutUpdate.isNeeded(
             currentFrame: panel.frame,
             targetFrame: frame,
@@ -396,6 +427,21 @@ final class NowSpeakingPanelController: ObservableObject {
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
         presentation.lingeringDuration = 0
+        updateActivationPolicy()
+    }
+
+    /// Windowed mode should behave like a normal app (Dock icon, Cmd+Tab) only
+    /// while its window is actually on screen; otherwise this stays a menu-bar-only accessory.
+    private func updateActivationPolicy() {
+        let shouldBeRegular = windowedMode && panel.isVisible
+        let target: NSApplication.ActivationPolicy = shouldBeRegular ? .regular : .accessory
+        guard NSApp.activationPolicy() != target else { return }
+        NSApp.setActivationPolicy(target)
+        if target == .regular {
+            // Without an activation nudge, LaunchServices/Dock can take several
+            // seconds (or never) to register the Dock tile after this policy change.
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     private func beginLingerIfNeeded() {
@@ -501,7 +547,9 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func configureResizeLimits(expanded: Bool) {
-        guard !windowedMode else { return }
+        // HUD-only: min/max sizes clamp the custom edge-resize to the screen.
+        // Windowed mode uses the native resize handle with its own limits.
+        guard usesFloatingHUD else { return }
         let maximumSize = HUDPlacement.frame(
             size: CGSize(width: 100_000, height: 100_000),
             preferredOrigin: preferencesStore.preferences.origin,
@@ -522,6 +570,10 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func clampCurrentFrameToVisibleScreen() {
+        // HUD-only: the floating panel is kept inside the screen inset after a
+        // custom edge-resize. A windowed player is resized natively by the OS and
+        // must keep exactly the frame the user dragged, so never clamp it.
+        guard usesFloatingHUD else { return }
         let frame = HUDPlacement.frame(
             size: panel.frame.size,
             preferredOrigin: panel.frame.origin,
@@ -764,8 +816,7 @@ private struct NowSpeakingHUDView: View {
             .padding(.horizontal, presentation.isExpanded ? 18 : 14)
             .padding(.vertical, presentation.isExpanded ? 16 : 11)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .hudSurface(accent: accent)
-            .padding(8)
+            .modifier(PlayerSurfaceStyle(isWindowedMode: isWindowedMode, accent: accent))
             .onHover { presentation.updateHover($0) }
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .overlay {
@@ -786,11 +837,8 @@ private struct NowSpeakingHUDView: View {
             .accessibilityLabel("Now speaking. \(item.nowSpeakingTitle). \(item.nowSpeakingContext)")
         } else if isWindowedMode {
             PlayerHistoryView(controller: controller, onHide: onHide)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .hudSurface(accent: .accentColor)
-                .padding(8)
+                .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 
@@ -1276,32 +1324,9 @@ private struct PlayerHistoryView: View {
     @State private var projectFilter: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("History", systemImage: "clock.arrow.circlepath")
-                    .font(.title3.weight(.semibold))
-                Spacer()
-                if availableProjects.count > 1 {
-                    Picker("Project", selection: $projectFilter) {
-                        Text("All Projects").tag(String?.none)
-                        ForEach(availableProjects, id: \.self) { project in
-                            Text(project).tag(String?.some(project))
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 180)
-                }
-                Button(action: onHide) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .help("Hide player")
-                .accessibilityLabel("Hide player")
-            }
+        VStack(spacing: 0) {
+            header
+            Divider()
 
             if filteredItems.isEmpty {
                 VStack(spacing: 6) {
@@ -1313,15 +1338,43 @@ private struct PlayerHistoryView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(filteredItems.prefix(60)) { item in
-                            PlayerHistoryRow(item: item, action: { controller.playNow(item) })
-                        }
-                    }
+                List(filteredItems.prefix(60)) { item in
+                    PlayerHistoryRow(item: item, action: { controller.playNow(item) })
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 }
+                .listStyle(.plain)
             }
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("History")
+                .font(.headline)
+            Spacer()
+            if availableProjects.count > 1 {
+                Picker("Project", selection: $projectFilter) {
+                    Text("All Projects").tag(String?.none)
+                    ForEach(availableProjects, id: \.self) { project in
+                        Text(project).tag(String?.some(project))
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 180)
+            }
+            Button(action: onHide) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Hide player")
+            .accessibilityLabel("Hide player")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private var historyItems: [TTSItem] {
@@ -1344,44 +1397,59 @@ private struct PlayerHistoryRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .top, spacing: 9) {
-                let accent = WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
-                Circle()
-                    .fill(accent)
-                    .frame(width: 7, height: 7)
-                    .padding(.top, 5)
-
+            HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.nowSpeakingTitle)
-                        .font(.subheadline.weight(.medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    HStack(spacing: 5) {
-                        if let workspace = item.workspaceName {
-                            Text(workspace)
-                        }
-                        Text(item.createdDate.formatted(date: .omitted, time: .shortened))
-                        if item.status == .failed {
-                            Text("Failed").foregroundStyle(.red)
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    Text(subtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
 
-                Image(systemName: "play.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                Text(item.createdDate.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, 5)
-            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+            .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
         .disabled(!FileManager.default.fileExists(atPath: item.outputFile))
         .help("Play now")
         .accessibilityLabel("Play now " + (item.subjectLabel ?? item.text))
+    }
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if let workspace = item.workspaceName {
+            parts.append(workspace)
+        }
+        if item.status == .failed {
+            parts.append("Failed")
+        } else {
+            parts.append(item.text)
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct PlayerSurfaceStyle: ViewModifier {
+    let isWindowedMode: Bool
+    let accent: Color
+
+    func body(content: Content) -> some View {
+        if isWindowedMode {
+            content.background(Color(nsColor: .windowBackgroundColor))
+        } else {
+            content
+                .hudSurface(accent: accent)
+                .padding(8)
+        }
     }
 }
 
