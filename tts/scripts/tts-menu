@@ -7,6 +7,9 @@ BINARY="$PACKAGE_DIR/.build/release/TTSMenuBar"
 APP_BUNDLE="$PACKAGE_DIR/.build/release/TTSMenuBar.app"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/TTSMenuBar"
 APP_INFO="$APP_BUNDLE/Contents/Info.plist"
+APP_RESOURCES="$APP_BUNDLE/Contents/Resources"
+APP_ICON_SOURCE="$PACKAGE_DIR/Resources/TTSMenuBar.icns"
+APP_ICON="$APP_RESOURCES/TTSMenuBar.icns"
 
 tts_state_dir() {
   if [ -n "${TTS_STATE_DIR:-}" ]; then
@@ -47,10 +50,13 @@ active_pid() {
 }
 
 stage_app_bundle() {
-  mkdir -p "$APP_BUNDLE/Contents/MacOS"
+  mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_RESOURCES"
   if [ ! -x "$APP_EXECUTABLE" ] || [ "$BINARY" -nt "$APP_EXECUTABLE" ]; then
     cp "$BINARY" "$APP_EXECUTABLE"
     chmod +x "$APP_EXECUTABLE"
+  fi
+  if [ ! -f "$APP_ICON" ] || [ "$APP_ICON_SOURCE" -nt "$APP_ICON" ]; then
+    cp "$APP_ICON_SOURCE" "$APP_ICON"
   fi
   cat > "$APP_INFO" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -63,6 +69,8 @@ stage_app_bundle() {
   <string>TTSMenuBar</string>
   <key>CFBundleIdentifier</key>
   <string>com.pablof7z.tts-menu</string>
+  <key>CFBundleIconFile</key>
+  <string>TTSMenuBar.icns</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -80,6 +88,7 @@ stage_app_bundle() {
 </dict>
 </plist>
 PLIST
+  touch "$APP_BUNDLE"
 }
 
 build_if_needed() {
