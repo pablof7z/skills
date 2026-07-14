@@ -3,6 +3,7 @@ import Foundation
 struct HUDPreferences: Codable, Equatable {
     var isPlayerVisible: Bool
     var isMiniPlayer: Bool
+    var isWindowedModeEnabled: Bool
     var originX: Double?
     var originY: Double?
     var expandedWidth: Double?
@@ -11,6 +12,7 @@ struct HUDPreferences: Codable, Equatable {
     init(
         isPlayerVisible: Bool = true,
         isMiniPlayer: Bool = false,
+        isWindowedModeEnabled: Bool = false,
         originX: Double? = nil,
         originY: Double? = nil,
         expandedWidth: Double? = nil,
@@ -18,6 +20,7 @@ struct HUDPreferences: Codable, Equatable {
     ) {
         self.isPlayerVisible = isPlayerVisible
         self.isMiniPlayer = isMiniPlayer
+        self.isWindowedModeEnabled = isWindowedModeEnabled
         self.originX = originX
         self.originY = originY
         self.expandedWidth = expandedWidth
@@ -28,6 +31,7 @@ struct HUDPreferences: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         isPlayerVisible = try container.decodeIfPresent(Bool.self, forKey: .isPlayerVisible) ?? true
         isMiniPlayer = try container.decodeIfPresent(Bool.self, forKey: .isMiniPlayer) ?? false
+        isWindowedModeEnabled = try container.decodeIfPresent(Bool.self, forKey: .isWindowedModeEnabled) ?? false
         originX = try container.decodeIfPresent(Double.self, forKey: .originX)
         originY = try container.decodeIfPresent(Double.self, forKey: .originY)
         expandedWidth = try container.decodeIfPresent(Double.self, forKey: .expandedWidth)
@@ -61,6 +65,11 @@ final class HUDPreferencesStore {
 
     func setMiniPlayer(_ miniPlayer: Bool) {
         preferences.isMiniPlayer = miniPlayer
+        save()
+    }
+
+    func setWindowedMode(_ windowed: Bool) {
+        preferences.isWindowedModeEnabled = windowed
         save()
     }
 
