@@ -175,6 +175,29 @@ struct QueueStoreTests {
     }
 
     @Test @MainActor
+    func generatingSpeechAppearsInPlayerListButNotPlaybackQueue() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        var generating = item(id: "generating", createdAt: 10)
+        generating.status = .generating
+        try store.save(generating)
+        let controller = PlaybackController(
+            store: store,
+            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            outputIsMuted: { false }
+        )
+        defer { controller.shutdown() }
+
+        controller.start()
+
+        #expect(controller.playerListItems.map(\.id) == [generating.id])
+        #expect(controller.queuedItems.isEmpty)
+        #expect(controller.currentItem == nil)
+        #expect(controller.isGenerating)
+    }
+
+    @Test @MainActor
     func explicitQueueSelectionClearsPauseAllAndDoesNotDuplicateItem() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

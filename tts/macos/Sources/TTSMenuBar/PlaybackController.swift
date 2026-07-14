@@ -50,6 +50,17 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             .sorted { $0.createdAt > $1.createdAt }
     }
 
+    var playerListItems: [TTSItem] {
+        items.filter {
+            ($0.status == .generating || $0.status.isRecent) && !$0.isAttachmentPlayback
+        }
+        .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    var isGenerating: Bool {
+        items.contains { $0.status == .generating && !$0.isAttachmentPlayback }
+    }
+
     var isPaused: Bool {
         currentItem?.status == .paused
     }

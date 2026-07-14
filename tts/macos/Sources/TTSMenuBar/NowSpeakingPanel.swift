@@ -1392,7 +1392,7 @@ private struct PlayerHistoryView: View {
     }
 
     private var historyItems: [TTSItem] {
-        controller.recentItems
+        controller.playerListItems
     }
 
     private var filteredItems: [TTSItem] {
@@ -1415,7 +1415,7 @@ private struct PlayerHistoryRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.nowSpeakingTitle)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(item.status == .generating ? .secondary : .primary)
                         .lineLimit(1)
                     Text(subtitle)
                         .font(.system(size: 11.5))
@@ -1425,17 +1425,24 @@ private struct PlayerHistoryRow: View {
 
                 Spacer(minLength: 8)
 
-                Text(item.createdDate.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                if item.status == .generating {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Generating audio")
+                } else {
+                    Text(item.createdDate.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
             }
             .contentShape(Rectangle())
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
-        .disabled(!FileManager.default.fileExists(atPath: item.outputFile))
-        .help("Play now")
-        .accessibilityLabel("Play now " + (item.subjectLabel ?? item.text))
+        .disabled(item.status == .generating || !FileManager.default.fileExists(atPath: item.outputFile))
+        .opacity(item.status == .generating ? 0.62 : 1)
+        .help(item.status == .generating ? "Generating audio" : "Play now")
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var subtitle: String {
@@ -1443,12 +1450,19 @@ private struct PlayerHistoryRow: View {
         if let workspace = item.workspaceName {
             parts.append(workspace)
         }
-        if item.status == .failed {
+        if item.status == .generating {
+            parts.append("Generating audio…")
+        } else if item.status == .failed {
             parts.append("Failed")
         } else {
             parts.append(item.text)
         }
         return parts.joined(separator: " · ")
+    }
+
+    private var accessibilityLabel: String {
+        let title = item.subjectLabel ?? item.text
+        return item.status == .generating ? "Generating audio for \(title)" : "Play now \(title)"
     }
 }
 

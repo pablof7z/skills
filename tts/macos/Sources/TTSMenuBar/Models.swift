@@ -1,6 +1,7 @@
 import Foundation
 
 enum PlaybackStatus: String, Codable, CaseIterable {
+    case generating
     case queued
     case playing
     case paused
