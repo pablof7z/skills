@@ -37,6 +37,19 @@ final class NowSpeakingPanelController: ObservableObject {
     private var observedMiniPlayer: Bool
     private var isFading = false
 
+    /// Whether the controller drives the floating-HUD chrome. When `true` the
+    /// controller owns the panel's frame and lifetime: custom edge-resize,
+    /// screen-inset clamping, auto-positioning on screen changes, alpha fades,
+    /// the mini/expanded toggle, and the linger auto-hide. When `false`
+    /// (windowed mode) all of that is delegated to a standard OS window that the
+    /// user moves, resizes, and closes, so none of those routines may run.
+    ///
+    /// Gate every HUD-only frame/visibility routine on this so windowed mode can
+    /// never be repositioned, resized, faded, or auto-hidden underneath the
+    /// user. Use `windowedMode` directly only for windowed-only features (idle
+    /// history, Dock activation, in-place `orderFront`).
+    private var usesFloatingHUD: Bool { !windowedMode }
+
     init(controller: PlaybackController, preferencesStore: HUDPreferencesStore) {
         playbackController = controller
         self.preferencesStore = preferencesStore
@@ -67,7 +80,7 @@ final class NowSpeakingPanelController: ObservableObject {
             for: NSApplication.didChangeScreenParametersNotification
         ).sink { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.windowedMode else { return }
+                guard let self, self.usesFloatingHUD else { return }
                 let size = self.presentation.isExpanded
                     ? self.preferredExpandedSize
                     : Layout.compactSize
@@ -321,11 +334,8 @@ final class NowSpeakingPanelController: ObservableObject {
     private func showPlayer() {
         configureResizeLimits(expanded: presentation.isExpanded)
         positionPanel(size: presentation.isExpanded ? preferredExpandedSize : Layout.compactSize)
-        if windowedMode {
-            panel.alphaValue = 1
-            NSApp.unhideWithoutActivation()
-            panel.orderFront(nil)
-        } else {
+        if usesFloatingHUD {
+            // Fade the floating panel in above every space.
             panel.alphaValue = 0
             NSApp.unhideWithoutActivation()
             panel.orderFrontRegardless()
@@ -334,13 +344,22 @@ final class NowSpeakingPanelController: ObservableObject {
                 context.duration = 0.18
                 panel.animator().alphaValue = 1
             }
+        } else {
+            // Windowed mode is a normal window: show it opaque, no fade.
+            panel.alphaValue = 1
+            NSApp.unhideWithoutActivation()
+            panel.orderFront(nil)
         }
         // panel.isVisible only flips true once ordered front, so this must run last.
         updateActivationPolicy()
     }
 
     private func updateLayout(animated: Bool) {
-        if !windowedMode, playbackController.currentItem == nil, presentation.lingeringItem == nil {
+        // HUD-only: this drives the floating panel's frame and alpha as the
+        // mini/expanded state changes. Windowed mode never resizes or repositions
+        // itself programmatically, so it must not run through here.
+        guard usesFloatingHUD else { return }
+        if playbackController.currentItem == nil, presentation.lingeringItem == nil {
             hide()
             return
         }
@@ -349,7 +368,7 @@ final class NowSpeakingPanelController: ObservableObject {
         configureResizeLimits(expanded: expanded)
         let size = expanded ? preferredExpandedSize : Layout.compactSize
         let frame = frameFor(size: size)
-        let alpha: CGFloat = windowedMode ? 1 : (presentation.isExpanded ? 1 : 0.84)
+        let alpha: CGFloat = presentation.isExpanded ? 1 : 0.84
         guard HUDLayoutUpdate.isNeeded(
             currentFrame: panel.frame,
             targetFrame: frame,
@@ -528,7 +547,9 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func configureResizeLimits(expanded: Bool) {
-        guard !windowedMode else { return }
+        // HUD-only: min/max sizes clamp the custom edge-resize to the screen.
+        // Windowed mode uses the native resize handle with its own limits.
+        guard usesFloatingHUD else { return }
         let maximumSize = HUDPlacement.frame(
             size: CGSize(width: 100_000, height: 100_000),
             preferredOrigin: preferencesStore.preferences.origin,
@@ -549,6 +570,10 @@ final class NowSpeakingPanelController: ObservableObject {
     }
 
     private func clampCurrentFrameToVisibleScreen() {
+        // HUD-only: the floating panel is kept inside the screen inset after a
+        // custom edge-resize. A windowed player is resized natively by the OS and
+        // must keep exactly the frame the user dragged, so never clamp it.
+        guard usesFloatingHUD else { return }
         let frame = HUDPlacement.frame(
             size: panel.frame.size,
             preferredOrigin: panel.frame.origin,
