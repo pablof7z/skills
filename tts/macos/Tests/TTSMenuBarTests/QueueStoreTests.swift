@@ -595,6 +595,152 @@ struct QueueStoreTests {
     }
 
     @Test
+    func rendersTaskItemsAsDistinctCheckboxes() {
+        let rendered = TranscriptMarkdown.render(
+            "- [ ] Still open\n- [x] Already done",
+            accent: .systemPink
+        )
+
+        #expect(rendered.string == "☐  Still open\n☑  Already done")
+        let checkedRange = (rendered.string as NSString).range(of: "Already done")
+        let style = rendered.attribute(.strikethroughStyle, at: checkedRange.location, effectiveRange: nil) as? Int
+        #expect(style == NSUnderlineStyle.single.rawValue)
+    }
+
+    @Test
+    func rendersMarkdownTableAsStyledCellsWithoutPipeScaffolding() {
+        let rendered = TranscriptMarkdown.render(
+            """
+            | Claim | Method |
+            |:------|-------:|
+            | API exists | source inspection |
+            """,
+            accent: .systemPink
+        )
+
+        #expect(rendered.string == "Claim\nMethod\nAPI exists\nsource inspection\n")
+        #expect(!rendered.string.contains("|"))
+
+        let claimParagraph = rendered.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        #expect(claimParagraph?.textBlocks.first is NSTextTableBlock)
+        #expect(claimParagraph?.alignment == .left)
+
+        let methodRange = (rendered.string as NSString).range(of: "Method")
+        let methodParagraph = rendered.attribute(
+            .paragraphStyle,
+            at: methodRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(methodParagraph?.alignment == .right)
+    }
+
+    @Test
+    @MainActor
+    func structuredMarkdownLaysOutWithinTheTranscriptWidth() {
+        let rendered = TranscriptMarkdown.render(
+            """
+            | Claim | Method | Result |
+            |:------|:-------|-------:|
+            | API exists | source inspection | verified |
+            | App fold | unit test | passing |
+
+            - [ ] Failure path remains explicit
+            - [x] Happy path verified
+            """,
+            accent: .systemPink
+        )
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 760, height: 480))
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainer?.containerSize = NSSize(width: 744, height: 1_000_000)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textStorage?.setAttributedString(rendered)
+
+        guard let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else {
+            Issue.record("NSTextView did not provide its text system")
+            return
+        }
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+
+        #expect(usedRect.width <= textContainer.containerSize.width)
+        #expect(usedRect.height > 100)
+    }
+
+    @Test
+    func preservesPipesInsideTableCodeSpans() {
+        let rendered = TranscriptMarkdown.render(
+            """
+            | Expression | Meaning |
+            | --- | --- |
+            | `left | right` | alternatives |
+            """,
+            accent: .systemPink
+        )
+
+        #expect(rendered.string.contains("left | right"))
+        #expect(rendered.string.contains("alternatives"))
+    }
+
+    @Test
+    func rendersLanguageTaggedCodeBlockWithLabelAndCode() {
+        let source = """
+        Here is a snippet:
+
+        ```ts
+        const x = 5;
+        ```
+        Done.
+        """
+        let rendered = TranscriptMarkdown.render(source, accent: .systemPink)
+
+        #expect(rendered.string == "Here is a snippet:\n\nTS\nconst x = 5;\n\nDone.")
+    }
+
+    @Test
+    func rendersBareCodeBlockWithoutLabel() {
+        let source = """
+        Run this:
+
+        ```
+        echo hello
+        ```
+        Done.
+        """
+        let rendered = TranscriptMarkdown.render(source, accent: .systemPink)
+
+        #expect(rendered.string == "Run this:\n\n\necho hello\n\nDone.")
+    }
+
+    @Test
+    func highlightsKeywordsInLanguageTaggedCodeBlock() {
+        let source = """
+        ```swift
+        let x = 5
+        ```
+        """
+        let rendered = TranscriptMarkdown.render(source, accent: .systemPink)
+
+        let string = rendered.string
+        #expect(string.contains("SWIFT"))
+        #expect(string.contains("let x = 5"))
+
+        let keywordColor = NSColor(calibratedRed: 0.55, green: 0.34, blue: 0.92, alpha: 1.0)
+        var foundKeywordColor = false
+        rendered.enumerateAttribute(
+            .foregroundColor,
+            in: NSRange(location: 0, length: rendered.length),
+            options: []
+        ) { value, _, stop in
+            if let color = value as? NSColor, color == keywordColor {
+                foundKeywordColor = true
+                stop.pointee = true
+            }
+        }
+        #expect(foundKeywordColor)
+    }
+
+    @Test
     func measuredPauseCreatesPhraseWithoutPunctuation() {
         let text = "A calm phrase then another thought"
         let timings = [

@@ -145,11 +145,6 @@ final class InteractiveTranscriptTextView: NSTextView {
             layoutManager.removeTemporaryAttribute(attribute, forCharacterRange: wholeRange)
         }
 
-        layoutManager.addTemporaryAttributes(
-            [.foregroundColor: NSColor.labelColor.withAlphaComponent(0.58)],
-            forCharacterRange: wholeRange
-        )
-
         if let activeWordIndex = playbackState.activeWordIndex,
            document.words.indices.contains(activeWordIndex) {
             let completedEnd = document.words[activeWordIndex].range.location

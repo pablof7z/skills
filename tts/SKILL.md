@@ -11,16 +11,19 @@ Generate spoken audio from text with a Kokoro-compatible endpoint.
 
 Use natural sentences for best results.
 
-- **Acronyms**: Write as you'd type them — `CLI`, `API`, `HTTP`, etc. The skill auto-converts to `C L I`, `A P I`, `H T T P` for letter-by-letter pronunciation.
-- **Abbreviations**: Expand when pronunciation matters — `AI` → `artificial intelligence`, `DB` → `database`, `API` → `application programming interface`.
-- **Code & paths**: Avoid or rephrase — instead of `run /usr/local/bin/script`, say `run the script`.
+- **Acronyms**: Write them as you naturally would — `JSON`, `CLI`, `API`. Some read
+  better as words (`JSON`), others letter-by-letter (`CLI`). Expand only when the
+  spoken form would be unclear to a listener.
+- **Abbreviations**: Expand when pronunciation matters — `AI` → `artificial
+  intelligence`, `DB` → `database`, `API` → `application programming interface`.
+- **Code & paths**: Avoid or rephrase — instead of `run /usr/local/bin/script`, say
+  `run the script`. See *Code blocks* below for inline code in messages.
 - **Punctuation**: Natural pauses work; avoid excessive symbols.
 
-## Available voices
+## Voice
 
-American English deterministic pool: `af_bella`, `af_heart`, `af_kore`, `af_nova`, `af_sarah`, `am_michael`, `am_puck`
-
-Other languages & accents available: British English, Japanese, Mandarin, French, Italian, Portuguese.
+A voice is assigned deterministically from your agent identity — you don't choose
+one.
 
 ## Agent identity
 
@@ -34,22 +37,18 @@ Use a phrase the listener can understand without opening a tracker, such as
 `improving TTS identity cues` or `refactoring the lib module`, not bare tracker
 labels or numeric references.
 
-The script decides whether to prepend it. If the same agent spoke within ten
-minutes, the intro is skipped; if another agent spoke since then, or enough time
-passed, the intro is included again.
+The introduction may or may not be spoken on any given call, so don't encode
+anything important in it — the listener should not depend on hearing it.
 
 Pass `--agent-name` only when the session has a specific identifier beyond the
-harness name. Use names like `quinn-delta-306`; do not use generic values like
-`codex` or `claude`. When using `--agent-name`, omit voice selection so the
-script can choose a deterministic voice from that name. Use `--voice-id` only
-when a specific voice is required.
+harness name. Use names like `<your-agent-id>`; do not use generic values like
+`codex` or `claude`.
 
 ## Subject
 
-Use `--subject` when a substantive update benefits from a scannable topic in
-the queue. Write 5 to 10 words that name the outcome or subject clearly. The
-subject is displayed prominently in the player and spoken immediately after
-any introduction, before the message body.
+Use `--subject` as a stable topic — like a session title that reflects what is
+being done. Keep it consistent across calls within the same work session. If you
+know your session's title, use it verbatim. Write 5 to 10 words.
 
 Skip `--subject` when it would add ceremony without useful context, such as a
 brief conversational response, acknowledgement, or follow-up question.
@@ -58,25 +57,57 @@ brief conversational response, acknowledgement, or follow-up question.
 
 Use repeatable `--attach "Label" path` arguments when a concise spoken update
 has genuinely useful supporting material. Prefer short, human labels such as
-`Why this matters`, `Screenshot`, or `Detailed findings`; never expose a raw
+`Mockup A`, `Architectural proposal`, or `Detailed findings`; never expose a raw
 filename as the label when a clearer description is available.
+
+SVG and Mermaid (`.mmd`) diagrams are supported alongside PNG, JPEG, and other
+image formats — use them when a visual communicates more than text.
 
 Pass the primary body with `--message` when attachments are present:
 
 ```bash
 ./scripts/tts \
-  --message "The implementation is ready. I attached the rationale and a screenshot." \
-  --attach "Why this matters" ./why-this-matters.md \
-  --attach "Screenshot" ./screenshot.png
+  --agent-name "<your-agent-id>" \
+  --introduction "Agent <name> here, working on <task>." \
+  --message "The implementation is ready. I attached the proposal and a mockup." \
+  --attach "Architectural proposal" ./proposal.md \
+  --attach "Mockup A" ./mockup-a.svg
 ```
 
 Markdown and text attachments are copied into durable session storage, shown
 with their structure preserved, and narrated in the background using the same
-voice as the primary update. Images preview inline, existing audio is playable,
-and other files can be opened in their default app. Attachments are optional
-branches: they do not count as queued speech until the user selects them. Do
-not attach routine logs, duplicate the primary message, or create supplemental
-files only to make an update look more substantial.
+voice as the primary update. Images and SVGs preview inline, Mermaid source
+previews with a diagram affordance, existing audio is playable, and other files
+can be opened in their default app. Attachments are optional branches: they do
+not count as queued speech until the user selects them. Do not attach routine
+logs, duplicate the primary message, or create supplemental files only to make
+an update look more substantial.
+
+## Code blocks
+
+When a message includes code, use fenced code blocks with a language tag for
+syntax-highlighted rendering:
+
+````
+Ok, here's a brief proposal for how that API would look:
+
+```ts
+const event = new NDKEvent();
+event.content = 'blah';
+await event.sign();
+```
+["The code shows a simple NDKEvent construction, but the key aspect is that we can sign it without broadcasting to get the signature with a simple awaited event dot sign call."]
+````
+
+Rules:
+
+- ` ```lang ` blocks (with a language like `ts`, `swift`, `rs`, `py`) are
+  rendered with syntax highlighting in the transcript and **skipped** in speech.
+  Follow the block with a `["…"]` spoken description in brackets — that
+  description is what gets read aloud and is also shown in the transcript.
+- ` ``` ` blocks (no language tag) are read aloud as plain text and rendered as
+  plain monospace code. Use this for short snippets, paths, or commands where
+  hearing the literal text is the point.
 
 ## Playback behavior
 
@@ -147,7 +178,6 @@ the paused apps a few seconds after playback ends.
 - Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
 - Use `--message text` for an explicit primary message; the original positional message remains supported.
 - Use repeatable `--attach "Label" path` pairs to add durable supporting material.
-- Use `--voice-id voice` to choose an explicit voice.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
 - Use `--handoff-delay seconds` or `TTS_MEDIA_HANDOFF_DELAY_SECONDS=seconds` to change the post-pause handoff.
 - Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
@@ -156,6 +186,6 @@ the paused apps a few seconds after playback ends.
 Queue records, process state, and logs live under the TTS state directory,
 normally `~/.local/state/tts/`.
 
-`./scripts/tts --agent-name quinn-delta-306 --introduction "Agent Quinn here, working on TTS." --subject "Playback queue ownership is now explicit" "The fix is ready."` will speak the introduction when needed, then the subject, then the body.
+`./scripts/tts --agent-name "<your-agent-id>" --introduction "Agent <name> here, working on <task>." --subject "<stable session topic>" "<message>"` will speak the introduction when needed, then the subject, then the body.
 
-`./scripts/tts --no-play --voice-id af_bella "Hello world"` will generate the MP3, print its output path, skip playback, and use an explicit voice.
+`./scripts/tts --no-play "<message>"` will generate the MP3, print its output path, and skip playback.
