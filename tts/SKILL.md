@@ -79,9 +79,10 @@ with their structure preserved, and narrated in the background using the same
 voice as the primary update. Images and SVGs preview inline, Mermaid attachments
 render as diagrams with a readable source fallback, existing audio is playable,
 and other files can be opened in their default app. Attachments are optional
-branches: they do not count as queued speech until the user selects them. Do not
-attach routine logs, duplicate the primary message, or create supplemental files
-only to make an update look more substantial.
+branches: narrated text and audio do not count as queued speech until the user
+selects them, while images and diagrams are preview-only. Do not attach routine
+logs, duplicate the primary message, or create supplemental files only to make
+an update look more substantial.
 
 ## Code blocks
 
@@ -104,7 +105,9 @@ Rules:
 - ` ```lang ` blocks (with a language like `ts`, `swift`, `rs`, `py`) are
   rendered with syntax highlighting in the transcript and **skipped** in speech.
   Follow the block with a `["…"]` spoken description in brackets — that
-  description is speech-only and is not shown in the transcript.
+  description is speech-only and is not shown in the transcript. While it is
+  spoken, the tagged code and visible transcript remain unhighlighted;
+  read-along highlighting resumes with the next visible spoken word.
 - ` ``` ` blocks (no language tag) are read aloud as plain text and rendered as
   plain monospace code. Use this for short snippets, paths, or commands where
   hearing the literal text is the point.
@@ -122,9 +125,10 @@ controls, a per-voice speed control, and a stable read-along transcript. The
 expanded HUD always shows the transcript without a separate toggle. When the
 endpoint supports captioned speech, a softly focused phrase preserves context
 while an exact word playhead follows synthesis timestamps; clicking a word
-seeks to its real audio boundary. The transcript shows only the agent's message,
-not the spoken introduction or subject, and preserves paragraphs, lists,
-headings, emphasis, links, and code-oriented Markdown styling.
+seeks to its real audio boundary. The transcript shows only the visible content
+of the agent's message, excluding the spoken introduction, subject, and
+speech-only code descriptions. It preserves paragraphs, lists, headings,
+emphasis, links, and code-oriented Markdown styling.
 Clicking the speed label cycles through `0.75×`, `1×`, `1.25×`, `1.5×`, and
 `2×`; the selected rate applies immediately and is remembered for that voice.
 The menu-bar popup remains a queue overview while speech is active: it lists
