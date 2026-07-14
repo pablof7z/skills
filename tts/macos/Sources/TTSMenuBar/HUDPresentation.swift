@@ -8,31 +8,23 @@ struct WorkspaceIdentity: Equatable {
 }
 
 enum WorkspaceAccent {
-    private static let palette: [Color] = [
-        Color(red: 0.35, green: 0.67, blue: 1.00),
-        Color(red: 0.28, green: 0.84, blue: 0.77),
-        Color(red: 0.68, green: 0.56, blue: 1.00),
-        Color(red: 1.00, green: 0.75, blue: 0.34),
-        Color(red: 1.00, green: 0.51, blue: 0.44),
-        Color(red: 0.43, green: 0.84, blue: 0.55),
-        Color(red: 0.96, green: 0.55, blue: 0.78),
-        Color(red: 0.45, green: 0.72, blue: 0.94),
-    ]
-
-    static var count: Int { palette.count }
+    // Matches 29er-next's `String.avatarColor` (ios/Sources/RootView.swift): FNV-1a
+    // 64-bit hash of the label's UTF-8 bytes, reduced to a hue angle on the HSB wheel.
+    static let count = 360
 
     static func color(forWorkspacePath path: String?) -> Color {
-        palette[paletteIndex(forWorkspacePath: path)]
+        let hue = Double(paletteIndex(forWorkspacePath: path)) / Double(count)
+        return Color(hue: hue, saturation: 0.58, brightness: 0.78)
     }
 
     static func paletteIndex(forWorkspacePath path: String?) -> Int {
         let label = projectLabel(forWorkspacePath: path)
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in label.lowercased().utf8 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in label.utf8 {
             hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
+            hash &*= 0x100_0000_01b3
         }
-        return Int(hash % UInt64(palette.count))
+        return Int(hash % UInt64(count))
     }
 
     static func projectLabel(forWorkspacePath path: String?) -> String {
