@@ -11,6 +11,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     @Published private(set) var playbackRate: Float = 1.0
     @Published private(set) var isGloballyPaused = false
     @Published private(set) var isSystemOutputMuted = false
+    @Published private(set) var generationProgressNow = Date()
 
     private let store: QueueStore
     private let mediaController: MediaController
@@ -73,6 +74,10 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     var isPaused: Bool {
         currentItem?.status == .paused
+    }
+
+    func generationProgress(for item: TTSItem) -> Double {
+        GenerationProgress.value(for: item, samples: items, now: generationProgressNow)
     }
 
     func start() {
@@ -405,6 +410,9 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             if loaded != items {
                 items = loaded
             }
+            if loaded.contains(where: { $0.status == .generating && !$0.isAttachmentPlayback }) {
+                generationProgressNow = Date()
+            }
             if let player {
                 let nextTime = player.currentTime
                 let nextDuration = player.duration
@@ -559,6 +567,9 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         item.completedAt = Int64(Date().timeIntervalSince1970)
         item.duration = player?.duration ?? item.duration
         item.error = error
+        if success, !item.isAttachmentPlayback {
+            item.isUnheard = false
+        }
         try? store.save(item)
 
         player = nil

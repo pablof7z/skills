@@ -511,6 +511,51 @@ struct QueueStoreTests {
     }
 
     @Test
+    func tracksUnreadStateAndGenerationDuration() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        var generating = item(id: "generating", createdAt: 10)
+        generating.generationDuration = 18
+        generating.isUnheard = true
+
+        try store.save(generating)
+
+        let loaded = try #require(store.loadItems().first)
+        #expect(loaded.generationDuration == 18)
+        #expect(loaded.unheard)
+    }
+
+    @Test
+    func estimatesGenerationProgressFromRecentSuccessfulSamples() {
+        var current = item(id: "current", createdAt: 100)
+        current.text = Array(repeating: "word", count: 100).joined(separator: " ")
+        var first = item(id: "first", createdAt: 10)
+        first.text = Array(repeating: "word", count: 100).joined(separator: " ")
+        first.status = .played
+        first.generationDuration = 20
+        var second = first
+        second.id = "second"
+        second.generationDuration = 24
+
+        let early = GenerationProgress.value(
+            for: current,
+            samples: [first, second],
+            now: Date(timeIntervalSince1970: 110)
+        )
+        let late = GenerationProgress.value(
+            for: current,
+            samples: [first, second],
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        #expect(early > 0.04)
+        #expect(early < 0.94)
+        #expect(late > 0.93)
+        #expect(late <= 0.94)
+    }
+
+    @Test
     func keepsFullSessionIdentifierForDisplay() {
         var value = item(id: "session", createdAt: 10)
         value.sessionID = "019c-live-menu-uat-full-session"

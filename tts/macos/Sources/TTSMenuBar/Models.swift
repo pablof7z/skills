@@ -100,6 +100,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var attachments: [TTSAttachment]? = nil
     var assetDirectory: String? = nil
     var retryCommand: String? = nil
+    var generationDuration: Double? = nil
+    var isUnheard: Bool? = nil
     var parentItemID: String? = nil
     var attachmentID: String? = nil
     var returnToPlaybackOffset: Double? = nil
@@ -128,6 +130,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case attachments
         case assetDirectory = "asset_directory"
         case retryCommand = "retry_command"
+        case generationDuration = "generation_duration"
+        case isUnheard = "is_unheard"
         case parentItemID = "parent_item_id"
         case attachmentID = "attachment_id"
         case returnToPlaybackOffset = "return_to_playback_offset"
@@ -189,6 +193,10 @@ struct TTSItem: Codable, Identifiable, Equatable {
         isArchived == true
     }
 
+    var unheard: Bool {
+        isUnheard == true
+    }
+
     /// Replaying a durable brief is playback of the same update, not a new
     /// generation. Keep its identity and creation time so history remains a
     /// reliable record of when the agent actually produced it.
@@ -217,6 +225,9 @@ struct TTSItem: Codable, Identifiable, Equatable {
             mediaHandoffDelay: mediaHandoffDelay,
             attachments: attachments,
             assetDirectory: assetDirectory,
+            retryCommand: retryCommand,
+            generationDuration: generationDuration,
+            isUnheard: isUnheard,
             parentItemID: parentItemID,
             attachmentID: attachmentID,
             returnToPlaybackOffset: returnToPlaybackOffset,
@@ -260,11 +271,45 @@ struct TTSItem: Codable, Identifiable, Equatable {
             mediaHandoffDelay: mediaHandoffDelay,
             attachments: attachments,
             assetDirectory: assetDirectory,
+            retryCommand: retryCommand,
+            generationDuration: generationDuration,
+            isUnheard: isUnheard,
             parentItemID: id,
             attachmentID: attachment.id,
             returnToPlaybackOffset: playbackOffset,
             isArchived: isArchived
         )
+    }
+}
+
+enum GenerationProgress {
+    private static let fallbackDuration: TimeInterval = 24
+
+    static func value(for item: TTSItem, samples: [TTSItem], now: Date) -> Double {
+        let elapsed = max(0, now.timeIntervalSince(item.createdDate))
+        let expected = estimatedDuration(for: item, samples: samples)
+        let eased = 0.04 + 0.90 * (1 - exp(-1.9 * elapsed / expected))
+        return min(max(eased, 0.04), 0.94)
+    }
+
+    static func estimatedDuration(for item: TTSItem, samples: [TTSItem]) -> TimeInterval {
+        let targetScale = sqrt(Double(max(item.text.split(whereSeparator: \.isWhitespace).count, 1)))
+        let normalized = samples.compactMap { sample -> Double? in
+            guard sample.status != .failed,
+                  let duration = sample.generationDuration,
+                  duration.isFinite,
+                  duration > 0,
+                  duration < 600 else { return nil }
+            let words = max(sample.text.split(whereSeparator: \.isWhitespace).count, 1)
+            return duration / sqrt(Double(words))
+        }
+        guard !normalized.isEmpty else { return fallbackDuration }
+        let sorted = normalized.sorted()
+        let midpoint = sorted.count / 2
+        let median = sorted.count.isMultiple(of: 2)
+            ? (sorted[midpoint - 1] + sorted[midpoint]) / 2
+            : sorted[midpoint]
+        return min(max(median * targetScale, 8), 180)
     }
 }
 

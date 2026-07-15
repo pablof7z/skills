@@ -176,6 +176,8 @@ class AttachmentFlowTests(unittest.TestCase):
                 self.assertEqual(queued["status"], "queued")
                 self.assertEqual(queued["iterm_session_id"], generating["iterm_session_id"])
                 self.assertEqual(queued["agent_name"], "agent-foreground-test")
+                self.assertIsNotNone(queued["generation_duration"])
+                self.assertTrue(queued["is_unheard"])
                 self.assertTrue(Path(queued["output_file"]).is_file())
                 with KokoroHandler.received_inputs_lock:
                     spoken = KokoroHandler.received_inputs[-1]
@@ -241,6 +243,8 @@ class AttachmentFlowTests(unittest.TestCase):
                 self.assertEqual(failed["status"], "failed")
                 self.assertEqual(failed["error"], "TTS request failed with HTTP 500")
                 self.assertEqual(failed["retry_command"], str(tts_command))
+                self.assertIsNotNone(failed["generation_duration"])
+                self.assertTrue(failed["is_unheard"])
                 self.assertIsNotNone(failed["completed_at"])
             finally:
                 server.shutdown()
