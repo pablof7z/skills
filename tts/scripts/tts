@@ -669,11 +669,13 @@ raise SystemExit(0 if any(
 PY
     then
       local attachment_log="$ITEM_DIRECTORY/attachment-generation.log"
-      nohup "$SCRIPT_DIR/tts-attachment-worker" "$item_file" \
-        </dev/null >>"$attachment_log" 2>&1 &
-      local attachment_worker_pid=$!
-      disown "$attachment_worker_pid" 2>/dev/null || true
-      printf 'Preparing TTS attachments in background: pid %s\n' "$attachment_worker_pid" >&2
+      echo "Preparing narrated TTS attachments before returning..." >&2
+      if "$SCRIPT_DIR/tts-attachment-worker" "$item_file" \
+        </dev/null >>"$attachment_log" 2>&1; then
+        echo "Prepared narrated TTS attachments." >&2
+      else
+        echo "Warning: narrated TTS attachment preparation failed; see $attachment_log" >&2
+      fi
     fi
     local queue_summary global_pause queued_count system_muted
     queue_summary="$(python3 - "$state_dir" <<'PY'
@@ -1074,7 +1076,7 @@ if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
 fi
 
 if [ "$NO_PLAY" -ne 1 ]; then
-  echo "TTS audio will play in the background after generation completes." >&2
+  echo "TTS generation runs in the foreground; playback will queue after generation completes." >&2
 fi
 
 API_URL="$KOKORO_API_ENDPOINT"

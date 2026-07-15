@@ -75,8 +75,8 @@ Pass the primary body with `--message` when attachments are present:
 ```
 
 Markdown and text attachments are copied into durable session storage, shown
-with their structure preserved, and narrated in the background using the same
-voice as the primary update. Images and SVGs preview inline, Mermaid attachments
+with their structure preserved, and narrated using the same voice as the primary
+update before the command returns. Images and SVGs preview inline, Mermaid attachments
 render as diagrams with a readable source fallback, existing audio is playable,
 and other files can be opened in their default app. Attachments are optional
 branches: narrated text and audio do not count as queued speech until the user
@@ -114,9 +114,16 @@ Rules:
 
 ## Playback behavior
 
-By default, `scripts/tts` generates the MP3 in the foreground, then queues
-playback in the background so the agent sees endpoint/setup failures before the
-command returns.
+By default, `scripts/tts` generates the primary MP3 and any narrated attachments
+in the foreground, then queues playback in the background. Do not detach
+generation inside the script: command completion is the reliable boundary for
+observing endpoint, setup, and attachment-generation failures.
+
+If the execution environment can run a command asynchronously, start the whole
+`scripts/tts` command with that capability when waiting would block unrelated
+work. Keep its execution handle and wait for completion before claiming that the
+spoken update was generated. Do not add shell-level `nohup`, `&`, or `disown` in
+examples; those hide completion and failure from the agent.
 
 On macOS, the first audible request starts a resident menu-bar app. It owns the
 playback queue and shows queued/current/recent speech. Playback lives in the

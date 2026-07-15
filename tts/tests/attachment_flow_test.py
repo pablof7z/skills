@@ -50,6 +50,22 @@ class BlockingKokoroHandler(KokoroHandler):
         super().do_POST()
 
 
+class BlockingAttachmentKokoroHandler(KokoroHandler):
+    request_count = 0
+    request_count_lock = threading.Lock()
+    attachment_request_started = threading.Event()
+    release_attachment_response = threading.Event()
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        with self.request_count_lock:
+            type(self).request_count += 1
+            request_number = type(self).request_count
+        if request_number == 2:
+            self.attachment_request_started.set()
+            self.release_attachment_response.wait(timeout=5)
+        super().do_POST()
+
+
 class FailingKokoroHandler(KokoroHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         length = int(self.headers.get("Content-Length", "0"))
@@ -197,6 +213,85 @@ class AttachmentFlowTests(unittest.TestCase):
                 self.assertEqual(failed["retry_command"], str(tts_command))
                 self.assertIsNotNone(failed["completed_at"])
             finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
+
+    def test_waits_for_narrated_attachment_generation_before_returning(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+        with tempfile.TemporaryDirectory(prefix="tts-foreground-attachments-") as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            home.mkdir()
+            state = root / "state"
+            markdown = root / "details.md"
+            markdown.write_text("# Details\n\nNarrate this before returning.\n", encoding="utf-8")
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_uname = fake_bin / "uname"
+            fake_uname.write_text("#!/bin/sh\nprintf 'Darwin\\n'\n", encoding="utf-8")
+            fake_uname.chmod(0o755)
+            fake_menu = root / "tts-menu"
+            fake_menu.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_menu.chmod(0o755)
+
+            BlockingAttachmentKokoroHandler.request_count = 0
+            BlockingAttachmentKokoroHandler.attachment_request_started = threading.Event()
+            BlockingAttachmentKokoroHandler.release_attachment_response = threading.Event()
+            server = ThreadingHTTPServer(("127.0.0.1", 0), BlockingAttachmentKokoroHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            process: subprocess.Popen[str] | None = None
+            try:
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "KOKORO_API_ENDPOINT": f"http://127.0.0.1:{server.server_port}/v1/audio/speech",
+                        "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
+                        "TTS_MACOS_MENU": "1",
+                        "TTS_MENU_COMMAND": str(fake_menu),
+                        "TTS_SESSIONS_ROOT": str(root / "sessions"),
+                        "TTS_STATE_DIR": str(state),
+                    }
+                )
+                process = subprocess.Popen(
+                    [
+                        str(tts_command),
+                        "--message",
+                        "The primary update is ready.",
+                        "--voice-id",
+                        "af_nova",
+                        "--attach",
+                        "Details",
+                        str(markdown),
+                    ],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+
+                self.assertTrue(
+                    BlockingAttachmentKokoroHandler.attachment_request_started.wait(timeout=5)
+                )
+                item_path = next((state / "items").glob("*.json"))
+                preparing = json.loads(item_path.read_text(encoding="utf-8"))
+                self.assertEqual(preparing["attachments"][0]["status"], "preparing")
+                self.assertIsNone(process.poll())
+
+                BlockingAttachmentKokoroHandler.release_attachment_response.set()
+                stdout, stderr = process.communicate(timeout=15)
+                self.assertEqual(process.returncode, 0, stderr)
+                ready = json.loads(item_path.read_text(encoding="utf-8"))
+                self.assertEqual(ready["attachments"][0]["status"], "ready")
+                self.assertIn("Prepared narrated TTS attachments.", stderr)
+            finally:
+                BlockingAttachmentKokoroHandler.release_attachment_response.set()
+                if process is not None and process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=2)
                 server.shutdown()
                 thread.join(timeout=2)
                 server.server_close()

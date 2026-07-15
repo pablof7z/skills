@@ -14,7 +14,7 @@ Agent work is increasingly parallel, but attention is still serial. Important up
 
 The workflow owns more than text generation:
 
-- The HTTP request stays in the foreground until the endpoint accepts it and the audio file exists, so setup and generation failures remain visible to the agent.
+- The primary HTTP request and narrated attachment synthesis stay in the foreground until every requested speech asset is ready or has reported failure, so command completion remains trustworthy.
 - Audible macOS requests appear in the windowed player as soon as synthesis starts. The pending row is dimmed, disabled, and marked with a progress indicator until the same item becomes playable; failures become disabled failed entries instead of getting stuck as pending.
 - Successful audio moves into background playback only after that handshake.
 - Every update is retained as a durable brief under `~/.agents/skills/tts/sessions/<session-id>/briefs/<item-id>/`, including its MP3, timing data, and any copied attachments.
@@ -51,7 +51,7 @@ export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
   --attach "Mockup A" ./mockup-a.svg
 ```
 
-On macOS 13 or later with Swift available, the first audible request builds and starts the menu-bar player. The command returns after generation succeeds and the item has been accepted for playback.
+On macOS 13 or later with Swift available, the first audible request builds and starts the menu-bar player. The command returns after the primary message and narrated attachments finish generating and the item has been accepted for playback. Agent harnesses with asynchronous command execution may run the whole command that way, then wait on its execution handle for the final result.
 
 Use `./scripts/tts-menu status` to inspect current playback and queue counts. Use `--no-play` when you only need the generated file; that command returns only after the file exists.
 
