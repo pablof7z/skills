@@ -681,6 +681,24 @@ struct QueueStoreTests {
     }
 
     @Test
+    func buildsProjectAgentLabelWithProjectFirst() {
+        var value = item(id: "player-history", createdAt: 10)
+        value.agentName = "river-codex"
+        value.workspace = "/not-a-repository/example-workspace"
+
+        #expect(value.projectAgentLabel == "example-workspace - river-codex")
+    }
+
+    @Test
+    func projectAgentLabelFallsBackToAgentWithoutWorkspace() {
+        var value = item(id: "player-history-no-workspace", createdAt: 10)
+        value.agentName = "river-codex"
+        value.workspace = nil
+
+        #expect(value.projectAgentLabel == "river-codex")
+    }
+
+    @Test
     func fallsBackToSpokenTextWhenSubjectIsMissing() {
         var value = item(id: "no-subject", createdAt: 10)
         value.subject = nil

@@ -3293,32 +3293,18 @@ private struct PlayerHistoryRow: View {
             Button(action: action) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(item.displayAgent)
+                        Text(item.nowSpeakingTitle)
                             .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
-                            .foregroundStyle(
-                                WorkspaceAccent.color(forAgentName: item.displayAgent)
-                                    .opacity(item.status == .generating ? 0.72 : 1)
-                            )
+                            .foregroundStyle(summaryColor)
                             .lineLimit(1)
-                        if let projectName = item.workspaceName {
-                            Text("·")
-                                .foregroundStyle(.tertiary)
-                            Text(projectName)
-                                .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
-                                .foregroundStyle(
-                                    WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
-                                        .opacity(item.status == .generating ? 0.72 : 1)
-                                )
-                                .lineLimit(1)
-                        }
                         Spacer(minLength: 8)
                         Text(item.timestampLabel(now: timestampNow))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
-                    Text(summary)
+                    Text(item.projectAgentLabel)
                         .font(.system(size: 15, weight: item.unheard ? .semibold : .regular))
-                        .foregroundStyle(summaryColor)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
@@ -3370,15 +3356,6 @@ private struct PlayerHistoryRow: View {
         }
     }
 
-    private var detail: String {
-        if item.status == .generating {
-            return "Generating audio…"
-        } else if item.status == .failed {
-            return item.error.map { "Failed: \($0)" } ?? "Failed"
-        }
-        return item.text
-    }
-
     @ViewBuilder
     private var queueItemIndicator: some View {
         if item.isPendingQuestion {
@@ -3404,11 +3381,6 @@ private struct PlayerHistoryRow: View {
                 .frame(width: 7, height: 7)
                 .frame(width: 28, height: 28)
         }
-    }
-
-    private var summary: String {
-        guard item.nowSpeakingTitle != detail else { return detail }
-        return "\(item.nowSpeakingTitle) — \(detail)"
     }
 
     private var summaryColor: Color {
