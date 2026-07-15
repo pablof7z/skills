@@ -1357,15 +1357,92 @@ private final class ImmediateClickNSView: NSView {
     }
 }
 
-private struct AnswerEditorSheet: View {
+@MainActor
+private final class AnswerEditorPresenter: NSObject, ObservableObject, NSWindowDelegate {
+    private var windowController: NSWindowController?
+    private weak var parentWindow: NSWindow?
+
+    func present(
+        context: AnswerEditorContext,
+        onSave: @escaping (String?, String, [URL]) -> Void
+    ) {
+        cancel()
+        let parent = NSApp.keyWindow
+        let editor = AnswerEditorView(
+            context: context,
+            onCancel: { [weak self] in self?.cancel() },
+            onDone: { [weak self] title, description, attachments in
+                onSave(title, description, attachments)
+                self?.cancel()
+            }
+        )
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 520),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = context.isSuggestion ? "Edit suggestion" : "Write your answer"
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.delegate = self
+        panel.contentView = NSHostingView(rootView: editor)
+        panel.minSize = NSSize(width: 520, height: 360)
+
+        let controller = NSWindowController(window: panel)
+        windowController = controller
+        parentWindow = parent
+        if let parent {
+            let screenFrame = parent.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? parent.frame
+            let proposed = NSPoint(
+                x: min(parent.frame.maxX + 16, screenFrame.maxX - panel.frame.width),
+                y: min(parent.frame.maxY - panel.frame.height, screenFrame.maxY - panel.frame.height)
+            )
+            panel.setFrameOrigin(NSPoint(
+                x: max(screenFrame.minX, proposed.x),
+                y: max(screenFrame.minY, proposed.y)
+            ))
+            parent.addChildWindow(panel, ordered: .above)
+        } else {
+            panel.center()
+        }
+        controller.showWindow(nil)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func cancel() {
+        guard let panel = windowController?.window else { return }
+        parentWindow?.removeChildWindow(panel)
+        panel.orderOut(nil)
+        panel.close()
+        windowController = nil
+        parentWindow = nil
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let panel = notification.object as? NSWindow else { return }
+        parentWindow?.removeChildWindow(panel)
+        windowController = nil
+        parentWindow = nil
+    }
+}
+
+private struct AnswerEditorView: View {
     private enum Field: Hashable {
         case title
         case body
     }
 
-    @Environment(\.dismiss) private var dismiss
     let context: AnswerEditorContext
-    let onSave: (String?, String, [URL]) -> Void
+    let onCancel: () -> Void
+    let onDone: (String?, String, [URL]) -> Void
     @State private var title: String
     @State private var bodyText: String
     @State private var attachments: [URL]
@@ -1374,10 +1451,12 @@ private struct AnswerEditorSheet: View {
 
     init(
         context: AnswerEditorContext,
-        onSave: @escaping (String?, String, [URL]) -> Void
+        onCancel: @escaping () -> Void,
+        onDone: @escaping (String?, String, [URL]) -> Void
     ) {
         self.context = context
-        self.onSave = onSave
+        self.onCancel = onCancel
+        self.onDone = onDone
         _title = State(initialValue: context.existingTitle ?? "")
         _bodyText = State(initialValue: context.existingDescription)
         _attachments = State(initialValue: context.existingAttachments)
@@ -1394,21 +1473,19 @@ private struct AnswerEditorSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(context.isSuggestion ? "Edit suggestion" : "Write your answer")
                         .font(.headline)
-                    Text(context.isSuggestion ? "Edit the title and supporting detail." : "Your draft is kept when you close and reopen this editor.")
+                    Text(context.isSuggestion ? "Edit the title and supporting detail." : "Changes apply only when you choose Done.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer()
-                Button {
-                    dismiss()
-                } label: {
+                Button(action: onCancel) {
                     Image(systemName: "xmark")
                         .frame(width: 24, height: 24)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Close editor")
+                .accessibilityLabel("Cancel editing")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
@@ -1462,6 +1539,11 @@ private struct AnswerEditorSheet: View {
             Divider()
 
             HStack(spacing: 8) {
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
                 Button {
                     addFiles(pickFiles())
                 } label: {
@@ -1499,12 +1581,16 @@ private struct AnswerEditorSheet: View {
                     .frame(maxWidth: 280)
                 }
                 Spacer()
-                Button("Close") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
                 Button("Done") {
-                    dismiss()
+                    let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onDone(
+                        context.isSuggestion ? trimmedTitle : nil,
+                        bodyText.trimmingCharacters(in: .whitespacesAndNewlines),
+                        attachments
+                    )
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(context.isSuggestion && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -1512,16 +1598,6 @@ private struct AnswerEditorSheet: View {
         .frame(width: 680, height: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { focusedField = context.isSuggestion ? .title : .body }
-        .onDisappear {
-            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !context.isSuggestion || !trimmedTitle.isEmpty {
-                onSave(
-                    context.isSuggestion ? trimmedTitle : nil,
-                    bodyText.trimmingCharacters(in: .whitespacesAndNewlines),
-                    attachments
-                )
-            }
-        }
     }
 
     private func addFiles(_ urls: [URL]) {
@@ -1555,7 +1631,7 @@ private struct NowSpeakingHUDView: View {
     let onToggleMiniPlayer: () -> Void
     let onHide: () -> Void
     @State private var questionComposer = QuestionComposerModel()
-    @State private var answerEditor: AnswerEditorContext?
+    @StateObject private var answerEditorPresenter = AnswerEditorPresenter()
     @State private var isAnswerDropTarget = false
 
     var body: some View {
@@ -1620,30 +1696,14 @@ private struct NowSpeakingHUDView: View {
             .onHover { presentation.updateHover($0) }
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .onChange(of: item.id) { _ in
+                answerEditorPresenter.cancel()
                 questionComposer.reset()
                 prepareComposer(for: item)
             }
             .onAppear {
                 prepareComposer(for: item)
             }
-            .sheet(item: $answerEditor) { context in
-                AnswerEditorSheet(context: context) { title, description, attachments in
-                    switch context.kind {
-                    case .freeform:
-                        questionComposer.updateDraft(description, for: context.questionID)
-                        questionComposer.setAttachments(attachments, for: context.questionID)
-                    case let .suggestion(suggestionID):
-                        guard let title else { return }
-                        questionComposer.applySuggestionEdit(
-                            title: title,
-                            description: description.nonemptyValue,
-                            suggestionID: suggestionID,
-                            attachments: attachments,
-                            for: context.questionID
-                        )
-                    }
-                }
-            }
+            .onDisappear { answerEditorPresenter.cancel() }
             .overlay {
                 if presentation.isExpanded, !isWindowedMode {
                     PlayerResizeRegions()
@@ -1704,7 +1764,10 @@ private struct NowSpeakingHUDView: View {
                     .accessibilityLabel("Open agent session")
                 }
 
-                Button(action: onHide) {
+                Button {
+                    answerEditorPresenter.cancel()
+                    onHide()
+                } label: {
                     Image(systemName: "xmark")
                         .frame(width: 30, height: 30)
                 }
@@ -1712,6 +1775,19 @@ private struct NowSpeakingHUDView: View {
                 .foregroundStyle(.secondary)
                 .help("Hide question")
                 .accessibilityLabel("Hide question")
+            }
+
+            if let primaryMessage = item.primaryMessage?.nonemptyValue {
+                ReadAlongTranscriptView(
+                    text: primaryMessage,
+                    timings: item.wordTimings,
+                    currentTime: playbackTime,
+                    duration: playbackDuration,
+                    accent: accent,
+                    onSeek: { seek(item: item, to: $0) }
+                )
+                .frame(minHeight: 72, maxHeight: 150)
+                .accessibilityLabel("Primary message")
             }
 
             if let description = item.bundleDescription?.nonemptyValue {
@@ -1966,13 +2042,20 @@ private struct NowSpeakingHUDView: View {
         accent: Color
     ) -> some View {
         let draft = questionComposer.draft(for: question.id)
+        let suggestionDraft = draft.suggestion(id)
+        let displayTitle = suggestionDraft?.isEdited == true
+            ? suggestionDraft?.title ?? suggestion.title
+            : suggestion.title
+        let displayDescription = suggestionDraft?.isEdited == true
+            ? suggestionDraft?.description
+            : suggestion.description
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 10) {
                 Button {
                     questionComposer.selectSuggestion(
                         id: id,
-                        title: suggestion.title,
-                        description: suggestion.description,
+                        title: displayTitle,
+                        description: displayDescription,
                         for: question.id
                     )
                 } label: {
@@ -1983,14 +2066,14 @@ private struct NowSpeakingHUDView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
-                    "\(question.type == .multipleChoice && selected ? "Deselect" : "Select") \(suggestion.title)"
+                    "\(question.type == .multipleChoice && selected ? "Deselect" : "Select") \(displayTitle)"
                 )
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(suggestion.title)
+                    Text(displayTitle)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
-                    if let description = suggestion.description?.nonemptyValue {
+                    if let description = displayDescription?.nonemptyValue {
                         Text(description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -2004,8 +2087,8 @@ private struct NowSpeakingHUDView: View {
                         onSingleClick: {
                             questionComposer.selectSuggestion(
                                 id: id,
-                                title: suggestion.title,
-                                description: suggestion.description,
+                                title: displayTitle,
+                                description: displayDescription,
                                 for: question.id
                             )
                         },
@@ -2025,40 +2108,20 @@ private struct NowSpeakingHUDView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Personalize this suggestion")
-                .accessibilityLabel("Personalize \(suggestion.title)")
+                .accessibilityLabel("Personalize \(displayTitle)")
             }
 
             if let attachments = suggestion.attachments, !attachments.isEmpty {
                 compactAttachmentButtons(attachments, item: item, accent: accent)
             }
 
-            if let suggestionDraft = draft.suggestion(id), suggestionDraft.isEdited {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("Edited suggestion", systemImage: "pencil.line")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(accent)
-                    Text(suggestionDraft.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                    if let description = suggestionDraft.description?.nonemptyValue {
-                        Text(description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    if !suggestionDraft.attachmentURLs.isEmpty {
-                        answerAttachmentChips(
-                            suggestionDraft.attachmentURLs,
-                            questionID: question.id,
-                            suggestionID: id,
-                            accent: accent
-                        )
-                    }
-                }
-                .padding(9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            if let suggestionDraft, suggestionDraft.isEdited, !suggestionDraft.attachmentURLs.isEmpty {
+                answerAttachmentChips(
+                    suggestionDraft.attachmentURLs,
+                    questionID: question.id,
+                    suggestionID: id,
+                    accent: accent
+                )
             }
         }
         .padding(11)
@@ -2070,7 +2133,7 @@ private struct NowSpeakingHUDView: View {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(selected ? accent : accent.opacity(0.14), lineWidth: selected ? 1.2 : 0.7)
         }
-        .accessibilityLabel(suggestion.title)
+        .accessibilityLabel(displayTitle)
         .accessibilityValue(selected ? "Selected" : "Not selected")
         .accessibilityHint(
             question.type == .multipleChoice
@@ -2221,24 +2284,43 @@ private struct NowSpeakingHUDView: View {
     ) {
         let draft = questionComposer.draft(for: questionID)
         let suggestionDraft = draft.suggestion(id)
-        answerEditor = AnswerEditorContext(
+        presentAnswerEditor(AnswerEditorContext(
             questionID: questionID,
             kind: .suggestion(id),
             existingTitle: suggestionDraft?.title ?? suggestion.title,
             existingDescription: suggestionDraft?.description ?? suggestion.description ?? "",
             existingAttachments: suggestionDraft?.attachmentURLs ?? []
-        )
+        ))
     }
 
     private func openAnswerEditor(for question: TTSQuestion) {
         let draft = questionComposer.draft(for: question.id)
-        answerEditor = AnswerEditorContext(
+        presentAnswerEditor(AnswerEditorContext(
             questionID: question.id,
             kind: .freeform,
             existingTitle: nil,
             existingDescription: draft.freeformText,
             existingAttachments: draft.attachmentURLs
-        )
+        ))
+    }
+
+    private func presentAnswerEditor(_ context: AnswerEditorContext) {
+        answerEditorPresenter.present(context: context) { title, description, attachments in
+            switch context.kind {
+            case .freeform:
+                questionComposer.updateDraft(description, for: context.questionID)
+                questionComposer.setAttachments(attachments, for: context.questionID)
+            case let .suggestion(suggestionID):
+                guard let title else { return }
+                questionComposer.applySuggestionEdit(
+                    title: title,
+                    description: description.nonemptyValue,
+                    suggestionID: suggestionID,
+                    attachments: attachments,
+                    for: context.questionID
+                )
+            }
+        }
     }
 
     private func choiceSymbol(for type: TTSQuestionType, selected: Bool) -> String {
@@ -2264,6 +2346,7 @@ private struct NowSpeakingHUDView: View {
     }
 
     private func submitAnswers(for item: TTSItem, questions: [TTSQuestion]) {
+        answerEditorPresenter.cancel()
         let submissions = questionComposer.submissions(questionIDs: questions.map(\.id))
         if item.questions?.isEmpty == false {
             controller.submitBundle(

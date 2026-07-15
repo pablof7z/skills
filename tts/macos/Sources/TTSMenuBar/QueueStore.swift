@@ -165,6 +165,7 @@ struct QueueStore {
         value.suggestions = value.suggestions ?? persisted.suggestions
         value.bundleTitle = value.bundleTitle ?? persisted.bundleTitle
         value.bundleDescription = value.bundleDescription ?? persisted.bundleDescription
+        value.primaryMessage = value.primaryMessage ?? persisted.primaryMessage
         if persisted.questionStatus?.isTerminal == true,
            value.questionStatus?.isTerminal != true {
             value.questionStatus = persisted.questionStatus

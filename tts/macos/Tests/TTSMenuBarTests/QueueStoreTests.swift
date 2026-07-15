@@ -324,6 +324,7 @@ struct QueueStoreTests {
         original.attachments = [attachment()]
         original.assetDirectory = "/tmp/brief"
         original.iTermSessionID = "w1t2p3:9473B74C-9371-4C44-B34C-84F40E3D2F04"
+        original.primaryMessage = "The implementation is complete. Two decisions remain."
 
         let replay = original.requeuedForReplay()
 
@@ -341,6 +342,7 @@ struct QueueStoreTests {
         #expect(replay.wordTimings == original.wordTimings)
         #expect(replay.attachments == original.attachments)
         #expect(replay.assetDirectory == original.assetDirectory)
+        #expect(replay.primaryMessage == original.primaryMessage)
     }
 
     @Test
