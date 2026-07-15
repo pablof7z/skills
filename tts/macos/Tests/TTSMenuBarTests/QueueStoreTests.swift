@@ -342,6 +342,16 @@ struct QueueStoreTests {
         #expect(!label.hasSuffix("ago"))
     }
 
+    @Test
+    func assignsIndependentStableColorsToAgentsAndProjects() {
+        let agent = WorkspaceAccent.paletteIndex(forStableLabel: "agent:clay-river-860")
+        let agentAgain = WorkspaceAccent.paletteIndex(forStableLabel: "agent:clay-river-860")
+        let project = WorkspaceAccent.paletteIndex(forStableLabel: "skills")
+
+        #expect(agent == agentAgain)
+        #expect(agent != project)
+    }
+
     @Test @MainActor
     func archivesAndRestoresRecentSpeechWithoutDeletingIt() throws {
         let directory = temporaryDirectory()

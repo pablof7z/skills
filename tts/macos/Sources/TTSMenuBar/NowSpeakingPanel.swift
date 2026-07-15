@@ -1896,6 +1896,7 @@ private struct PlayerHistoryView: View {
                         onRetry: { controller.retryGeneration(item) },
                         isRetrying: controller.isRetrying(item),
                         generationProgress: controller.generationProgress(for: item),
+                        timestampNow: controller.historyTimestampNow,
                         onArchive: { controller.setArchived(!item.archived, for: item) }
                     )
                         .listRowInsets(EdgeInsets(
@@ -1904,6 +1905,13 @@ private struct PlayerHistoryView: View {
                             bottom: item.status == .generating ? 0 : 8,
                             trailing: 16
                         ))
+                        .listRowSeparator(item.status == .generating ? .hidden : .visible)
+                        .listRowBackground(
+                            GenerationProgressRowBackground(
+                                item: item,
+                                progress: controller.generationProgress(for: item)
+                            )
+                        )
                 }
                 .listStyle(.plain)
             }
@@ -1946,6 +1954,7 @@ private struct PlayerHistoryRow: View {
     let onRetry: () -> Void
     let isRetrying: Bool
     let generationProgress: Double
+    let timestampNow: Date
     let onArchive: () -> Void
 
     var body: some View {
@@ -1957,12 +1966,26 @@ private struct PlayerHistoryRow: View {
             Button(action: action) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(sender)
+                        Text(item.displayAgent)
                             .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
-                            .foregroundStyle(item.status == .generating ? .secondary : .primary)
+                            .foregroundStyle(
+                                WorkspaceAccent.color(forAgentName: item.displayAgent)
+                                    .opacity(item.status == .generating ? 0.72 : 1)
+                            )
                             .lineLimit(1)
+                        if let projectName = item.workspaceName {
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                            Text(projectName)
+                                .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
+                                .foregroundStyle(
+                                    WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
+                                        .opacity(item.status == .generating ? 0.72 : 1)
+                                )
+                                .lineLimit(1)
+                        }
                         Spacer(minLength: 8)
-                        Text(item.timestampLabel())
+                        Text(item.timestampLabel(now: timestampNow))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
@@ -2007,21 +2030,6 @@ private struct PlayerHistoryRow: View {
             }
         }
         .padding(.vertical, 5)
-        .overlay(alignment: .bottom) {
-            if item.status == .generating {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle().fill(Color.primary.opacity(0.10))
-                        Rectangle()
-                            .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath).opacity(0.82))
-                            .frame(width: max(3, geometry.size.width * generationProgress))
-                    }
-                }
-                .frame(height: 2)
-                .padding(.leading, 17)
-                .accessibilityLabel("Generating audio")
-            }
-        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if item.status != .generating {
                 Button(role: item.archived ? nil : .destructive, action: onArchive) {
@@ -2033,10 +2041,6 @@ private struct PlayerHistoryRow: View {
                 .tint(item.archived ? .accentColor : .red)
             }
         }
-    }
-
-    private var sender: String {
-        item.workspaceName ?? item.displayAgent
     }
 
     private var detail: String {
@@ -2062,6 +2066,32 @@ private struct PlayerHistoryRow: View {
         if item.status == .generating { return "Open pending update \(title)" }
         if item.status == .failed { return "Failed synthesis for \(title)" }
         return "Play now \(title)"
+    }
+}
+
+private struct GenerationProgressRowBackground: View {
+    let item: TTSItem
+    let progress: Double
+
+    var body: some View {
+        if item.status == .generating {
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.primary.opacity(0.10))
+                        Rectangle()
+                            .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath).opacity(0.82))
+                            .frame(width: max(3, (geometry.size.width - 17) * progress))
+                    }
+                    .frame(height: 2)
+                    .padding(.leading, 17)
+                }
+            }
+            .accessibilityLabel("Generating audio")
+        } else {
+            Color.clear
+        }
     }
 }
 
