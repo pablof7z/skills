@@ -821,6 +821,8 @@ private final class NowSpeakingPresentation: ObservableObject {
     @Published private(set) var selectedAttachmentText: String?
     @Published private(set) var selectedAttachmentImage: NSImage?
     @Published var historyProjectFilter: String?
+    @Published var historySearchQuery = ""
+    @Published var isViewingArchive = false
     private var hoverExitTask: Task<Void, Never>?
 
     init(isMiniPlayer: Bool) {
@@ -1458,19 +1460,25 @@ private struct PlayerHistoryView: View {
     @ObservedObject var presentation: NowSpeakingPresentation
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            historyControls
+            Divider()
             if filteredItems.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "waveform")
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(.tertiary)
-                    Text(historyItems.isEmpty ? "No recent speech" : "No speech for this project")
+                    Text(emptyStateTitle)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(filteredItems.prefix(60)) { item in
-                    PlayerHistoryRow(item: item, action: { controller.playNow(item) })
+                    PlayerHistoryRow(
+                        item: item,
+                        action: { controller.playNow(item) },
+                        onArchive: { controller.setArchived(!item.archived, for: item) }
+                    )
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 }
                 .listStyle(.plain)
@@ -1478,23 +1486,64 @@ private struct PlayerHistoryView: View {
         }
     }
 
+    private var historyControls: some View {
+        HStack(spacing: 8) {
+            TextField("Search speech", text: $presentation.historySearchQuery)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Search speech history")
+            Button {
+                presentation.isViewingArchive.toggle()
+            } label: {
+                Label(
+                    presentation.isViewingArchive ? "Recent" : "Archive",
+                    systemImage: presentation.isViewingArchive ? "clock.arrow.circlepath" : "archivebox"
+                )
+            }
+            .help(presentation.isViewingArchive ? "View recent speech" : "View archived speech")
+            .accessibilityLabel(presentation.isViewingArchive ? "View recent speech" : "View archived speech")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
     private var historyItems: [TTSItem] {
-        controller.playerListItems
+        presentation.isViewingArchive ? controller.archivedHistoryItems : controller.activeHistoryItems
     }
 
     private var filteredItems: [TTSItem] {
-        guard let projectFilter = presentation.historyProjectFilter else { return historyItems }
-        return historyItems.filter { $0.workspaceName == projectFilter }
+        historyItems.filter { item in
+            let matchesProject = presentation.historyProjectFilter.map { item.workspaceName == $0 } ?? true
+            return matchesProject && matchesSearch(item)
+        }
+    }
+
+    private var emptyStateTitle: String {
+        if !presentation.historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "No matching speech"
+        }
+        if presentation.isViewingArchive {
+            return presentation.historyProjectFilter == nil ? "No archived speech" : "No archived speech for this project"
+        }
+        return presentation.historyProjectFilter == nil ? "No recent speech" : "No speech for this project"
+    }
+
+    private func matchesSearch(_ item: TTSItem) -> Bool {
+        let query = presentation.historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return [item.nowSpeakingTitle, item.text, item.displayAgent, item.workspaceName]
+            .compactMap { $0 }
+            .contains { $0.localizedCaseInsensitiveContains(query) }
     }
 }
 
 private struct PlayerHistoryRow: View {
     let item: TTSItem
     let action: () -> Void
+    let onArchive: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
+            Button(action: action) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.nowSpeakingTitle)
                         .font(.system(size: 13, weight: .medium))
@@ -1518,26 +1567,35 @@ private struct PlayerHistoryRow: View {
                     .lineLimit(1)
                 }
 
-                Spacer(minLength: 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(item.status == .generating || !FileManager.default.fileExists(atPath: item.outputFile))
+            .opacity(item.status == .generating ? 0.62 : 1)
+            .help(item.status == .generating ? "Generating audio" : "Play now")
+            .accessibilityLabel(accessibilityLabel)
 
-                if item.status == .generating {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Generating audio")
-                } else {
-                    Text(item.createdDate.formatted(date: .omitted, time: .shortened))
+            if item.status == .generating {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Generating audio")
+            } else {
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text(item.timestampLabel())
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
+                    Button(action: onArchive) {
+                        Image(systemName: item.archived ? "tray.and.arrow.up" : "archivebox")
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(item.archived ? "Restore from archive" : "Archive")
+                    .accessibilityLabel(item.archived ? "Restore from archive" : "Archive")
                 }
             }
-            .contentShape(Rectangle())
-            .padding(.vertical, 2)
         }
-        .buttonStyle(.plain)
-        .disabled(item.status == .generating || !FileManager.default.fileExists(atPath: item.outputFile))
-        .opacity(item.status == .generating ? 0.62 : 1)
-        .help(item.status == .generating ? "Generating audio" : "Play now")
-        .accessibilityLabel(accessibilityLabel)
+        .padding(.vertical, 2)
     }
 
     private var detail: String {

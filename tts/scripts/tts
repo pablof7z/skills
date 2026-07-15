@@ -204,6 +204,19 @@ normalize_space() {
   printf '%s' "$1" | tr -s '[:space:]' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
+normalize_literal_newlines() {
+  python3 - "$1" <<'PY'
+import sys
+
+text = sys.argv[1]
+# Agents occasionally pass JSON-style line breaks as literal characters. Turn
+# those into real Markdown line breaks before storing, displaying, or speaking
+# the update, while leaving every other character untouched.
+text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+sys.stdout.write(text)
+PY
+}
+
 strip_spoken_code_blocks() {
   python3 - "$1" <<'PY'
 import re
@@ -840,6 +853,7 @@ if ! [[ "$HANDOFF_DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 
 DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
+DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
 TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
 TEXT=$(normalize_space "$TEXT")
 INTRODUCTION=$(normalize_space "$INTRODUCTION")

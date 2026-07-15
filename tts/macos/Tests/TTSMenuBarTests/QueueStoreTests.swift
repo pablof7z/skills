@@ -225,7 +225,7 @@ struct QueueStoreTests {
     }
 
     @Test @MainActor
-    func explicitRecentSelectionCreatesPlaybackCopyAndClearsPauseAll() throws {
+    func explicitRecentSelectionRequeuesTheOriginalItemAndClearsPauseAll() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -248,8 +248,10 @@ struct QueueStoreTests {
 
         let items = try store.loadItems()
         #expect(!controller.isGloballyPaused)
-        #expect(items.contains { $0.id == recent.id && $0.status == .played })
-        #expect(items.contains { $0.id.hasPrefix("replay-") && $0.status == .queued })
+        #expect(items.count == 1)
+        #expect(items.first?.id == recent.id)
+        #expect(items.first?.createdAt == recent.createdAt)
+        #expect(items.first?.status == .queued)
     }
 
     @Test
@@ -292,7 +294,7 @@ struct QueueStoreTests {
     }
 
     @Test
-    func replayCopiesMetadataAndReturnsToQueue() {
+    func replayKeepsGenerationIdentityAndReturnsToQueue() {
         var original = item(id: "done", createdAt: 10)
         original.status = .played
         original.startedAt = 11
@@ -302,22 +304,66 @@ struct QueueStoreTests {
         original.assetDirectory = "/tmp/brief"
         original.iTermSessionID = "w1t2p3:9473B74C-9371-4C44-B34C-84F40E3D2F04"
 
-        let replay = original.replayCopy(now: 20)
+        let replay = original.requeuedForReplay()
 
-        #expect(replay.id.hasPrefix("replay-"))
+        #expect(replay.id == original.id)
         #expect(replay.text == original.text)
         #expect(replay.subject == original.subject)
         #expect(replay.agentName == original.agentName)
         #expect(replay.sessionID == original.sessionID)
         #expect(replay.iTermSessionID == original.iTermSessionID)
         #expect(replay.status == .queued)
-        #expect(replay.createdAt == 20)
+        #expect(replay.createdAt == original.createdAt)
         #expect(replay.startedAt == nil)
         #expect(replay.completedAt == nil)
         #expect(replay.playbackOffset == nil)
         #expect(replay.wordTimings == original.wordTimings)
         #expect(replay.attachments == original.attachments)
         #expect(replay.assetDirectory == original.assetDirectory)
+    }
+
+    @Test
+    func showsRelativeHistoryTimesForTheFirstDay() {
+        let now = Date(timeIntervalSince1970: 200_000)
+
+        #expect(item(id: "now", createdAt: 199_970).timestampLabel(now: now) == "just now")
+        #expect(item(id: "minutes", createdAt: 199_700).timestampLabel(now: now) == "5m ago")
+        #expect(item(id: "hours", createdAt: 189_200).timestampLabel(now: now) == "3h ago")
+    }
+
+    @Test
+    func switchesHistoryTimesToAbsoluteAtTwentyFourHours() {
+        let now = Date(timeIntervalSince1970: 200_000)
+        let label = item(id: "day-old", createdAt: 113_600).timestampLabel(now: now)
+
+        #expect(label != "24h ago")
+        #expect(!label.hasSuffix("ago"))
+    }
+
+    @Test @MainActor
+    func archivesAndRestoresRecentSpeechWithoutDeletingIt() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        var recent = item(id: "recent", createdAt: 10)
+        recent.status = .played
+        try store.save(recent)
+        let controller = PlaybackController(
+            store: store,
+            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"])
+        )
+        defer { controller.shutdown() }
+        controller.start()
+
+        controller.setArchived(true, for: recent)
+        #expect(controller.activeHistoryItems.isEmpty)
+        #expect(controller.archivedHistoryItems.map(\.id) == [recent.id])
+        #expect(try store.loadItems().first?.archived == true)
+
+        let archived = try #require(controller.archivedHistoryItems.first)
+        controller.setArchived(false, for: archived)
+        #expect(controller.activeHistoryItems.map(\.id) == [recent.id])
+        #expect(controller.archivedHistoryItems.isEmpty)
     }
 
     @Test
@@ -444,7 +490,7 @@ struct QueueStoreTests {
     func replayCanStartAtRequestedPlaybackOffset() {
         let original = item(id: "done", createdAt: 10)
 
-        let replay = original.replayCopy(now: 20, startingAt: 42.5)
+        let replay = original.requeuedForReplay(startingAt: 42.5)
 
         #expect(replay.status == .queued)
         #expect(replay.playbackOffset == 42.5)
@@ -954,6 +1000,7 @@ struct QueueStoreTests {
         object.removeValue(forKey: "attachment_id")
         object.removeValue(forKey: "return_to_playback_offset")
         object.removeValue(forKey: "iterm_session_id")
+        object.removeValue(forKey: "is_archived")
 
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         let decoded = try JSONDecoder().decode(TTSItem.self, from: legacyData)
@@ -964,6 +1011,7 @@ struct QueueStoreTests {
         #expect(decoded.attachments == nil)
         #expect(decoded.assetDirectory == nil)
         #expect(decoded.iTermSessionID == nil)
+        #expect(!decoded.archived)
         #expect(!decoded.isAttachmentPlayback)
     }
 
