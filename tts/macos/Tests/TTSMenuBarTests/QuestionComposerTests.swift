@@ -73,16 +73,16 @@ struct QuestionComposerTests {
         let apiFile = URL(fileURLWithPath: "/tmp/api.md")
         let uiFile = URL(fileURLWithPath: "/tmp/ui.png")
         model.applySuggestionEdit(
-            "API after compatibility review",
+            title: "API after compatibility review",
+            description: "Keep compatibility with existing clients.",
             suggestionID: "api",
-            suggestionTitle: "API",
             attachments: [apiFile],
             for: "scope"
         )
         model.applySuggestionEdit(
-            "UI with the compact layout",
+            title: "UI with the compact layout",
+            description: "Use the dense presentation.",
             suggestionID: "ui",
-            suggestionTitle: "UI",
             attachments: [uiFile],
             for: "scope"
         )
@@ -92,6 +92,18 @@ struct QuestionComposerTests {
         let submission = model.submissions(questionIDs: ["scope"])[0]
         #expect(submission.suggestionIDs == ["api", "ui"])
         #expect(submission.answer == "API after compatibility review, UI with the compact layout")
+        #expect(submission.selectedSuggestions == [
+            TTSQuestionDraftSuggestion(
+                id: "api",
+                title: "API after compatibility review",
+                description: "Keep compatibility with existing clients."
+            ),
+            TTSQuestionDraftSuggestion(
+                id: "ui",
+                title: "UI with the compact layout",
+                description: "Use the dense presentation."
+            ),
+        ])
         #expect(submission.attachmentURLs == [apiFile.path, uiFile.path])
     }
 
@@ -126,9 +138,9 @@ struct QuestionComposerTests {
         model.prepare(questionIDs: ["timing"])
         let attachment = URL(fileURLWithPath: "/tmp/release-checklist.md")
         model.applySuggestionEdit(
-            "Ship today after the smoke test",
+            title: "Ship today after the smoke test",
+            description: "Wait for the final smoke test result.",
             suggestionID: "ship",
-            suggestionTitle: "Ship today",
             attachments: [attachment],
             for: "timing"
         )
@@ -136,6 +148,7 @@ struct QuestionComposerTests {
         let submission = model.submissions(questionIDs: ["timing"]).first
         #expect(submission?.answer == "Ship today after the smoke test")
         #expect(submission?.suggestionID == "ship")
+        #expect(submission?.selectedSuggestions.first?.description == "Wait for the final smoke test result.")
         #expect(submission?.attachmentURLs == [attachment.path])
     }
 
@@ -152,6 +165,20 @@ struct QuestionComposerTests {
         model.removeAttachment(first, for: "evidence")
 
         #expect(model.draft(for: "evidence").attachmentURLs == [second])
+    }
+
+    @Test
+    func savedFreeformAnswerCanBeClearedBackToSkipped() {
+        var model = QuestionComposerModel()
+        model.prepare(questionIDs: ["scope"])
+        model.updateDraft("Keep it narrow", for: "scope")
+        model.setAttachments([URL(fileURLWithPath: "/tmp/context.md")], for: "scope")
+
+        model.updateDraft("", for: "scope")
+        model.setAttachments([], for: "scope")
+
+        #expect(model.draft(for: "scope").freeformText.isEmpty)
+        #expect(model.submissions(questionIDs: ["scope"])[0].isSkipped)
     }
 
     @Test

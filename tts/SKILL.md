@@ -31,7 +31,8 @@ Do not detach it with shell process-management syntax.
 
 - **Questions**: Before using `--ask`, read
   [asking-questions.md](references/asking-questions.md). The user's submitted
-  answers and answer-attachment paths return in the tool output.
+  answers, selected-suggestion details, and answer-attachment paths return in
+  the tool output.
 - **Attachments or formatted code**: Read
   [rich-content.md](references/rich-content.md).
 - **No-play generation, status inspection, or failures**: Read
