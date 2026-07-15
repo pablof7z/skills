@@ -1626,9 +1626,10 @@ private struct PlayerHistoryView: View {
                         },
                         onRetry: { controller.retryGeneration(item) },
                         isRetrying: controller.isRetrying(item),
+                        generationProgress: controller.generationProgress(for: item),
                         onArchive: { controller.setArchived(!item.archived, for: item) }
                     )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                 }
                 .listStyle(.plain)
             }
@@ -1670,32 +1671,44 @@ private struct PlayerHistoryRow: View {
     let action: () -> Void
     let onRetry: () -> Void
     let isRetrying: Bool
+    let generationProgress: Double
     let onArchive: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(item.unheard ? Color.accentColor : .clear)
+                .frame(width: 7, height: 7)
+                .padding(.top, 8)
             Button(action: action) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.nowSpeakingTitle)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(item.status == .generating ? .secondary : .primary)
-                        .lineLimit(1)
-                    HStack(spacing: 5) {
-                        if let workspace = item.workspaceName {
-                            Circle()
-                                .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath))
-                                .frame(width: 6, height: 6)
-                            Text(workspace)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(WorkspaceAccent.color(forWorkspacePath: item.workspacePath))
-                            Text("·")
-                                .foregroundStyle(.tertiary)
-                        }
-                        Text(detail)
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(sender)
+                            .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
+                            .foregroundStyle(item.status == .generating ? .secondary : .primary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(item.timestampLabel())
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.tertiary)
                     }
-                    .font(.system(size: 11.5))
-                    .lineLimit(1)
+                    Text(summary)
+                        .font(.system(size: 15, weight: item.unheard ? .semibold : .regular))
+                        .foregroundStyle(summaryColor)
+                        .lineLimit(1)
+                    if item.status == .generating {
+                        GeometryReader { geometry in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.primary.opacity(0.10))
+                                Capsule()
+                                    .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath).opacity(0.82))
+                                    .frame(width: max(3, geometry.size.width * generationProgress))
+                            }
+                        }
+                        .frame(height: 2)
+                        .padding(.top, 2)
+                        .accessibilityLabel("Generating audio")
+                    }
                 }
 
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1712,10 +1725,7 @@ private struct PlayerHistoryRow: View {
                     .controlSize(.small)
                     .accessibilityLabel("Generating audio")
             } else {
-                VStack(alignment: .trailing, spacing: 5) {
-                    Text(item.timestampLabel())
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                VStack(alignment: .trailing, spacing: 7) {
                     if item.status == .failed {
                         Button(action: onRetry) {
                             if isRetrying {
@@ -1735,7 +1745,7 @@ private struct PlayerHistoryRow: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 5)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if item.status != .generating {
                 Button(role: item.archived ? nil : .destructive, action: onArchive) {
@@ -1749,6 +1759,10 @@ private struct PlayerHistoryRow: View {
         }
     }
 
+    private var sender: String {
+        item.workspaceName ?? item.displayAgent
+    }
+
     private var detail: String {
         if item.status == .generating {
             return "Generating audio…"
@@ -1756,6 +1770,15 @@ private struct PlayerHistoryRow: View {
             return item.error.map { "Failed: \($0)" } ?? "Failed"
         }
         return item.text
+    }
+
+    private var summary: String {
+        guard item.nowSpeakingTitle != detail else { return detail }
+        return "\(item.nowSpeakingTitle) — \(detail)"
+    }
+
+    private var summaryColor: Color {
+        item.status == .failed ? .secondary : .primary.opacity(0.84)
     }
 
     private var accessibilityLabel: String {

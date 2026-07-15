@@ -389,6 +389,7 @@ write_macos_item_record() {
   local status="$2"
   local completed_at="${3:-}"
   local error_message="${4:-}"
+  local generation_duration="${5:-}"
   local harness session_id iterm_session_id workspace inferred_agent
 
   harness="$(infer_harness)"
@@ -417,7 +418,8 @@ write_macos_item_record() {
     "$ITEM_CREATED_AT" \
     "$status" \
     "$completed_at" \
-    "$error_message" <<'PY'
+    "$error_message" \
+    "$generation_duration" <<'PY'
 import json
 import os
 import sys
@@ -443,6 +445,7 @@ import sys
     status,
     completed_at,
     error,
+    generation_duration,
 ) = sys.argv[1:]
 
 def optional(value):
@@ -490,6 +493,8 @@ item = {
     "attachments": attachments,
     "asset_directory": optional(asset_directory),
     "retry_command": optional(retry_command),
+    "generation_duration": float(generation_duration) if generation_duration else None,
+    "is_unheard": True,
 }
 
 with open(destination, "w", encoding="utf-8") as handle:
@@ -539,17 +544,19 @@ begin_macos_generation() {
 }
 
 mark_macos_generation_failed() {
-  local completed_at temporary_file
+  local completed_at temporary_file generation_duration
   [ "$MACOS_GENERATION_ACTIVE" -eq 1 ] || return 0
   [ -n "$MACOS_ITEM_FILE" ] || return 0
   MACOS_GENERATION_ACTIVE=0
   completed_at="$(date +%s)"
+  generation_duration=$(( completed_at - ITEM_CREATED_AT ))
   temporary_file="${MACOS_ITEM_FILE%/*}/.${ITEM_ID}.failed.tmp"
   if write_macos_item_record \
     "$temporary_file" \
     "failed" \
     "$completed_at" \
-    "${GENERATION_FAILURE_MESSAGE:-Speech generation failed.}"; then
+    "${GENERATION_FAILURE_MESSAGE:-Speech generation failed.}" \
+    "$generation_duration"; then
     mv "$temporary_file" "$MACOS_ITEM_FILE"
   else
     rm -f "$temporary_file"
@@ -564,7 +571,7 @@ discard_macos_generation() {
 }
 
 queue_macos_playback() {
-  local state_dir items_dir item_id item_file temporary_file
+  local state_dir items_dir item_id item_file temporary_file generation_duration
   local menu_command
 
   if ! command -v python3 >/dev/null 2>&1; then
@@ -587,8 +594,9 @@ queue_macos_playback() {
   item_id="$ITEM_ID"
   item_file="$items_dir/$item_id.json"
   temporary_file="$items_dir/.$item_id.tmp"
+  generation_duration=$(( $(date +%s) - ITEM_CREATED_AT ))
 
-  if ! write_macos_item_record "$temporary_file" "queued"; then
+  if ! write_macos_item_record "$temporary_file" "queued" "" "" "$generation_duration"; then
     rm -f "$temporary_file"
     discard_macos_generation
     return 1
