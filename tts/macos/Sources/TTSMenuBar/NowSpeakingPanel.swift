@@ -145,7 +145,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             sessionOpener: sessionOpener,
             isWindowedMode: windowedMode,
             onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
-            onHide: { [weak self] in self?.setPlayerVisible(false) }
+            onHide: { [weak self] in self?.dismissPlayerContent() }
         )
         // The floating HUD is always a dark glass overlay by design; a normal
         // window should instead follow the system's light/dark appearance.
@@ -368,6 +368,23 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         } else {
             hide()
         }
+    }
+
+    private func dismissPlayerContent() {
+        guard windowedMode else {
+            setPlayerVisible(false)
+            return
+        }
+        presentation.clearPendingPreview()
+        presentation.lingeringItem = nil
+        presentation.lingeringTime = 0
+        presentation.lingeringDuration = 0
+        lastCurrentItem = nil
+        activeItemID = nil
+        if playbackController.currentItem != nil {
+            playbackController.stop()
+        }
+        showIdleIfNeeded()
     }
 
     func toggleMiniPlayer() {
@@ -1063,6 +1080,17 @@ enum PendingQuestionRetention {
     }
 }
 
+enum QuestionAudioReview {
+    static func canReplay(
+        _ item: TTSItem,
+        fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)
+    ) -> Bool {
+        item.isQuestion
+            && item.status != .generating
+            && fileExists(item.outputFile)
+    }
+}
+
 struct QuestionSubmission: Equatable {
     let questionID: String
     let answer: String?
@@ -1606,6 +1634,7 @@ private struct NowSpeakingHUDView: View {
     @StateObject private var answerEditorPresenter = AnswerEditorPresenter()
     @State private var isAnswerDropTarget = false
     @State private var primaryMessageContentHeight: CGFloat = 150
+    @State private var previewPlaybackOffset: TimeInterval = 0
 
     var body: some View {
         if let item = displayedItem {
@@ -1671,6 +1700,7 @@ private struct NowSpeakingHUDView: View {
             .onChange(of: item.id) { _ in
                 answerEditorPresenter.cancel()
                 primaryMessageContentHeight = 150
+                previewPlaybackOffset = 0
                 questionComposer.reset()
                 prepareComposer(for: item)
             }
@@ -1853,7 +1883,7 @@ private struct NowSpeakingHUDView: View {
                 }
             }
 
-            if !isPreviewingPending {
+            if !isPreviewingPending || QuestionAudioReview.canReplay(item) {
                 Divider().overlay(Color.white.opacity(0.11))
                 timeline(accent: accent)
                 controls(item: item, accent: accent)
@@ -2457,15 +2487,15 @@ private struct NowSpeakingHUDView: View {
                 .accessibilityLabel("Open agent session")
             }
 
-            Button(action: isWindowedMode ? dismissPreviewOrStop : onHide) {
-                Image(systemName: isPreviewingPending ? "chevron.backward" : "xmark")
+            Button(action: onHide) {
+                Image(systemName: "xmark")
                     .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
-            .help(isPreviewingPending ? "Back to history" : (isWindowedMode ? "Stop" : "Hide player"))
-            .accessibilityLabel(isPreviewingPending ? "Back to history" : (isWindowedMode ? "Stop" : "Hide player"))
+            .help(isWindowedMode ? "Back to history" : "Hide player")
+            .accessibilityLabel(isWindowedMode ? "Back to history" : "Hide player")
         }
     }
 
@@ -2738,7 +2768,9 @@ private struct NowSpeakingHUDView: View {
                 value: Binding(
                     get: { playbackTime },
                     set: { newValue in
-                        if isLingering {
+                        if isPreviewingPending {
+                            previewPlaybackOffset = newValue
+                        } else if isLingering {
                             presentation.lingeringTime = newValue
                         } else {
                             controller.seek(to: newValue)
@@ -2747,8 +2779,12 @@ private struct NowSpeakingHUDView: View {
                 ),
                 in: 0 ... max(playbackDuration, 1),
                 onEditingChanged: { isEditing in
-                    guard !isEditing, isLingering, let item = presentation.lingeringItem else { return }
-                    controller.replay(item, startingAt: presentation.lingeringTime)
+                    guard !isEditing else { return }
+                    if isPreviewingPending, let item = pendingPreviewItem {
+                        controller.replay(item, startingAt: previewPlaybackOffset)
+                    } else if isLingering, let item = presentation.lingeringItem {
+                        controller.replay(item, startingAt: presentation.lingeringTime)
+                    }
                 }
             )
             .tint(accent)
@@ -2769,36 +2805,42 @@ private struct NowSpeakingHUDView: View {
         HStack(spacing: 12) {
             playbackRateButton(item: item, accent: accent)
             controlButton(symbol: "gobackward.15", label: "Back 15 seconds", accent: accent) {
-                if let item = presentation.lingeringItem {
-                    controller.replay(item, startingAt: max(0, presentation.lingeringTime - 15))
+                if isLingering || isPreviewingPending {
+                    controller.replay(item, startingAt: max(0, playbackTime - 15))
                 } else {
                     controller.rewind()
                 }
             }
             controlButton(
-                symbol: isLingering ? "arrow.counterclockwise" : (controller.isPaused ? "play.fill" : "pause.fill"),
-                label: isLingering ? "Replay" : (controller.isPaused ? "Resume" : "Pause"),
+                symbol: isLingering || isPreviewingPending
+                    ? "arrow.counterclockwise"
+                    : (controller.isPaused ? "play.fill" : "pause.fill"),
+                label: isLingering || isPreviewingPending
+                    ? "Replay"
+                    : (controller.isPaused ? "Resume" : "Pause"),
                 accent: accent,
                 prominent: true
             ) {
-                if let item = presentation.lingeringItem {
+                if isLingering || isPreviewingPending {
                     controller.replay(item, startingAt: 0)
                 } else {
                     controller.togglePause()
                 }
             }
             controlButton(symbol: "stop.fill", label: "Stop", accent: accent) {
-                if isLingering {
+                if isPreviewingPending {
+                    presentation.clearPendingPreview()
+                } else if isLingering {
                     presentation.lingeringItem = nil
                 } else {
                     controller.stop()
                 }
             }
             controlButton(symbol: "goforward.15", label: "Forward 15 seconds", accent: accent) {
-                if let item = presentation.lingeringItem {
+                if isLingering || isPreviewingPending {
                     controller.replay(
                         item,
-                        startingAt: min(playbackDuration, presentation.lingeringTime + 15)
+                        startingAt: min(playbackDuration, playbackTime + 15)
                     )
                 } else {
                     controller.forward()
@@ -2873,11 +2915,13 @@ private struct NowSpeakingHUDView: View {
     }
 
     private var playbackTime: TimeInterval {
-        isLingering ? presentation.lingeringTime : controller.currentTime
+        if isPreviewingPending { return previewPlaybackOffset }
+        return isLingering ? presentation.lingeringTime : controller.currentTime
     }
 
     private var playbackDuration: TimeInterval {
-        isLingering ? presentation.lingeringDuration : controller.duration
+        if isPreviewingPending { return pendingPreviewItem?.duration ?? 0 }
+        return isLingering ? presentation.lingeringDuration : controller.duration
     }
 
     private var statusSymbol: String {
@@ -2889,26 +2933,10 @@ private struct NowSpeakingHUDView: View {
     }
 
     private func seek(item: TTSItem, to time: TimeInterval) {
-        if isLingering {
+        if isLingering || isPreviewingPending {
             controller.replay(item, startingAt: time)
         } else {
             controller.seek(to: time)
-        }
-    }
-
-    private func stopPlayback() {
-        if isLingering {
-            presentation.lingeringItem = nil
-        } else {
-            controller.stop()
-        }
-    }
-
-    private func dismissPreviewOrStop() {
-        if isPreviewingPending {
-            presentation.clearPendingPreview()
-        } else {
-            stopPlayback()
         }
     }
 
