@@ -249,7 +249,6 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var error: String?
     var playbackOffset: Double? = nil
     var wordTimings: [TTSWordTiming]? = nil
-    var mediaHandoffDelay: Double? = nil
     var attachments: [TTSAttachment]? = nil
     var assetDirectory: String? = nil
     var retryCommand: String? = nil
@@ -293,7 +292,6 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case error
         case playbackOffset = "playback_offset"
         case wordTimings = "word_timings"
-        case mediaHandoffDelay = "media_handoff_delay"
         case attachments
         case assetDirectory = "asset_directory"
         case retryCommand = "retry_command"
@@ -411,7 +409,6 @@ struct TTSItem: Codable, Identifiable, Equatable {
             error: nil,
             playbackOffset: playbackOffset,
             wordTimings: wordTimings,
-            mediaHandoffDelay: mediaHandoffDelay,
             attachments: attachments,
             assetDirectory: assetDirectory,
             retryCommand: retryCommand,
@@ -471,7 +468,6 @@ struct TTSItem: Codable, Identifiable, Equatable {
             error: nil,
             playbackOffset: nil,
             wordTimings: attachment.wordTimings,
-            mediaHandoffDelay: mediaHandoffDelay,
             attachments: attachments,
             assetDirectory: assetDirectory,
             retryCommand: retryCommand,

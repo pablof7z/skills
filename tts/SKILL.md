@@ -221,6 +221,8 @@ generation time, shows relative times during the first 24 hours and absolute
 timestamps afterward, and keeps search beside the project filter in the native
 titlebar toolbar. That filter menu selects recent or archived history, while
 swiping left archives an update and the archived view offers restore.
+Preferences can keep the Windowed Player above other windows only while it is
+speaking; paused and idle history return to normal window level.
 The player can be dragged from any non-interactive background and its expanded
 view has forgiving resize zones on every edge and corner, with the original `540×470` layout
 as its minimum unless the display itself is smaller. A remembered header control
@@ -229,8 +231,8 @@ the window size. Position, expanded size, mini-player mode, and
 Show Player / Hide Player state are remembered; the header × hides the HUD
 without stopping speech. Display changes clamp the whole frame onto a remaining
 visible screen and reduce an oversized saved frame to fit. Right-clicking the
-TTS status item also exposes Show/Hide Player and Pause/Resume All; left-click
-still opens the queue popup.
+TTS status item also exposes Show/Hide Player, Pause/Resume All, and
+Preferences; `Command`+`,` opens Preferences while the TTS app is active.
 When an audible macOS request begins, the windowed player immediately shows the
 new update with a progress indicator. Its durable text can be opened and read
 while audio is generated; that preview becomes the normal player when audio
@@ -271,17 +273,14 @@ the speech gate so only one audible TTS job speaks at a time. Set
 `TTS_MACOS_MENU=0` to force this fallback.
 
 On macOS, media keeps playing while audio is generated. Once the MP3 has fully
-arrived, the playback backend checks Music and Spotify. If it actually pauses
-one of them, it leaves a two-second handoff before speech begins, then resumes
-the paused apps a few seconds after playback ends.
+arrived, the player can pause Music and Spotify according to its local
+Preferences, waits the configured handoff before speech, then resumes only the
+apps it paused after the configured delay.
 
 - Use `--no-play` to generate the MP3 without playback. Its JSON result includes the path only after the file exists.
 - Use `--message text` for an explicit primary message; the original positional message remains supported.
 - Use repeatable `--attach "Label" path` pairs to add durable supporting material.
-- Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
-- Use `--handoff-delay seconds` or `TTS_MEDIA_HANDOFF_DELAY_SECONDS=seconds` to change the post-pause handoff.
-- Use `--resume-delay seconds` or `TTS_RESUME_DELAY_SECONDS=seconds` to change the resume delay.
-- Use `TTS_MEDIA_APPS="Music,Spotify"` to customize the checked apps.
+- On macOS, media interruption behavior is a local TTS Player preference. Agents do not configure it.
 
 Queue records, process state, and logs live under the TTS state directory,
 normally `~/.local/state/tts/`.

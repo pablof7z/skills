@@ -75,6 +75,25 @@ struct QueueStoreTests {
         #expect(reloaded.preferences.expandedSize == CGSize(width: 680, height: 560))
     }
 
+    @Test @MainActor
+    func persistsMediaAndWindowedPlayerPreferences() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PlayerPreferencesStore(stateDirectory: directory)
+
+        #expect(store.preferences == PlayerPreferences())
+        store.setPausesMedia(false)
+        store.setMediaHandoffDelay(1.5)
+        store.setMediaResumeDelay(4.5)
+        store.setKeepsWindowOnTopWhilePlaying(true)
+
+        let reloaded = PlayerPreferencesStore(stateDirectory: directory)
+        #expect(!reloaded.preferences.pausesMedia)
+        #expect(reloaded.preferences.mediaHandoffDelay == 1.5)
+        #expect(reloaded.preferences.mediaResumeDelay == 4.5)
+        #expect(reloaded.preferences.keepsWindowOnTopWhilePlaying)
+    }
+
     @Test
     func clampsSavedPlayerPositionOntoRemainingDisplay() {
         let frame = HUDPlacement.frame(
@@ -164,7 +183,7 @@ struct QueueStoreTests {
         try store.save(item(id: "muted", createdAt: 10))
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { true }
         )
         defer { controller.shutdown() }
@@ -186,7 +205,7 @@ struct QueueStoreTests {
         try store.save(generating)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { false }
         )
         defer { controller.shutdown() }
@@ -212,7 +231,7 @@ struct QueueStoreTests {
         try store.setGlobalPlaybackPaused(true)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { true }
         )
         defer { controller.shutdown() }
@@ -240,7 +259,7 @@ struct QueueStoreTests {
         try store.setGlobalPlaybackPaused(true)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { true }
         )
         defer { controller.shutdown() }
@@ -362,7 +381,7 @@ struct QueueStoreTests {
         try store.save(recent)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"])
+            mediaController: disabledMediaController(stateDirectory: directory)
         )
         defer { controller.shutdown() }
         controller.start()
@@ -410,7 +429,7 @@ struct QueueStoreTests {
         try store.save(supplemental)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { true }
         )
         defer { controller.shutdown() }
@@ -435,7 +454,7 @@ struct QueueStoreTests {
         try store.save(main)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { true }
         )
         defer { controller.shutdown() }
@@ -1309,7 +1328,7 @@ struct QueueStoreTests {
         try store.save(item(id: "automatic", createdAt: 10, outputFile: audio.path))
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { false },
             idleSeconds: { 120 }
         )
@@ -1339,7 +1358,7 @@ struct QueueStoreTests {
         try store.setGlobalPlaybackPaused(true)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { false },
             idleSeconds: { 120 }
         )
@@ -1369,7 +1388,7 @@ struct QueueStoreTests {
         try store.setGlobalPlaybackPaused(true)
         let controller = PlaybackController(
             store: store,
-            mediaController: MediaController(environment: ["TTS_MEDIA_CONTROL": "0"]),
+            mediaController: disabledMediaController(stateDirectory: directory),
             outputIsMuted: { false },
             idleSeconds: { 120 }
         )
@@ -1799,6 +1818,13 @@ struct QueueStoreTests {
             ),
         ]
         return value
+    }
+
+    @MainActor
+    private func disabledMediaController(stateDirectory: URL) -> MediaController {
+        let preferencesStore = PlayerPreferencesStore(stateDirectory: stateDirectory)
+        preferencesStore.setPausesMedia(false)
+        return MediaController(preferencesStore: preferencesStore)
     }
 
     private func temporaryDirectory() -> URL {
