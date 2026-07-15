@@ -27,22 +27,12 @@ one.
 
 ## Agent identity
 
-Always pass `--introduction` with a brief spoken preamble of 30 words or fewer:
-
-```text
-Agent <name> here, working on <short user-meaningful task>.
-```
-
-Use a phrase the listener can understand without opening a tracker, such as
-`improving TTS identity cues` or `refactoring the lib module`, not bare tracker
-labels or numeric references.
-
-The introduction may or may not be spoken on any given call, so don't encode
-anything important in it — the listener should not depend on hearing it.
-
 Pass `--agent-name` only when the session has a specific identifier beyond the
 harness name. Use names like `<your-agent-id>`; do not use generic values like
 `codex` or `claude`.
+
+Agent attribution comes from this metadata and the calling harness. Do not
+repeat the agent name or identity in the spoken message.
 
 ## Subject
 
@@ -68,7 +58,6 @@ Pass the primary body with `--message` when attachments are present:
 ```bash
 ./scripts/tts \
   --agent-name "<your-agent-id>" \
-  --introduction "Agent <name> here, working on <task>." \
   --message "The implementation is ready. I attached the proposal and a mockup." \
   --attach "Architectural proposal" ./proposal.md \
   --attach "Mockup A" ./mockup-a.svg
@@ -133,7 +122,7 @@ expanded HUD always shows the transcript without a separate toggle. When the
 endpoint supports captioned speech, a softly focused phrase preserves context
 while an exact word playhead follows synthesis timestamps; clicking a word
 seeks to its real audio boundary. The transcript shows only the visible content
-of the agent's message, excluding the spoken introduction, subject, and
+of the agent's message, excluding the spoken subject and
 speech-only code descriptions. It preserves paragraphs, lists, headings,
 emphasis, links, and code-oriented Markdown styling.
 Clicking the speed label cycles through `0.75×`, `1×`, `1.25×`, `1.5×`, and
@@ -210,6 +199,6 @@ the paused apps a few seconds after playback ends.
 Queue records, process state, and logs live under the TTS state directory,
 normally `~/.local/state/tts/`.
 
-`./scripts/tts --agent-name "<your-agent-id>" --introduction "Agent <name> here, working on <task>." --subject "<stable session topic>" "<message>"` will speak the introduction when needed, then the subject, then the body.
+`./scripts/tts --agent-name "<your-agent-id>" --subject "<stable session topic>" "<message>"` will speak the subject, then the body.
 
 `./scripts/tts --no-play "<message>"` will generate the MP3, print its output path, and skip playback.

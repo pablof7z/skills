@@ -174,7 +174,6 @@ usage() {
   echo "  --message text             Explicit primary message (positional text remains supported)." >&2
   echo "  --attach label path        Attach labeled Markdown, text, image, audio, or another file. Repeatable." >&2
   echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
-  echo "  --introduction text        Brief identity/work context, 30 words or fewer." >&2
   echo "  --subject text             Optional spoken/display subject, 5 to 10 words." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
   echo "  --no-play                  Print target MP3 path and generate it without playback." >&2
@@ -188,13 +187,11 @@ NO_PLAY=0
 MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
 HANDOFF_DELAY="${TTS_MEDIA_HANDOFF_DELAY_SECONDS:-2}"
 RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
-INTRODUCTION=""
 SUBJECT=""
 AGENT_NAME=""
 VOICE_ID=""
 PLAY_EXISTING_FILE=""
 MESSAGE=""
-INTRO_RECENT_SECONDS=600
 DETERMINISTIC_VOICES=(af_bella af_heart af_kore af_nova af_sarah am_michael am_puck)
 POSITIONAL=()
 ATTACHMENT_LABELS=()
@@ -348,43 +345,12 @@ agent_identity() {
   fi
 }
 
-intro_state_dir() {
-  tts_state_dir
-}
-
 select_voice_from_seed() {
   local seed="$1"
   local checksum index
   checksum=$(printf '%s' "$seed" | cksum | awk '{ print $1 }')
   index=$(( checksum % ${#DETERMINISTIC_VOICES[@]} ))
   printf '%s\n' "${DETERMINISTIC_VOICES[$index]}"
-}
-
-should_prepend_introduction() {
-  if [ -z "$INTRODUCTION" ]; then
-    return 1
-  fi
-
-  local now last_spoken_at last_agent_id age
-  now=$(date +%s)
-  last_spoken_at=""
-  last_agent_id=""
-
-  if [ -r "$INTRO_STATE_FILE" ]; then
-    {
-      IFS= read -r last_spoken_at || true
-      IFS= read -r last_agent_id || true
-    } < "$INTRO_STATE_FILE"
-  fi
-
-  if [ "$last_agent_id" = "$AGENT_ID" ] && [[ "$last_spoken_at" =~ ^[0-9]+$ ]]; then
-    age=$(( now - last_spoken_at ))
-    if [ "$age" -ge 0 ] && [ "$age" -le "$INTRO_RECENT_SECONDS" ]; then
-      return 1
-    fi
-  fi
-
-  return 0
 }
 
 prepend_spoken_segment() {
@@ -398,25 +364,6 @@ prepend_spoken_segment() {
       printf '%s. %s\n' "$segment" "$text"
       ;;
   esac
-}
-
-record_agent_spoken() {
-  local now tmp
-  now=$(date +%s)
-
-  if ! mkdir -p "$INTRO_STATE_DIR" 2>/dev/null; then
-    return 0
-  fi
-
-  tmp="$INTRO_STATE_FILE.$$"
-  if {
-    printf '%s\n' "$now"
-    printf '%s\n' "$AGENT_ID"
-  } > "$tmp"; then
-    mv "$tmp" "$INTRO_STATE_FILE" 2>/dev/null || rm -f "$tmp"
-  else
-    rm -f "$tmp"
-  fi
 }
 
 MACOS_GENERATION_ACTIVE=0
@@ -656,7 +603,6 @@ queue_macos_playback() {
     "$menu_command" start >/dev/null; then
     MACOS_GENERATION_ACTIVE=0
     MACOS_ITEM_FILE="$item_file"
-    record_agent_spoken
     if python3 - "$item_file" <<'PY'
 import json
 import sys
@@ -782,14 +728,6 @@ while [ "$#" -gt 0 ]; do
       AGENT_NAME="$2"
       shift 2
       ;;
-    --introduction)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --introduction requires a value." >&2
-        exit 1
-      fi
-      INTRODUCTION="$2"
-      shift 2
-      ;;
     --subject)
       if [ -z "${2:-}" ]; then
         echo "Error: --subject requires a value." >&2
@@ -876,11 +814,9 @@ DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
 DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
 TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
 TEXT=$(normalize_space "$TEXT")
-INTRODUCTION=$(normalize_space "$INTRODUCTION")
 SUBJECT=$(normalize_space "$SUBJECT")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
-AGENT_ID="$(agent_identity)"
-VOICE_SEED="$AGENT_ID"
+VOICE_SEED="$(agent_identity)"
 if [ -n "$AGENT_NAME" ]; then
   VOICE_SEED="$AGENT_NAME"
 fi
@@ -888,9 +824,6 @@ VOICE="${VOICE_ID:-${POSITIONAL[1]:-}}"
 if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   VOICE="$(select_voice_from_seed "$VOICE_SEED")"
 fi
-INTRO_STATE_DIR="$(intro_state_dir)"
-INTRO_STATE_FILE="$INTRO_STATE_DIR/last-speaker"
-
 if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   SUBJECT_WORDS=$(word_count "$SUBJECT")
   if [ "$SUBJECT_WORDS" -lt 5 ] || [ "$SUBJECT_WORDS" -gt 10 ]; then
@@ -898,18 +831,6 @@ if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
     exit 1
   fi
   TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")
-fi
-
-if [ -n "$INTRODUCTION" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
-  INTRO_WORDS=$(word_count "$INTRODUCTION")
-  if [ "$INTRO_WORDS" -gt 30 ]; then
-    echo "Error: --introduction must be 30 words or fewer." >&2
-    exit 1
-  fi
-
-  if should_prepend_introduction; then
-    TEXT=$(prepend_spoken_segment "$INTRODUCTION" "$TEXT")
-  fi
 fi
 
 SESSION_ID="$(infer_session_id)"
@@ -1045,27 +966,19 @@ if [ -n "$PLAY_EXISTING_FILE" ]; then
   fi
 
   acquire_speech_gate
-  record_agent_spoken
   pause_media_if_playing
   if [ "${#PAUSED_MEDIA_APPS[@]}" -gt 0 ]; then
     sleep "$HANDOFF_DELAY" 2>/dev/null || true
   fi
 
-  PLAYED=0
   if command -v afplay >/dev/null 2>&1; then
     afplay "$OUTPUT_FILE"
-    PLAYED=1
   elif command -v xdg-open >/dev/null 2>&1; then
-    if xdg-open "$OUTPUT_FILE" >/dev/null 2>&1; then
-      PLAYED=1
-    fi
+    xdg-open "$OUTPUT_FILE" >/dev/null 2>&1 || true
   else
     echo "Tip: open the file manually: $OUTPUT_FILE"
   fi
 
-  if [ "$PLAYED" -eq 1 ]; then
-    record_agent_spoken
-  fi
   exit 0
 fi
 

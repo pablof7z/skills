@@ -80,6 +80,25 @@ class AttachmentFlowTests(unittest.TestCase):
         with KokoroHandler.received_inputs_lock:
             KokoroHandler.received_inputs = []
 
+    def test_rejects_removed_introduction_option(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+        result = subprocess.run(
+            [
+                str(tts_command),
+                "--introduction",
+                "Agent example here.",
+                "--message",
+                "This should not run.",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Error: unknown option: --introduction", result.stderr)
+
     def test_publishes_generating_item_before_audio_is_ready(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         tts_command = repository / "tts" / "scripts" / "tts"
@@ -124,6 +143,10 @@ class AttachmentFlowTests(unittest.TestCase):
                         str(tts_command),
                         "--message",
                         "The player should show this while it is generating.",
+                        "--agent-name",
+                        "agent-foreground-test",
+                        "--subject",
+                        "Foreground TTS generation remains clearly observable",
                         "--voice-id",
                         "af_nova",
                     ],
@@ -152,7 +175,14 @@ class AttachmentFlowTests(unittest.TestCase):
                 queued = json.loads(item_path.read_text(encoding="utf-8"))
                 self.assertEqual(queued["status"], "queued")
                 self.assertEqual(queued["iterm_session_id"], generating["iterm_session_id"])
+                self.assertEqual(queued["agent_name"], "agent-foreground-test")
                 self.assertTrue(Path(queued["output_file"]).is_file())
+                with KokoroHandler.received_inputs_lock:
+                    spoken = KokoroHandler.received_inputs[-1]
+                self.assertTrue(
+                    spoken.startswith("Foreground TTS generation remains clearly observable.")
+                )
+                self.assertNotIn("agent-foreground-test", spoken)
             finally:
                 BlockingKokoroHandler.release_response.set()
                 if process is not None and process.poll() is None:
