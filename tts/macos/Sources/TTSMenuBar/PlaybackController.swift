@@ -337,6 +337,20 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         }
     }
 
+    func submitBundle(_ item: TTSItem, drafts: [TTSQuestionDraft]) {
+        do {
+            let updated = try store.submitBundle(
+                id: item.id,
+                drafts: drafts,
+                actor: "tts-menu"
+            )
+            replaceItem(updated)
+        } catch {
+            NSLog("Unable to submit TTS question bundle: %@", error.localizedDescription)
+            refresh()
+        }
+    }
+
     func playAttachment(_ attachment: TTSAttachment, from displayedItem: TTSItem) {
         let brief = displayedItem.parentItemID
             .flatMap { parentID in items.first(where: { $0.id == parentID }) }

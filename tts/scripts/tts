@@ -175,7 +175,7 @@ usage() {
   echo "  --attach label path        Attach labeled Markdown, text, image, audio, or another file. Repeatable." >&2
   echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
   echo "  --subject text             Optional spoken/display subject, 5 to 10 words." >&2
-  echo "  --ask                      Mark the message as a question and wait for the user's answer." >&2
+  echo "  --ask [json|@file]         Ask one legacy question or a structured question bundle." >&2
   echo "  --suggestions json         Suggested answers as JSON [[title, description], ...]." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
   echo "  --no-play                  Generate without playback; JSON output includes the MP3 path." >&2
@@ -187,7 +187,10 @@ usage() {
 
 NO_PLAY=0
 ASK=0
+ASK_PAYLOAD_SOURCE=""
 SUGGESTIONS_JSON="[]"
+RAW_BUNDLE_JSON=""
+QUESTION_BUNDLE_FILE=""
 MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
 HANDOFF_DELAY="${TTS_MEDIA_HANDOFF_DELAY_SECONDS:-2}"
 RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
@@ -337,6 +340,180 @@ finally:
 PY
 }
 
+prepare_question_bundle() {
+  local destination="$1"
+  local raw_bundle="$2"
+  local root_manifest="$3"
+  local item_directory="$4"
+  python3 - "$destination" "$raw_bundle" "$root_manifest" "$item_directory" <<'PY'
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+import tempfile
+
+destination = Path(sys.argv[1])
+bundle = json.loads(sys.argv[2])
+root_manifest = Path(sys.argv[3]) if sys.argv[3] else destination.parent / "attachments" / "manifest.json"
+item_directory = Path(sys.argv[4])
+image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif", ".tiff", ".svg"}
+diagram_extensions = {".mmd"}
+audio_extensions = {".mp3", ".m4a", ".wav", ".aac", ".aiff", ".caf"}
+text_extensions = {".md", ".markdown", ".txt"}
+
+def atomic_write(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.stem}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+def copy_attachment(spec, attachment_id, directory):
+    source = Path(spec["path"]).expanduser().resolve()
+    if not source.is_file():
+        raise SystemExit(f"attachment does not exist or is not a file: {source}")
+    label = spec.get("label") or source.stem
+    directory.mkdir(parents=True, exist_ok=True)
+    copied = directory / ("source" + source.suffix.lower())
+    shutil.copy2(source, copied)
+    extension = copied.suffix.lower()
+    kind = "file"
+    status = "ready"
+    audio_file = None
+    text = None
+    if extension in text_extensions:
+        kind = "narrated_text"
+        status = "preparing"
+        audio_file = str(directory / "narration.mp3")
+    elif extension in image_extensions:
+        kind = "image"
+    elif extension in diagram_extensions:
+        kind = "diagram"
+        text = copied.read_text(encoding="utf-8")
+    elif extension in audio_extensions:
+        kind = "audio"
+        audio_file = str(copied)
+    return {
+        "id": attachment_id,
+        "label": label,
+        "description": spec.get("description"),
+        "kind": kind,
+        "status": status,
+        "source_file": str(copied),
+        "text": text,
+        "audio_file": audio_file,
+        "word_timings": None,
+        "error": None,
+    }
+
+root_attachments = []
+if root_manifest.is_file():
+    loaded = json.loads(root_manifest.read_text(encoding="utf-8"))
+    if isinstance(loaded, list):
+        root_attachments.extend(loaded)
+for index, spec in enumerate(bundle.get("attachments") or [], 1):
+    attachment_id = f"root-a-{index:02d}"
+    root_attachments.append(copy_attachment(spec, attachment_id, root_manifest.parent / attachment_id))
+
+questions = []
+for question_index, raw_question in enumerate(bundle["questions"], 1):
+    question_id = f"q-{question_index:02d}"
+    question_directory = item_directory / "questions" / question_id
+    question_attachments = [
+        copy_attachment(spec, f"{question_id}-a-{index:02d}", question_directory / "attachments" / f"a-{index:02d}")
+        for index, spec in enumerate(raw_question.get("attachments") or [], 1)
+    ]
+    suggestions = []
+    for suggestion_index, raw_suggestion in enumerate(raw_question.get("suggestions") or [], 1):
+        suggestion_id = f"{question_id}-s-{suggestion_index:02d}"
+        suggestion_directory = question_directory / "suggestions" / suggestion_id
+        suggestion_attachments = [
+            copy_attachment(spec, f"{suggestion_id}-a-{index:02d}", suggestion_directory / "attachments" / f"a-{index:02d}")
+            for index, spec in enumerate(raw_suggestion.get("attachments") or [], 1)
+        ]
+        suggestions.append({
+            "id": suggestion_id,
+            "title": raw_suggestion["title"],
+            "description": raw_suggestion.get("description"),
+            "attachments": suggestion_attachments,
+        })
+    questions.append({
+        "id": question_id,
+        "title": raw_question["title"],
+        "type": raw_question.get("type", "single_choice"),
+        "description": raw_question.get("description"),
+        "attachments": question_attachments,
+        "suggestions": suggestions,
+        "status": "pending",
+        "response": None,
+    })
+
+prepared = {
+    "bundle_title": bundle.get("title"),
+    "bundle_description": bundle.get("description"),
+    "questions": questions,
+}
+atomic_write(root_manifest, root_attachments)
+atomic_write(destination, prepared)
+PY
+}
+
+prepare_scoped_attachment_narrations() {
+  local bundle_file="$1"
+  local voice="$2"
+  local work_file="$ITEM_DIRECTORY/scoped-attachments-work.json"
+  local prepared_file="$ITEM_DIRECTORY/scoped-attachments-prepared.json"
+  if ! python3 - "$bundle_file" "$work_file" "$voice" <<'PY'
+import json
+import sys
+bundle_file, work_file, voice = sys.argv[1:]
+bundle = json.load(open(bundle_file, encoding="utf-8"))
+attachments = []
+for question in bundle.get("questions") or []:
+    attachments.extend(question.get("attachments") or [])
+    for suggestion in question.get("suggestions") or []:
+        attachments.extend(suggestion.get("attachments") or [])
+pending = [value for value in attachments if value.get("kind") == "narrated_text" and value.get("status") == "preparing"]
+if not pending:
+    raise SystemExit(1)
+with open(work_file, "w", encoding="utf-8") as handle:
+    json.dump({"voice": voice, "attachments": pending}, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+  then
+    return 0
+  fi
+  echo "Preparing scoped narrated question attachments..." >&2
+  if ! "$SCRIPT_DIR/tts-attachment-worker" "$work_file" </dev/null >&2; then
+    echo "Warning: one or more scoped question attachments could not be narrated." >&2
+  fi
+  python3 - "$bundle_file" "$work_file" "$prepared_file" <<'PY'
+import json
+import os
+import sys
+bundle_path, work_path, prepared_path = sys.argv[1:]
+bundle = json.load(open(bundle_path, encoding="utf-8"))
+work = json.load(open(work_path, encoding="utf-8"))
+by_id = {value["id"]: value for value in work.get("attachments") or []}
+for question in bundle.get("questions") or []:
+    question["attachments"] = [by_id.get(value["id"], value) for value in question.get("attachments") or []]
+    for suggestion in question.get("suggestions") or []:
+        suggestion["attachments"] = [by_id.get(value["id"], value) for value in suggestion.get("attachments") or []]
+with open(prepared_path, "w", encoding="utf-8") as handle:
+    json.dump(bundle, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(prepared_path, bundle_path)
+PY
+  rm -f "$work_file"
+}
+
 word_count() {
   printf '%s\n' "$1" | awk '{ count += NF } END { print count + 0 }'
 }
@@ -425,7 +602,8 @@ write_macos_item_record() {
     "$error_message" \
     "$generation_duration" \
     "$ASK" \
-    "$SUGGESTIONS_JSON" <<'PY'
+    "$SUGGESTIONS_JSON" \
+    "$QUESTION_BUNDLE_FILE" <<'PY'
 import json
 import fcntl
 import os
@@ -456,6 +634,7 @@ import tempfile
     generation_duration,
     ask,
     suggestions_json,
+    question_bundle_file,
 ) = sys.argv[1:]
 
 def optional(value):
@@ -481,6 +660,20 @@ if attachment_manifest and os.path.isfile(attachment_manifest):
     except (OSError, ValueError):
         attachments = None
 
+bundle_title = None
+bundle_description = None
+questions = None
+if question_bundle_file and os.path.isfile(question_bundle_file):
+    try:
+        with open(question_bundle_file, encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            bundle_title = loaded.get("bundle_title")
+            bundle_description = loaded.get("bundle_description")
+            questions = loaded.get("questions")
+    except (OSError, ValueError):
+        questions = None
+
 state_directory = os.path.dirname(os.path.dirname(destination))
 os.makedirs(state_directory, exist_ok=True)
 lock_handle = open(os.path.join(state_directory, "operations.flock"), "a+")
@@ -495,6 +688,22 @@ try:
         existing = loaded
 except (OSError, ValueError):
     pass
+
+if isinstance(questions, list):
+    existing_questions = {
+        value.get("id"): value
+        for value in (existing.get("questions") or [])
+        if isinstance(value, dict) and value.get("id")
+    }
+    for question in questions:
+        previous = existing_questions.get(question.get("id"))
+        if not previous:
+            continue
+        if previous.get("status") and previous.get("status") != "pending":
+            question["status"] = previous["status"]
+            question["response"] = previous.get("response")
+        elif previous.get("response") is not None:
+            question["response"] = previous["response"]
 
 item = {
     "id": item_id,
@@ -532,6 +741,9 @@ item = {
     "playback_initiator": existing.get("playback_initiator", "automatic"),
     "engagement": existing.get("engagement", "unknown"),
     "user_activity": existing.get("user_activity"),
+    "bundle_title": bundle_title,
+    "bundle_description": bundle_description,
+    "questions": questions,
 }
 
 descriptor, temporary = tempfile.mkstemp(prefix=f".{item_id}.", suffix=".tmp", dir=os.path.dirname(destination))
@@ -781,7 +993,12 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ask)
       ASK=1
-      shift
+      if [[ "${2:-}" == \{* ]] || [[ "${2:-}" == @* ]]; then
+        ASK_PAYLOAD_SOURCE="$2"
+        shift 2
+      else
+        shift
+      fi
       ;;
     --suggestions)
       if [ -z "${2:-}" ]; then
@@ -877,6 +1094,11 @@ if [ "$ASK" -ne 1 ] && [ "$SUGGESTIONS_JSON" != "[]" ]; then
   exit 1
 fi
 
+if [ -n "$ASK_PAYLOAD_SOURCE" ] && [ "$SUGGESTIONS_JSON" != "[]" ]; then
+  echo "Error: --suggestions is only supported with legacy bare --ask; put suggestions on each JSON question." >&2
+  exit 1
+fi
+
 if ! SUGGESTIONS_JSON="$(python3 - "$SUGGESTIONS_JSON" <<'PY'
 import json
 import sys
@@ -908,6 +1130,120 @@ PY
   exit 1
 fi
 
+if [ -n "$ASK_PAYLOAD_SOURCE" ]; then
+  if ! RAW_BUNDLE_JSON="$(python3 - "$ASK_PAYLOAD_SOURCE" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+source = sys.argv[1]
+base_directory = Path.cwd()
+try:
+    if source.startswith("@"):
+        path = Path(source[1:]).expanduser()
+        if not path.is_file():
+            raise ValueError(f"question bundle file does not exist: {path}")
+        base_directory = path.resolve().parent
+        value = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        value = json.loads(source)
+except (OSError, json.JSONDecodeError, ValueError) as error:
+    print(f"Error: invalid --ask question bundle: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+def optional_text(owner, key, context):
+    if key not in owner or owner[key] is None:
+        return None
+    if not isinstance(owner[key], str):
+        raise ValueError(f"{context} {key} must be a string")
+    return owner[key].strip() or None
+
+def attachments(owner, context):
+    raw = owner.get("attachments") or []
+    if not isinstance(raw, list):
+        raise ValueError(f"{context} attachments must be an array")
+    result = []
+    def resolved_path(raw_path):
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = base_directory / path
+        return str(path.resolve())
+    for index, attachment in enumerate(raw, 1):
+        if isinstance(attachment, str):
+            if not attachment.strip():
+                raise ValueError(f"{context} attachment {index} path cannot be empty")
+            result.append({"path": resolved_path(attachment.strip()), "label": None, "description": None})
+            continue
+        if not isinstance(attachment, dict) or not isinstance(attachment.get("path"), str) or not attachment["path"].strip():
+            raise ValueError(f"{context} attachment {index} must be a path string or an object with path")
+        result.append({
+            "path": resolved_path(attachment["path"].strip()),
+            "label": optional_text(attachment, "label", f"{context} attachment {index}"),
+            "description": optional_text(attachment, "description", f"{context} attachment {index}"),
+        })
+    return result
+
+try:
+    if not isinstance(value, dict):
+        raise ValueError("question bundle root must be an object")
+    if "required" in value or "response_mode" in value:
+        raise ValueError("required and response_mode are not supported; every question is optional")
+    raw_questions = value.get("questions")
+    if not isinstance(raw_questions, list) or not raw_questions:
+        raise ValueError("questions must be a non-empty array")
+    questions = []
+    for question_index, question in enumerate(raw_questions, 1):
+        context = f"question {question_index}"
+        if not isinstance(question, dict):
+            raise ValueError(f"{context} must be an object")
+        if "required" in question or "response_mode" in question:
+            raise ValueError(f"{context} cannot set required or response_mode")
+        title = optional_text(question, "title", context)
+        if not title:
+            raise ValueError(f"{context} title must be a non-empty string")
+        question_type = question.get("type", "single_choice")
+        if question_type not in ("single_choice", "multiple_choice"):
+            raise ValueError(f"{context} type must be single_choice or multiple_choice")
+        raw_suggestions = question.get("suggestions") or []
+        if not isinstance(raw_suggestions, list):
+            raise ValueError(f"{context} suggestions must be an array")
+        suggestions = []
+        for suggestion_index, suggestion in enumerate(raw_suggestions, 1):
+            suggestion_context = f"{context} suggestion {suggestion_index}"
+            if not isinstance(suggestion, dict):
+                raise ValueError(f"{suggestion_context} must be an object")
+            suggestion_title = optional_text(suggestion, "title", suggestion_context)
+            if not suggestion_title:
+                raise ValueError(f"{suggestion_context} title must be a non-empty string")
+            suggestions.append({
+                "title": suggestion_title,
+                "description": optional_text(suggestion, "description", suggestion_context),
+                "attachments": attachments(suggestion, suggestion_context),
+            })
+        questions.append({
+            "title": title,
+            "type": question_type,
+            "description": optional_text(question, "description", context),
+            "attachments": attachments(question, context),
+            "suggestions": suggestions,
+        })
+    normalized = {
+        "title": optional_text(value, "title", "bundle"),
+        "description": optional_text(value, "description", "bundle"),
+        "attachments": attachments(value, "bundle"),
+        "questions": questions,
+    }
+except ValueError as error:
+    print(f"Error: invalid --ask question bundle: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+print(json.dumps(normalized, ensure_ascii=False, separators=(",", ":")))
+PY
+)"; then
+    exit 1
+  fi
+fi
+
 if [ -n "$PLAY_EXISTING_FILE" ] && { [ "${#POSITIONAL[@]}" -gt 0 ] || [ -n "$MESSAGE" ] || [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; }; then
   echo "Error: --play-existing does not accept message or attachment arguments." >&2
   usage
@@ -926,8 +1262,13 @@ if [ "${#POSITIONAL[@]}" -gt 2 ]; then
   exit 1
 fi
 
-if [ -z "$PLAY_EXISTING_FILE" ] && [ -z "$MESSAGE" ] && [ -z "${POSITIONAL[0]:-}" ]; then
+if [ -z "$PLAY_EXISTING_FILE" ] && [ -z "$MESSAGE" ] && [ -z "${POSITIONAL[0]:-}" ] && [ -z "$ASK_PAYLOAD_SOURCE" ]; then
   usage
+  exit 1
+fi
+
+if [ -n "$ASK_PAYLOAD_SOURCE" ] && { [ -n "$MESSAGE" ] || [ "${#POSITIONAL[@]}" -gt 0 ]; }; then
+  echo "Error: structured --ask JSON cannot be combined with message or positional arguments." >&2
   exit 1
 fi
 
@@ -942,7 +1283,20 @@ if ! [[ "$HANDOFF_DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   exit 1
 fi
 
-DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
+if [ -n "$RAW_BUNDLE_JSON" ]; then
+  DISPLAY_TEXT="$(python3 - "$RAW_BUNDLE_JSON" <<'PY'
+import json
+import sys
+value = json.loads(sys.argv[1])
+parts = [value.get("title"), value.get("description")]
+for question in value["questions"]:
+    parts.extend((question["title"], question.get("description")))
+print("\n\n".join(part for part in parts if part))
+PY
+)"
+else
+  DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
+fi
 DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
 TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
 TEXT=$(normalize_space "$TEXT")
@@ -988,6 +1342,34 @@ if [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; then
     ATTACHMENT_ARGUMENTS+=( "${ATTACHMENT_LABELS[$index]}" "${ATTACHMENT_PATHS[$index]}" )
   done
   prepare_attachment_manifest "$ATTACHMENT_MANIFEST" "${ATTACHMENT_ARGUMENTS[@]}"
+fi
+
+if [ "$ASK" -eq 1 ]; then
+  if [ -z "$RAW_BUNDLE_JSON" ]; then
+    RAW_BUNDLE_JSON="$(python3 - "$DISPLAY_TEXT" "$SUGGESTIONS_JSON" <<'PY'
+import json
+import sys
+print(json.dumps({
+    "title": None,
+    "description": None,
+    "attachments": [],
+    "questions": [{
+        "title": sys.argv[1],
+        "type": "single_choice",
+        "description": None,
+        "attachments": [],
+        "suggestions": json.loads(sys.argv[2]),
+    }],
+}, ensure_ascii=False, separators=(",", ":")))
+PY
+)"
+  fi
+  QUESTION_BUNDLE_FILE="$ITEM_DIRECTORY/question-bundle.json"
+  if [ -z "$ATTACHMENT_MANIFEST" ]; then
+    ATTACHMENT_MANIFEST="$ITEM_DIRECTORY/attachments/manifest.json"
+  fi
+  prepare_question_bundle "$QUESTION_BUNDLE_FILE" "$RAW_BUNDLE_JSON" "$ATTACHMENT_MANIFEST" "$ITEM_DIRECTORY"
+  prepare_scoped_attachment_narrations "$QUESTION_BUNDLE_FILE" "$VOICE"
 fi
 
 OUTPUT_FILE="${TTS_OUTPUT_FILE:-$ITEM_DIRECTORY/message.mp3}"
