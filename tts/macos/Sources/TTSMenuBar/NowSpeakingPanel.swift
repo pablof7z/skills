@@ -9,6 +9,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         static let expandedSize = NSSize(width: 540, height: 470)
         static let screenInset: CGFloat = 20
         static let lingerSeconds: TimeInterval = 8
+        static let hoverExitContinuationSeconds: TimeInterval = 2
         static let fadeSeconds: TimeInterval = 0.34
     }
 
@@ -37,6 +38,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     private var lingerTask: Task<Void, Never>?
     private var fadeTask: Task<Void, Never>?
     private var geometrySaveTask: Task<Void, Never>?
+    private var hoverAdvanceTask: Task<Void, Never>?
     private var activeItemID: String?
     private var lastCurrentItem: TTSItem?
     private var lastDuration: TimeInterval = 0
@@ -211,6 +213,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         )
 
         cancelLingerDismissal(resetCountdown: true, restoreOpacity: false)
+        hoverAdvanceTask?.cancel()
+        hoverAdvanceTask = nil
+        playbackController.setAutomaticQueueAdvanceDeferred(false)
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
         presentation.lingeringDuration = 0
@@ -264,7 +269,15 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
         guard let item = playbackController.currentItem else {
             if windowedMode {
-                if presentation.pendingPreviewItem != nil {
+                if PlayerHoverContinuation.shouldRetainCurrentContent(
+                    isHovered: presentation.isHovered,
+                    isGracePeriodActive: hoverAdvanceTask != nil,
+                    hasCurrentContent: lastCurrentItem != nil
+                ) {
+                    sessionOpener.refresh(rawIdentifier: lastCurrentItem?.iTermSessionID)
+                    beginLingerIfNeeded()
+                    if !panel.isVisible { showPlayer() }
+                } else if presentation.pendingPreviewItem != nil {
                     if !panel.isVisible { showPlayer() }
                 } else {
                     presentation.lingeringItem = nil
@@ -373,6 +386,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         lingerTask?.cancel()
         fadeTask?.cancel()
         geometrySaveTask?.cancel()
+        hoverAdvanceTask?.cancel()
+        playbackController.setAutomaticQueueAdvanceDeferred(false)
         if panel.isVisible {
             preferencesStore.setOrigin(panel.frame.origin)
             if presentation.isExpanded {
@@ -406,6 +421,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             ?? presentation.pendingPreviewItem?.id
             ?? presentation.lingeringItem?.id
         presentation.showHistory(hiding: hiddenItemID)
+        hoverAdvanceTask?.cancel()
+        hoverAdvanceTask = nil
+        playbackController.setAutomaticQueueAdvanceDeferred(false)
         presentation.clearPendingPreview()
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
@@ -703,10 +721,18 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         guard isHovered != observedHover else { return }
         observedHover = isHovered
 
-        // Windowed-player transparency reacts to hover regardless of whether
-        // content is lingering; hovering always restores full opacity.
         if windowedMode {
+            // Hovering restores full opacity and temporarily holds the current
+            // content instead of advancing the queue underneath the pointer.
             updateWindowedOpacity()
+            if isHovered {
+                hoverAdvanceTask?.cancel()
+                hoverAdvanceTask = nil
+                playbackController.setAutomaticQueueAdvanceDeferred(true)
+            } else {
+                scheduleWindowedHoverContinuation()
+            }
+            return
         }
 
         guard playbackController.currentItem == nil, presentation.lingeringItem != nil else { return }
@@ -725,9 +751,31 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
     }
 
+    private func scheduleWindowedHoverContinuation() {
+        hoverAdvanceTask?.cancel()
+        hoverAdvanceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Layout.hoverExitContinuationSeconds))
+            guard !Task.isCancelled, let self else { return }
+            hoverAdvanceTask = nil
+            presentation.lingeringItem = nil
+            presentation.lingeringTime = 0
+            presentation.lingeringDuration = 0
+            lastCurrentItem = nil
+            playbackController.setAutomaticQueueAdvanceDeferred(false)
+            if playbackController.currentItem == nil {
+                activeItemID = nil
+                sessionOpener.clear()
+                showIdleIfNeeded()
+            }
+        }
+    }
+
     private func hide() {
         guard activeItemID != nil || panel.isVisible else { return }
         cancelLingerDismissal(resetCountdown: true, restoreOpacity: false)
+        hoverAdvanceTask?.cancel()
+        hoverAdvanceTask = nil
+        playbackController.setAutomaticQueueAdvanceDeferred(false)
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0
@@ -735,6 +783,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         sessionOpener.clear()
         panel.orderOut(nil)
         panel.alphaValue = 1
+        observedHover = false
         presentation.clearHover()
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
@@ -1231,6 +1280,16 @@ enum PlayerNavigationPolicy {
         currentlyHidden hiddenItemID: String?
     ) -> String? {
         hiddenItemID == itemID ? hiddenItemID : nil
+    }
+}
+
+enum PlayerHoverContinuation {
+    static func shouldRetainCurrentContent(
+        isHovered: Bool,
+        isGracePeriodActive: Bool,
+        hasCurrentContent: Bool
+    ) -> Bool {
+        hasCurrentContent && (isHovered || isGracePeriodActive)
     }
 }
 
@@ -2937,44 +2996,54 @@ private struct NowSpeakingHUDView: View {
     }
 
     private func controls(item: TTSItem, accent: Color) -> some View {
-        HStack(spacing: 12) {
-            if isWindowedMode {
-                quickSettingsButton(accent: accent)
+        HStack(spacing: 0) {
+            HStack(spacing: 10) {
+                if isWindowedMode {
+                    quickSettingsButton(accent: accent)
+                }
+                playbackRateButton(item: item, accent: accent)
             }
-            playbackRateButton(item: item, accent: accent)
-            controlButton(symbol: "gobackward.15", label: "Back 15 seconds", accent: accent) {
-                if isLingering || isPreviewingPending {
-                    controller.replay(item, startingAt: max(0, playbackTime - 15))
-                } else {
-                    controller.rewind()
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 12) {
+                controlButton(symbol: "gobackward.15", label: "Back 15 seconds", accent: accent) {
+                    if isLingering || isPreviewingPending {
+                        controller.replay(item, startingAt: max(0, playbackTime - 15))
+                    } else {
+                        controller.rewind()
+                    }
+                }
+                controlButton(
+                    symbol: isLingering || isPreviewingPending
+                        ? "arrow.counterclockwise"
+                        : (controller.isPaused ? "play.fill" : "pause.fill"),
+                    label: isLingering || isPreviewingPending
+                        ? "Replay"
+                        : (controller.isPaused ? "Resume" : "Pause"),
+                    accent: accent,
+                    prominent: true
+                ) {
+                    if isLingering || isPreviewingPending {
+                        controller.replay(item, startingAt: 0)
+                    } else {
+                        controller.togglePause()
+                    }
+                }
+                controlButton(symbol: "goforward.15", label: "Forward 15 seconds", accent: accent) {
+                    if isLingering || isPreviewingPending {
+                        controller.replay(
+                            item,
+                            startingAt: min(playbackDuration, playbackTime + 15)
+                        )
+                    } else {
+                        controller.forward()
+                    }
                 }
             }
-            controlButton(
-                symbol: isLingering || isPreviewingPending
-                    ? "arrow.counterclockwise"
-                    : (controller.isPaused ? "play.fill" : "pause.fill"),
-                label: isLingering || isPreviewingPending
-                    ? "Replay"
-                    : (controller.isPaused ? "Resume" : "Pause"),
-                accent: accent,
-                prominent: true
-            ) {
-                if isLingering || isPreviewingPending {
-                    controller.replay(item, startingAt: 0)
-                } else {
-                    controller.togglePause()
-                }
-            }
-            controlButton(symbol: "goforward.15", label: "Forward 15 seconds", accent: accent) {
-                if isLingering || isPreviewingPending {
-                    controller.replay(
-                        item,
-                        startingAt: min(playbackDuration, playbackTime + 15)
-                    )
-                } else {
-                    controller.forward()
-                }
-            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            nextInQueueIndicator
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(maxWidth: .infinity)
     }
@@ -2994,6 +3063,34 @@ private struct NowSpeakingHUDView: View {
         .accessibilityLabel("Player floatness and transparency")
         .popover(isPresented: $isQuickSettingsPresented, arrowEdge: .bottom) {
             QuickSettingsPopover(playerPreferencesStore: playerPreferencesStore)
+        }
+    }
+
+    @ViewBuilder
+    private var nextInQueueIndicator: some View {
+        if let next = controller.nextQueuedItem {
+            HStack(spacing: 6) {
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("UP NEXT")
+                        .font(.system(size: 8, weight: .bold))
+                        .tracking(0.7)
+                        .foregroundStyle(.tertiary)
+                    Text(next.nowSpeakingTitle)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .help("Next: \(next.nowSpeakingTitle)")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Up next: \(next.nowSpeakingTitle)")
+        } else {
+            Color.clear
+                .frame(height: 34)
+                .accessibilityHidden(true)
         }
     }
 
@@ -3192,10 +3289,7 @@ private struct PlayerHistoryRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(item.unheard ? Color.accentColor : .clear)
-                .frame(width: 7, height: 7)
-                .padding(.top, 8)
+            queueItemIndicator
             Button(action: action) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -3218,7 +3312,6 @@ private struct PlayerHistoryRow: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 8)
-                        questionIndicator
                         Text(item.timestampLabel(now: timestampNow))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tertiary)
@@ -3287,22 +3380,29 @@ private struct PlayerHistoryRow: View {
     }
 
     @ViewBuilder
-    private var questionIndicator: some View {
+    private var queueItemIndicator: some View {
         if item.isPendingQuestion {
-            Label("Answer needed", systemImage: "questionmark.bubble.fill")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .background(Color.orange.opacity(0.12), in: Capsule())
+            Image(systemName: "questionmark.bubble.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(Color.orange, in: Circle())
+                .shadow(color: Color.orange.opacity(0.28), radius: 4, y: 1)
                 .help("Contains unanswered questions")
                 .accessibilityLabel("Unanswered questions")
         } else if item.isQuestion {
-            Image(systemName: "questionmark.bubble")
+            Image(systemName: "questionmark.bubble.fill")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.purple)
+                .frame(width: 28, height: 28)
+                .background(Color.purple.opacity(0.12), in: Circle())
                 .help("Contains questions")
                 .accessibilityLabel("Contains questions")
+        } else {
+            Circle()
+                .fill(item.unheard ? Color.accentColor : .clear)
+                .frame(width: 7, height: 7)
+                .frame(width: 28, height: 28)
         }
     }
 
@@ -3330,7 +3430,10 @@ private struct GenerationProgressRowBackground: View {
     let progress: Double
 
     var body: some View {
-        if item.status == .generating {
+        if item.isPendingQuestion {
+            Color.orange.opacity(0.075)
+                .accessibilityHidden(true)
+        } else if item.status == .generating {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
