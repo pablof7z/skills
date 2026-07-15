@@ -1451,7 +1451,7 @@ private struct AnswerEditorSheet: View {
             .background(
                 isDropTarget
                     ? Color.accentColor.opacity(0.08)
-                    : Color(nsColor: .textBackgroundColor)
+                    : Color.clear
             )
             .dropDestination(for: URL.self) { urls, _ in
                 let files = urls.filter(\.isFileURL)
@@ -1510,6 +1510,7 @@ private struct AnswerEditorSheet: View {
             .padding(.vertical, 10)
         }
         .frame(width: 680, height: 520)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { focusedField = context.isSuggestion ? .title : .body }
         .onDisappear {
             let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
