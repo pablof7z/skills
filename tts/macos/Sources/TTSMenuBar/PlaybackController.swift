@@ -25,6 +25,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private var playbackStartTask: Task<Void, Never>?
     private var automaticallyPausedItemID: String?
     private var retryingItemIDs = Set<String>()
+    private var isAutomaticQueueAdvanceDeferred = false
     private var started = false
     private var lastHistoryTimestampRefresh = Date.distantPast
 
@@ -59,6 +60,10 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         items.filter { $0.status.isPending && !$0.isAttachmentPlayback }
     }
 
+    var nextQueuedItem: TTSItem? {
+        Self.nextQueuedItem(in: items)
+    }
+
     var recentItems: [TTSItem] {
         items.filter { $0.status.isRecent && !$0.isAttachmentPlayback && !$0.archived }
             .sorted { $0.createdAt > $1.createdAt }
@@ -90,6 +95,14 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     func generationProgress(for item: TTSItem) -> Double {
         GenerationProgress.value(for: item, samples: items, now: generationProgressNow)
+    }
+
+    func setAutomaticQueueAdvanceDeferred(_ deferred: Bool) {
+        guard deferred != isAutomaticQueueAdvanceDeferred else { return }
+        isAutomaticQueueAdvanceDeferred = deferred
+        if !deferred {
+            refresh()
+        }
     }
 
     func start() {
@@ -477,6 +490,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                     duration = nextDuration
                 }
             } else if !isPlaybackBlocked,
+                      !isAutomaticQueueAdvanceDeferred,
                       let next = Self.nextQueuedItem(in: loaded) {
                 play(next)
             }
