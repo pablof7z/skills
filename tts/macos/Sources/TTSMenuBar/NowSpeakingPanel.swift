@@ -1637,17 +1637,21 @@ private struct PlayerHistoryRow: View {
                         .help(isRetrying ? "Retrying synthesis" : "Retry synthesis")
                         .accessibilityLabel(isRetrying ? "Retrying synthesis" : "Retry synthesis")
                     }
-                    Button(action: onArchive) {
-                        Image(systemName: item.archived ? "tray.and.arrow.up" : "archivebox")
-                            .frame(width: 18, height: 18)
-                    }
-                    .buttonStyle(.borderless)
-                    .help(item.archived ? "Restore from archive" : "Archive")
-                    .accessibilityLabel(item.archived ? "Restore from archive" : "Archive")
                 }
             }
         }
         .padding(.vertical, 2)
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            if item.status != .generating {
+                Button(role: item.archived ? nil : .destructive, action: onArchive) {
+                    Label(
+                        item.archived ? "Restore" : "Archive",
+                        systemImage: item.archived ? "tray.and.arrow.up" : "archivebox"
+                    )
+                }
+                .tint(item.archived ? .accentColor : .red)
+            }
+        }
     }
 
     private var detail: String {

@@ -139,7 +139,7 @@ The windowed player's idle history keeps replayed items at their original
 generation time, shows relative times during the first 24 hours and absolute
 timestamps afterward, and keeps search beside the project filter in the native
 titlebar toolbar. That filter menu selects recent or archived history, while
-each update has a one-click archive control.
+swiping left archives an update and the archived view offers restore.
 The player can be dragged from any non-interactive background and its expanded
 view has forgiving resize zones on every edge and corner, with the original `540×470` layout
 as its minimum unless the display itself is smaller. A remembered header control
