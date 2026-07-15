@@ -11,7 +11,7 @@ extension NowSpeakingPanelController {
     }
 
     func showPlayer() {
-        isPlayerVisible = true
+        setPlayerVisible(true)
         panel.makeKeyAndOrderFront(nil)
     }
 
