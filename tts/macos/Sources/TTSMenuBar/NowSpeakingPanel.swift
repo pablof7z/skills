@@ -56,6 +56,13 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     /// history, Dock activation, in-place `orderFront`).
     private var usesFloatingHUD: Bool { !windowedMode }
 
+    private var needsExpandedLayout: Bool {
+        playbackController.currentItem?.isQuestion == true
+            || presentation.pendingPreviewItem?.isQuestion == true
+            || presentation.lingeringItem?.isQuestion == true
+            || presentation.isExpanded
+    }
+
     init(
         controller: PlaybackController,
         preferencesStore: HUDPreferencesStore,
@@ -93,10 +100,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         ).sink { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.usesFloatingHUD else { return }
-                let size = self.presentation.isExpanded
+                let size = self.needsExpandedLayout
                     ? self.preferredExpandedSize
                     : Layout.compactSize
-                self.configureResizeLimits(expanded: self.presentation.isExpanded)
+                self.configureResizeLimits(expanded: self.needsExpandedLayout)
                 self.positionPanel(size: size)
             }
         }
@@ -219,6 +226,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     func refresh() {
         updateHistoryFilterMenu()
         synchronizePendingPreview()
+        synchronizeLingeringQuestion()
+        updateQuestionInputAvailability()
         guard isPlayerVisible else {
             sessionOpener.clear()
             if panel.isVisible || activeItemID != nil {
@@ -272,11 +281,32 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             presentation.clearPendingPreview()
             return
         }
-        if latest.status == .failed || latest.status == .played {
+        if (latest.status == .failed || latest.status == .played), !latest.isPendingQuestion {
             presentation.clearPendingPreview()
         } else {
             presentation.updatePendingPreview(with: latest)
         }
+    }
+
+    private func synchronizeLingeringQuestion() {
+        guard let lingering = presentation.lingeringItem, lingering.isQuestion else { return }
+        guard let latest = playbackController.items.first(where: { $0.id == lingering.id }) else {
+            return
+        }
+        if latest.isPendingQuestion {
+            presentation.lingeringItem = latest
+            lastCurrentItem = latest
+        } else {
+            presentation.lingeringItem = nil
+            lastCurrentItem = nil
+        }
+    }
+
+    private func updateQuestionInputAvailability() {
+        guard let passivePanel = panel as? PassiveHUDPanel else { return }
+        passivePanel.allowsQuestionEditing = playbackController.currentItem?.isPendingQuestion == true
+            || presentation.pendingPreviewItem?.isPendingQuestion == true
+            || presentation.lingeringItem?.isPendingQuestion == true
     }
 
     func shutdown() {
@@ -341,6 +371,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
                 .stationary,
             ]
             (panel as? NSPanel)?.isFloatingPanel = true
+            // The HUD is presented without activation. It may become key only
+            // after the user deliberately clicks the question composer.
+            (panel as? NSPanel)?.becomesKeyOnlyIfNeeded = true
             panel.hidesOnDeactivate = false
             panel.ignoresMouseEvents = false
             panel.acceptsMouseMovedEvents = true
@@ -454,8 +487,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private func showPlayer() {
-        configureResizeLimits(expanded: presentation.isExpanded)
-        positionPanel(size: presentation.isExpanded ? preferredExpandedSize : Layout.compactSize)
+        configureResizeLimits(expanded: needsExpandedLayout)
+        positionPanel(size: needsExpandedLayout ? preferredExpandedSize : Layout.compactSize)
         if usesFloatingHUD {
             // Fade the floating panel in above every space.
             panel.alphaValue = 0
@@ -486,7 +519,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             return
         }
         guard panel.isVisible else { return }
-        let expanded = presentation.isExpanded
+        let expanded = needsExpandedLayout
         configureResizeLimits(expanded: expanded)
         let size = expanded ? preferredExpandedSize : Layout.compactSize
         let frame = frameFor(size: size)
@@ -516,6 +549,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private func presentationDidChange() {
+        updateQuestionInputAvailability()
         let miniPlayer = presentation.isMiniPlayer
         if miniPlayer != observedMiniPlayer {
             observedMiniPlayer = miniPlayer
@@ -526,6 +560,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         guard isHovered != observedHover else { return }
         observedHover = isHovered
         guard playbackController.currentItem == nil, presentation.lingeringItem != nil else { return }
+
+        // Pending questions remain available until answered, skipped, or
+        // superseded. Hovering must not start their ordinary speech timeout.
+        guard presentation.lingeringItem?.isPendingQuestion != true else { return }
 
         if isHovered {
             lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
@@ -578,6 +616,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         presentation.lingeringItem = lastCurrentItem
         presentation.lingeringDuration = duration
         presentation.lingeringTime = duration
+        if lastCurrentItem.isPendingQuestion {
+            cancelLingerDismissal(resetCountdown: true, restoreOpacity: true)
+            return
+        }
         lingerCountdown.start(at: ProcessInfo.processInfo.systemUptime)
         if presentation.isHovered {
             lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
@@ -587,6 +629,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private func scheduleLingerDismissal() {
+        guard presentation.lingeringItem?.isPendingQuestion != true else { return }
         lingerTask?.cancel()
         cancelFade(restoreOpacity: true)
         let now = ProcessInfo.processInfo.systemUptime
@@ -609,7 +652,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     private func beginFadeOut() {
         guard !presentation.isHovered,
               playbackController.currentItem == nil,
-              presentation.lingeringItem != nil else { return }
+              presentation.lingeringItem != nil,
+              presentation.lingeringItem?.isPendingQuestion != true else { return }
         lingerTask?.cancel()
         lingerTask = nil
         fadeTask?.cancel()
@@ -770,7 +814,11 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
 }
 
 final class PassiveHUDPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    // Ordinary playback can never take focus. A pending question temporarily
+    // enables key status so a deliberate composer click can accept input;
+    // ordering the non-activating panel still does not make it key.
+    var allowsQuestionEditing = false
+    override var canBecomeKey: Bool { allowsQuestionEditing }
     override var canBecomeMain: Bool { false }
 }
 
@@ -959,6 +1007,40 @@ private final class NowSpeakingPresentation: ObservableObject {
     }
 }
 
+struct QuestionSubmission: Equatable {
+    let text: String
+    let suggestionIndex: Int?
+}
+
+struct QuestionComposerModel: Equatable {
+    private(set) var draft = ""
+    private(set) var selectedSuggestionIndex: Int?
+
+    var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var submission: QuestionSubmission? {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return QuestionSubmission(text: text, suggestionIndex: selectedSuggestionIndex)
+    }
+
+    mutating func select(suggestion: TTSSuggestion, at index: Int) {
+        draft = suggestion.title
+        selectedSuggestionIndex = index
+    }
+
+    mutating func updateDraft(_ value: String) {
+        draft = value
+    }
+
+    mutating func reset() {
+        draft = ""
+        selectedSuggestionIndex = nil
+    }
+}
+
 private struct NowSpeakingHUDView: View {
     @ObservedObject var controller: PlaybackController
     @ObservedObject var presentation: NowSpeakingPresentation
@@ -966,56 +1048,61 @@ private struct NowSpeakingHUDView: View {
     let isWindowedMode: Bool
     let onToggleMiniPlayer: () -> Void
     let onHide: () -> Void
+    @State private var questionComposer = QuestionComposerModel()
 
     var body: some View {
         if let item = displayedItem {
             let accent = WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
             VStack(alignment: .leading, spacing: presentation.isExpanded ? 12 : 8) {
-                summary(item: item, accent: accent)
+                if item.isQuestion {
+                    questionPrompt(item: item, accent: accent)
+                } else {
+                    summary(item: item, accent: accent)
 
-                if presentation.isExpanded {
-                    if isPreviewingPending {
-                        Divider().overlay(Color.white.opacity(0.11))
-                        ReadAlongTranscriptView(
-                            text: item.text,
-                            timings: item.wordTimings,
-                            currentTime: 0,
-                            duration: 0,
-                            accent: accent,
-                            onSeek: { _ in }
-                        )
-                        .transition(.opacity)
-                        Divider().overlay(Color.white.opacity(0.11))
-                        pendingPreviewStatus(for: item)
-                    } else {
-                        if !item.briefAttachments.isEmpty {
-                            attachmentStrip(item: item, accent: accent)
-                        }
-                        Divider().overlay(Color.white.opacity(0.11))
-                        if let attachment = selectedAttachment(for: item) {
-                            attachmentPreview(attachment, item: item, accent: accent)
-                                .transition(.opacity)
-                        } else {
+                    if presentation.isExpanded {
+                        if isPreviewingPending {
+                            Divider().overlay(Color.white.opacity(0.11))
                             ReadAlongTranscriptView(
                                 text: item.text,
                                 timings: item.wordTimings,
-                                currentTime: playbackTime,
-                                duration: playbackDuration,
+                                currentTime: 0,
+                                duration: 0,
                                 accent: accent,
-                                onSeek: { seek(item: item, to: $0) }
+                                onSeek: { _ in }
                             )
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            .transition(.opacity)
+                            Divider().overlay(Color.white.opacity(0.11))
+                            pendingPreviewStatus(for: item)
+                        } else {
+                            if !item.briefAttachments.isEmpty {
+                                attachmentStrip(item: item, accent: accent)
+                            }
+                            Divider().overlay(Color.white.opacity(0.11))
+                            if let attachment = selectedAttachment(for: item) {
+                                attachmentPreview(attachment, item: item, accent: accent)
+                                    .transition(.opacity)
+                            } else {
+                                ReadAlongTranscriptView(
+                                    text: item.text,
+                                    timings: item.wordTimings,
+                                    currentTime: playbackTime,
+                                    duration: playbackDuration,
+                                    accent: accent,
+                                    onSeek: { seek(item: item, to: $0) }
+                                )
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            }
+                            Divider().overlay(Color.white.opacity(0.11))
+                            timeline(accent: accent)
+                            controls(item: item, accent: accent)
                         }
-                        Divider().overlay(Color.white.opacity(0.11))
-                        timeline(accent: accent)
-                        controls(item: item, accent: accent)
+                    } else {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .tint(accent)
+                            .controlSize(.mini)
+                            .accessibilityLabel("Playback progress")
                     }
-                } else {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                        .tint(accent)
-                        .controlSize(.mini)
-                        .accessibilityLabel("Playback progress")
                 }
             }
             .padding(.horizontal, presentation.isExpanded ? 18 : 14)
@@ -1024,6 +1111,9 @@ private struct NowSpeakingHUDView: View {
             .modifier(PlayerSurfaceStyle(isWindowedMode: isWindowedMode, accent: accent))
             .onHover { presentation.updateHover($0) }
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
+            .onChange(of: item.id) { _ in
+                questionComposer.reset()
+            }
             .overlay {
                 if presentation.isExpanded, !isWindowedMode {
                     PlayerResizeRegions()
@@ -1047,6 +1137,185 @@ private struct NowSpeakingHUDView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
+    }
+
+    private func questionPrompt(item: TTSItem, accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "questionmark.bubble.fill")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 42, height: 42)
+                    .background(accent.opacity(0.16), in: Circle())
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Question from \(item.displayAgent)")
+                        .font(.headline)
+                    if let workspaceLabel = item.workspaceDisplayLabel {
+                        Text(workspaceLabel)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+
+                if sessionOpener.canOpen(rawIdentifier: item.iTermSessionID) {
+                    Button {
+                        sessionOpener.open(rawIdentifier: item.iTermSessionID)
+                    } label: {
+                        Image(systemName: "arrow.up.forward.app")
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Open agent session")
+                    .accessibilityLabel("Open agent session")
+                }
+
+                Button(action: onHide) {
+                    Image(systemName: "xmark")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Hide question")
+                .accessibilityLabel("Hide question")
+            }
+
+            ScrollView {
+                Text(item.text)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 98)
+            .accessibilityLabel("Question")
+
+            if item.isPendingQuestion {
+                if let suggestions = item.suggestions, !suggestions.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 9) {
+                            ForEach(Array(suggestions.enumerated()), id: \.offset) { index, suggestion in
+                                suggestionButton(
+                                    suggestion,
+                                    index: index,
+                                    selected: questionComposer.selectedSuggestionIndex == index,
+                                    accent: accent
+                                )
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Suggested answers")
+                }
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField(
+                        "Write your answer…",
+                        text: Binding(
+                            get: { questionComposer.draft },
+                            set: { questionComposer.updateDraft($0) }
+                        ),
+                        axis: .vertical
+                    )
+                    .lineLimit(1...3)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 11)
+                            .stroke(accent.opacity(0.22), lineWidth: 0.8)
+                    }
+                    .accessibilityLabel("Answer")
+                    .onSubmit { submitAnswer(for: item) }
+
+                    Button { submitAnswer(for: item) } label: {
+                        Label("Send", systemImage: "arrow.up")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.black.opacity(0.82))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(accent, in: RoundedRectangle(cornerRadius: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!questionComposer.canSend)
+                    .opacity(questionComposer.canSend ? 1 : 0.45)
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .accessibilityHint("Sends the editable answer to the asking agent")
+                }
+            } else if let response = item.response {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(accent)
+                    Text("Answer sent")
+                        .font(.subheadline.weight(.semibold))
+                    Text(response.answer)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .accessibilityElement(children: .combine)
+            }
+
+            if !isPreviewingPending {
+                Divider().overlay(Color.white.opacity(0.11))
+                timeline(accent: accent)
+                controls(item: item, accent: accent)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Question from \(item.displayAgent)")
+    }
+
+    private func suggestionButton(
+        _ suggestion: TTSSuggestion,
+        index: Int,
+        selected: Bool,
+        accent: Color
+    ) -> some View {
+        Button {
+            questionComposer.select(suggestion: suggestion, at: index)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(suggestion.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(suggestion.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            .frame(width: 190, alignment: .leading)
+            .padding(11)
+            .background(
+                selected ? accent.opacity(0.18) : Color.white.opacity(0.065),
+                in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(selected ? accent : accent.opacity(0.16), lineWidth: selected ? 1.3 : 0.7)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(suggestion.title)
+        .accessibilityHint("Fills the editable answer field. It will not send automatically.")
+    }
+
+    private func submitAnswer(for item: TTSItem) {
+        guard let submission = questionComposer.submission else { return }
+        controller.answer(
+            item,
+            text: submission.text,
+            suggestionIndex: submission.suggestionIndex
+        )
+        questionComposer.reset()
     }
 
     private func summary(item: TTSItem, accent: Color) -> some View {
@@ -1618,7 +1887,7 @@ private struct PlayerHistoryView: View {
                     PlayerHistoryRow(
                         item: item,
                         action: {
-                            if item.status == .generating {
+                            if item.status == .generating || item.isPendingQuestion {
                                 presentation.previewPendingItem(item)
                             } else {
                                 controller.playNow(item)

@@ -2,10 +2,12 @@ import Foundation
 
 enum PlaybackStatus: String, Codable, CaseIterable {
     case generating
+    case generated
     case queued
     case playing
     case paused
     case played
+    case interrupted
     case failed
 
     var isPending: Bool {
@@ -13,7 +15,74 @@ enum PlaybackStatus: String, Codable, CaseIterable {
     }
 
     var isRecent: Bool {
-        self == .played || self == .failed
+        self == .generated || self == .played || self == .interrupted || self == .failed
+    }
+}
+
+enum TTSItemKind: String, Codable, Equatable {
+    case speech
+    case question
+}
+
+enum TTSQuestionStatus: String, Codable, Equatable {
+    case pending
+    case answered
+    case skipped
+    case superseded
+
+    var isTerminal: Bool { self != .pending }
+}
+
+struct TTSSuggestion: Codable, Equatable {
+    var title: String
+    var description: String
+}
+
+struct TTSResponse: Codable, Equatable {
+    var answer: String
+    var suggestionIndex: Int?
+    var modified: Bool
+    var answeredAt: Int64
+    var interaction: String
+
+    enum CodingKeys: String, CodingKey {
+        case answer
+        case suggestionIndex = "suggestion_index"
+        case modified
+        case answeredAt = "answered_at"
+        case interaction
+    }
+}
+
+enum TTSPlaybackInitiator: String, Codable, Equatable {
+    case automatic
+    case direct
+}
+
+enum TTSEngagement: String, Codable, Equatable {
+    case unknown
+    case unattendedLikely = "unattended_likely"
+    case presentUnconfirmed = "present_unconfirmed"
+    case directInteraction = "direct_interaction"
+}
+
+/// Coarse activity facts only. No key names, pointer positions, application
+/// names, or other input content are observed or persisted.
+struct TTSUserActivity: Codable, Equatable {
+    var idleSecondsAtStart: Double?
+    var idleSecondsAtEnd: Double?
+    var activityObserved: Bool
+    var directInteraction: Bool
+    var lastInteractionAt: Int64?
+    var recordedAt: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case idleSecondsAtStart = "idle_seconds_at_start"
+        case idleSecondsAtEnd = "idle_seconds_at_end"
+        case activityObserved = "activity_observed"
+        case directInteraction = "direct_interaction"
+        case lastInteractionAt = "last_interaction_at"
+        case recordedAt = "recorded_at"
     }
 }
 
@@ -106,6 +175,17 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var attachmentID: String? = nil
     var returnToPlaybackOffset: Double? = nil
     var isArchived: Bool? = nil
+    var kind: TTSItemKind? = nil
+    var questionStatus: TTSQuestionStatus? = nil
+    var suggestions: [TTSSuggestion]? = nil
+    var response: TTSResponse? = nil
+    var archivedAt: Int64? = nil
+    var archiveReason: String? = nil
+    var archivedBy: String? = nil
+    var supersededBy: [String]? = nil
+    var playbackInitiator: TTSPlaybackInitiator? = nil
+    var engagement: TTSEngagement? = nil
+    var userActivity: TTSUserActivity? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -136,6 +216,17 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case attachmentID = "attachment_id"
         case returnToPlaybackOffset = "return_to_playback_offset"
         case isArchived = "is_archived"
+        case kind
+        case questionStatus = "question_status"
+        case suggestions
+        case response
+        case archivedAt = "archived_at"
+        case archiveReason = "archive_reason"
+        case archivedBy = "archived_by"
+        case supersededBy = "superseded_by"
+        case playbackInitiator = "playback_initiator"
+        case engagement
+        case userActivity = "user_activity"
     }
 
     var displayAgent: String {
@@ -193,6 +284,14 @@ struct TTSItem: Codable, Identifiable, Equatable {
         isArchived == true
     }
 
+    var isQuestion: Bool {
+        kind == .question || questionStatus != nil
+    }
+
+    var isPendingQuestion: Bool {
+        isQuestion && (questionStatus ?? .pending) == .pending
+    }
+
     var unheard: Bool {
         isUnheard == true
     }
@@ -231,7 +330,18 @@ struct TTSItem: Codable, Identifiable, Equatable {
             parentItemID: parentItemID,
             attachmentID: attachmentID,
             returnToPlaybackOffset: returnToPlaybackOffset,
-            isArchived: isArchived
+            isArchived: isArchived,
+            kind: kind,
+            questionStatus: questionStatus,
+            suggestions: suggestions,
+            response: response,
+            archivedAt: archivedAt,
+            archiveReason: archiveReason,
+            archivedBy: archivedBy,
+            supersededBy: supersededBy,
+            playbackInitiator: nil,
+            engagement: nil,
+            userActivity: nil
         )
     }
 
@@ -277,7 +387,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
             parentItemID: id,
             attachmentID: attachment.id,
             returnToPlaybackOffset: playbackOffset,
-            isArchived: isArchived
+            isArchived: isArchived,
+            kind: .speech
         )
     }
 }
