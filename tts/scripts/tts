@@ -187,6 +187,7 @@ ASK_PAYLOAD_SOURCE=""
 SUGGESTIONS_JSON="[]"
 RAW_BUNDLE_JSON=""
 QUESTION_BUNDLE_FILE=""
+PRIMARY_MESSAGE=""
 SUBJECT=""
 AGENT_NAME=""
 PLAY_EXISTING_FILE=""
@@ -594,7 +595,8 @@ write_macos_item_record() {
     "$generation_duration" \
     "$ASK" \
     "$SUGGESTIONS_JSON" \
-    "$QUESTION_BUNDLE_FILE" <<'PY'
+    "$QUESTION_BUNDLE_FILE" \
+    "$PRIMARY_MESSAGE" <<'PY'
 import json
 import fcntl
 import os
@@ -625,6 +627,7 @@ import tempfile
     ask,
     suggestions_json,
     question_bundle_file,
+    primary_message,
 ) = sys.argv[1:]
 
 def optional(value):
@@ -733,6 +736,7 @@ item = {
     "bundle_title": bundle_title,
     "bundle_description": bundle_description,
     "questions": questions,
+    "primary_message": optional(primary_message),
 }
 
 descriptor, temporary = tempfile.mkstemp(prefix=f".{item_id}.", suffix=".tmp", dir=os.path.dirname(destination))
@@ -1219,17 +1223,22 @@ if [ -z "$PLAY_EXISTING_FILE" ] && [ -z "$MESSAGE" ] && [ -z "${POSITIONAL[0]:-}
   exit 1
 fi
 
-if [ -n "$ASK_PAYLOAD_SOURCE" ] && { [ -n "$MESSAGE" ] || [ "${#POSITIONAL[@]}" -gt 0 ]; }; then
-  echo "Error: structured --ask JSON cannot be combined with message or positional arguments." >&2
-  exit 1
-fi
-
 if [ -n "$RAW_BUNDLE_JSON" ]; then
-  DISPLAY_TEXT="$(python3 - "$RAW_BUNDLE_JSON" <<'PY'
+  if [ -z "$MESSAGE" ]; then
+    echo "Error: structured --ask JSON requires --message with the primary spoken update." >&2
+    exit 1
+  fi
+  if [ "${#POSITIONAL[@]}" -gt 0 ]; then
+    echo "Error: structured --ask JSON requires --message; positional message text is not supported." >&2
+    exit 1
+  fi
+  PRIMARY_MESSAGE="$MESSAGE"
+  DISPLAY_TEXT="$(python3 - "$MESSAGE" "$RAW_BUNDLE_JSON" <<'PY'
 import json
 import sys
-value = json.loads(sys.argv[1])
-parts = [value.get("title"), value.get("description")]
+message = sys.argv[1]
+value = json.loads(sys.argv[2])
+parts = [message, value.get("title"), value.get("description")]
 for question in value["questions"]:
     parts.extend((question["title"], question.get("description")))
 print("\n\n".join(part for part in parts if part))
@@ -1239,6 +1248,7 @@ else
   DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
 fi
 DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
+PRIMARY_MESSAGE=$(normalize_literal_newlines "$PRIMARY_MESSAGE")
 TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
 TEXT=$(normalize_space "$TEXT")
 SUBJECT=$(normalize_space "$SUBJECT")

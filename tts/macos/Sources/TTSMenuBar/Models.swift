@@ -288,6 +288,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var bundleTitle: String? = nil
     var bundleDescription: String? = nil
     var questions: [TTSQuestion]? = nil
+    var primaryMessage: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -331,6 +332,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case bundleTitle = "bundle_title"
         case bundleDescription = "bundle_description"
         case questions
+        case primaryMessage = "primary_message"
     }
 
     var displayAgent: String {
@@ -447,7 +449,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
             userActivity: nil,
             bundleTitle: bundleTitle,
             bundleDescription: bundleDescription,
-            questions: questions
+            questions: questions,
+            primaryMessage: primaryMessage
         )
     }
 

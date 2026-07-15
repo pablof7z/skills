@@ -33,9 +33,11 @@ tradeoff. Titles should be short; descriptions should explain the consequence.
 ## Structured question bundles
 
 Use `--ask '<json>'` or `--ask @questions.json` for one or more related optional
-questions. The bundle fields provide the spoken content, so do not combine a
-structured `--ask` with `--message`. The JSON requires a nonempty `questions`
-array and may include:
+questions. Always provide the main spoken update with `--message`; it gives the
+user the reasoning and context that comes before the questions. The player
+keeps that primary message visible above the question UI. Positional message
+text is not accepted for structured asks. The JSON requires a nonempty
+`questions` array and may include:
 
 - Root `title`, `description`, and `attachments` shared by the bundle.
 - Per-question `title`, `description`, `type`, `attachments`, and `suggestions`.
@@ -48,6 +50,7 @@ several suggestions may be selected.
 ./scripts/tts \
   --agent-name "<seed-name>" \
   --subject "Choosing the rollout and notification plan" \
+  --message "The release candidate passed its automated checks. I narrowed the remaining decisions to rollout risk and who needs advance notice." \
   --ask '{
     "title": "Release choices",
     "attachments": [{"path": "./context.md", "label": "Release context"}],
@@ -75,10 +78,12 @@ else`, `Other`, or an equivalent catch-all suggestion.
 
 - Single-choice questions present suggestions as radio-style choices.
 - Multiple-choice questions present suggestions as checkboxes.
-- Suggestions are editable starting points, not locked answers. Editing exposes
-  both the title and description.
-- Freeform answers and suggestions open the same full editor, retain saved
-  drafts when reopened, and accept dropped or selected files.
+- Suggestions are editable starting points, not locked answers. Editing replaces
+  the suggestion's displayed title and description in place.
+- Freeform answers and suggestions open the same modeless editor, so the user can
+  continue using the question window and its attachments. `Done` applies the
+  edit; `Cancel`, the close control, and Escape discard it. Applied drafts are
+  restored when the editor is reopened. Dropped or selected files are accepted.
 - For multiple choice, freeform text becomes an additional note alongside the
   selected suggestions.
 - The user submits the entire bundle atomically. A blank question is skipped.

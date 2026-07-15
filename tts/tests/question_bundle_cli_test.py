@@ -118,6 +118,8 @@ class QuestionBundleCLITests(unittest.TestCase):
                 "question-bundle-test",
                 "--subject",
                 "Choosing the release rollout and notification plan",
+                "--message",
+                "The release is ready, but we still need to choose the rollout and notification plan.",
                 "--ask",
                 json.dumps(bundle),
             ],
@@ -138,6 +140,11 @@ class QuestionBundleCLITests(unittest.TestCase):
             self.assertTrue(Path(item["questions"][0]["attachments"][0]["audio_file"]).is_file())
             self.assertEqual(item["questions"][0]["suggestions"][0]["attachments"][0]["status"], "ready")
             self.assertTrue(Path(item["attachments"][0]["source_file"]).is_file())
+            self.assertEqual(
+                item["primary_message"],
+                "The release is ready, but we still need to choose the rollout and notification plan.",
+            )
+            self.assertTrue(item["text"].startswith("The release is ready"))
             self.assertIn("Release decision", item["text"])
             self.assertIn("Which rollout shape", item["text"])
             self.assertNotIn("Progressive rollout", item["text"])
@@ -174,6 +181,8 @@ class QuestionBundleCLITests(unittest.TestCase):
                 "question-bundle-test",
                 "--subject",
                 "Choosing the release rollout and notification plan",
+                "--message",
+                "I reviewed the available direction and need your decision.",
                 "--ask",
                 f"@{payload}",
             ],
@@ -221,6 +230,16 @@ class QuestionBundleCLITests(unittest.TestCase):
         )
         self.assertNotEqual(invalid_type.returncode, 0)
         self.assertIn("single_choice or multiple_choice", invalid_type.stderr)
+
+        missing_message = subprocess.run(
+            [str(self.tts), "--ask", '{"questions": [{"title": "Pick one"}]}'],
+            env=self.environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(missing_message.returncode, 0)
+        self.assertIn("requires --message", missing_message.stderr)
 
         legacy = subprocess.run(
             [str(self.tts), "--ask", "Legacy question?", "--no-play"],
