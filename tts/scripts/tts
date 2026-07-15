@@ -411,10 +411,6 @@ if root_manifest.is_file():
     loaded = json.loads(root_manifest.read_text(encoding="utf-8"))
     if isinstance(loaded, list):
         root_attachments.extend(loaded)
-for index, spec in enumerate(bundle.get("attachments") or [], 1):
-    attachment_id = f"root-a-{index:02d}"
-    root_attachments.append(copy_attachment(spec, attachment_id, root_manifest.parent / attachment_id))
-
 questions = []
 for question_index, raw_question in enumerate(bundle["questions"], 1):
     question_id = f"q-{question_index:02d}"
@@ -449,8 +445,7 @@ for question_index, raw_question in enumerate(bundle["questions"], 1):
     })
 
 prepared = {
-    "bundle_title": bundle.get("title"),
-    "bundle_description": bundle.get("description"),
+    "questions_preamble": bundle.get("questions_preamble"),
     "questions": questions,
 }
 atomic_write(root_manifest, root_attachments)
@@ -653,16 +648,14 @@ if attachment_manifest and os.path.isfile(attachment_manifest):
     except (OSError, ValueError):
         attachments = None
 
-bundle_title = None
-bundle_description = None
+questions_preamble = None
 questions = None
 if question_bundle_file and os.path.isfile(question_bundle_file):
     try:
         with open(question_bundle_file, encoding="utf-8") as handle:
             loaded = json.load(handle)
         if isinstance(loaded, dict):
-            bundle_title = loaded.get("bundle_title")
-            bundle_description = loaded.get("bundle_description")
+            questions_preamble = loaded.get("questions_preamble")
             questions = loaded.get("questions")
     except (OSError, ValueError):
         questions = None
@@ -733,8 +726,7 @@ item = {
     "playback_initiator": existing.get("playback_initiator", "automatic"),
     "engagement": existing.get("engagement", "unknown"),
     "user_activity": existing.get("user_activity"),
-    "bundle_title": bundle_title,
-    "bundle_description": bundle_description,
+    "questions_preamble": questions_preamble,
     "questions": questions,
     "primary_message": optional(primary_message),
 }
@@ -1144,6 +1136,12 @@ try:
         raise ValueError("question bundle root must be an object")
     if "required" in value or "response_mode" in value:
         raise ValueError("required and response_mode are not supported; every question is optional")
+    unsupported_root_fields = [key for key in ("title", "description", "attachments") if key in value]
+    if unsupported_root_fields:
+        fields = ", ".join(unsupported_root_fields)
+        raise ValueError(
+            f"question bundle root no longer supports {fields}; use questions_preamble and question-level attachments"
+        )
     raw_questions = value.get("questions")
     if not isinstance(raw_questions, list) or not raw_questions:
         raise ValueError("questions must be a non-empty array")
@@ -1184,9 +1182,7 @@ try:
             "suggestions": suggestions,
         })
     normalized = {
-        "title": optional_text(value, "title", "bundle"),
-        "description": optional_text(value, "description", "bundle"),
-        "attachments": attachments(value, "bundle"),
+        "questions_preamble": optional_text(value, "questions_preamble", "bundle"),
         "questions": questions,
     }
 except ValueError as error:
@@ -1238,7 +1234,7 @@ import json
 import sys
 message = sys.argv[1]
 value = json.loads(sys.argv[2])
-parts = [message, value.get("title"), value.get("description")]
+parts = [message, value.get("questions_preamble")]
 for question in value["questions"]:
     parts.extend((question["title"], question.get("description")))
 print("\n\n".join(part for part in parts if part))
@@ -1315,9 +1311,7 @@ if [ "$ASK" -eq 1 ]; then
 import json
 import sys
 print(json.dumps({
-    "title": None,
-    "description": None,
-    "attachments": [],
+    "questions_preamble": None,
     "questions": [{
         "title": sys.argv[1],
         "type": "single_choice",

@@ -79,8 +79,6 @@ class QuestionBundleCLITests(unittest.TestCase):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def test_inline_bundle_copies_scoped_assets_and_returns_atomic_answers(self) -> None:
-        root_context = self.root / "root.md"
-        root_context.write_text("Root context body must not enter the main speech.")
         question_context = self.root / "question.md"
         question_context.write_text("Question context body must not enter the main speech.")
         suggestion_context = self.root / "suggestion.txt"
@@ -88,9 +86,7 @@ class QuestionBundleCLITests(unittest.TestCase):
         answer_attachment = self.root / "answer.txt"
         answer_attachment.write_text("The user's dropped answer attachment.")
         bundle = {
-            "title": "Release decision",
-            "description": "Choose how the rollout should proceed.",
-            "attachments": [{"path": str(root_context), "label": "Release context"}],
+            "questions_preamble": "There are two rollout details to settle before release.",
             "questions": [
                 {
                     "title": "Which rollout shape should we use?",
@@ -131,7 +127,10 @@ class QuestionBundleCLITests(unittest.TestCase):
         try:
             item_path = self.wait_for_item()
             item = json.loads(item_path.read_text())
-            self.assertEqual(item["bundle_title"], "Release decision")
+            self.assertEqual(
+                item["questions_preamble"],
+                "There are two rollout details to settle before release.",
+            )
             self.assertEqual([q["id"] for q in item["questions"]], ["q-01", "q-02"])
             self.assertEqual(item["questions"][0]["type"], "single_choice")
             self.assertEqual(item["questions"][1]["type"], "multiple_choice")
@@ -139,13 +138,13 @@ class QuestionBundleCLITests(unittest.TestCase):
             self.assertEqual(item["questions"][0]["attachments"][0]["status"], "ready")
             self.assertTrue(Path(item["questions"][0]["attachments"][0]["audio_file"]).is_file())
             self.assertEqual(item["questions"][0]["suggestions"][0]["attachments"][0]["status"], "ready")
-            self.assertTrue(Path(item["attachments"][0]["source_file"]).is_file())
+            self.assertIsNone(item["attachments"])
             self.assertEqual(
                 item["primary_message"],
                 "The release is ready, but we still need to choose the rollout and notification plan.",
             )
             self.assertTrue(item["text"].startswith("The release is ready"))
-            self.assertIn("Release decision", item["text"])
+            self.assertIn("two rollout details", item["text"])
             self.assertIn("Which rollout shape", item["text"])
             self.assertNotIn("Progressive rollout", item["text"])
             self.assertNotIn("context body", item["text"])
@@ -240,6 +239,22 @@ class QuestionBundleCLITests(unittest.TestCase):
         )
         self.assertNotEqual(missing_message.returncode, 0)
         self.assertIn("requires --message", missing_message.stderr)
+
+        obsolete_root_fields = subprocess.run(
+            [
+                str(self.tts),
+                "--message",
+                "The implementation is ready.",
+                "--ask",
+                '{"title": "Old hierarchy", "questions": [{"title": "Pick one"}]}',
+            ],
+            env=self.environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(obsolete_root_fields.returncode, 0)
+        self.assertIn("root no longer supports title", obsolete_root_fields.stderr)
 
         legacy = subprocess.run(
             [str(self.tts), "--ask", "Legacy question?", "--no-play"],

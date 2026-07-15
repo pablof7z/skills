@@ -2,12 +2,22 @@ import AppKit
 import SwiftUI
 
 struct ReadAlongTranscriptView: NSViewRepresentable {
+    final class Coordinator {
+        var measuredText = ""
+        var measuredWidth: CGFloat = 0
+    }
+
     let text: String
     let timings: [TTSWordTiming]?
     let currentTime: TimeInterval
     let duration: TimeInterval
     let accent: Color
     let onSeek: (TimeInterval) -> Void
+    var onContentHeightChange: ((CGFloat) -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = InteractiveTranscriptTextView()
@@ -42,9 +52,27 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
             accent: NSColor(accent),
             onSeek: onSeek
         )
+        guard let onContentHeightChange else { return }
+        let coordinator = context.coordinator
+        DispatchQueue.main.async { [weak scrollView, weak textView] in
+            guard let scrollView, let textView, let layoutManager = textView.layoutManager,
+                  let textContainer = textView.textContainer else { return }
+            let width = max(1, scrollView.contentSize.width)
+            guard coordinator.measuredText != text || abs(coordinator.measuredWidth - width) > 0.5 else {
+                return
+            }
+            coordinator.measuredText = text
+            coordinator.measuredWidth = width
+            if abs(textView.frame.width - width) > 0.5 {
+                textView.setFrameSize(NSSize(width: width, height: textView.frame.height))
+            }
+            layoutManager.ensureLayout(for: textContainer)
+            let usedHeight = layoutManager.usedRect(for: textContainer).height
+            onContentHeightChange(ceil(usedHeight + (textView.textContainerInset.height * 2)))
+        }
     }
 
-    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: ()) {
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
         NSCursor.arrow.set()
     }
 }

@@ -39,9 +39,16 @@ keeps that primary message visible above the question UI. Positional message
 text is not accepted for structured asks. The JSON requires a nonempty
 `questions` array and may include:
 
-- Root `title`, `description`, and `attachments` shared by the bundle.
+- An optional root `questions_preamble` that transitions from the update into
+  the questions.
 - Per-question `title`, `description`, `type`, `attachments`, and `suggestions`.
 - Per-suggestion `title`, `description`, and `attachments`.
+
+Use `questions_preamble` only when a transition adds clarity. It is spoken
+immediately after `--message`, so make it a short high-level explanation of
+what remains to decide without restating the update or listing the questions.
+For example: `There are two release details to settle before I finish.` Root
+`title`, `description`, and `attachments` are not supported.
 
 Question `type` defaults to `single_choice`. Use `multiple_choice` only when
 several suggestions may be selected.
@@ -52,8 +59,7 @@ several suggestions may be selected.
   --subject "Choosing the rollout and notification plan" \
   --message "The release candidate passed its automated checks. I narrowed the remaining decisions to rollout risk and who needs advance notice." \
   --ask '{
-    "title": "Release choices",
-    "attachments": [{"path": "./context.md", "label": "Release context"}],
+    "questions_preamble": "There are two release details to settle before I finish.",
     "questions": [{
       "title": "Which rollout should I use?",
       "suggestions": [{
@@ -92,9 +98,11 @@ else`, `Other`, or an equivalent catch-all suggestion.
 
 Add context attachments only when they materially help the decision:
 
-- Root attachments provide context for the whole bundle.
 - Question attachments provide context for one question.
 - Suggestion attachments provide evidence or detail for one proposed answer.
+
+If the main spoken update itself needs attachments, use the ordinary
+top-level `--attach` option rather than putting attachments in the ask JSON.
 
 These sources are copied durably, remain scoped to their owner, and are not read
 as part of the main spoken question. Users can also drop files into their

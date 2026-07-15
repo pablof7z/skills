@@ -1927,8 +1927,7 @@ struct QueueStoreTests {
         var value = item(id: id, createdAt: 10)
         value.kind = .question
         value.questionStatus = .pending
-        value.bundleTitle = "Configure the bundle"
-        value.bundleDescription = "Answer every question in one submission."
+        value.questionsPreamble = "There are two details to settle before implementation."
         value.questions = [
             TTSQuestion(
                 id: "q-01",

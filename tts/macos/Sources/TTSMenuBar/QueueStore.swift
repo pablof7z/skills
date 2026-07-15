@@ -163,8 +163,7 @@ struct QueueStore {
         var value = proposed
         value.kind = value.kind ?? persisted.kind
         value.suggestions = value.suggestions ?? persisted.suggestions
-        value.bundleTitle = value.bundleTitle ?? persisted.bundleTitle
-        value.bundleDescription = value.bundleDescription ?? persisted.bundleDescription
+        value.questionsPreamble = value.questionsPreamble ?? persisted.questionsPreamble
         value.primaryMessage = value.primaryMessage ?? persisted.primaryMessage
         if persisted.questionStatus?.isTerminal == true,
            value.questionStatus?.isTerminal != true {
