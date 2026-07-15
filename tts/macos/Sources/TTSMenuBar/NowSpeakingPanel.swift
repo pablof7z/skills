@@ -218,6 +218,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     func refresh() {
         updateHistoryFilterMenu()
+        synchronizePendingPreview()
         guard isPlayerVisible else {
             sessionOpener.clear()
             if panel.isVisible || activeItemID != nil {
@@ -242,6 +243,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         if presentation.lingeringItem != nil {
             presentation.lingeringItem = nil
         }
+        presentation.clearPendingPreview()
         if item.isAttachmentPlayback,
            presentation.selectedAttachmentID == item.attachmentID {
             presentation.selectAttachment(nil)
@@ -260,6 +262,20 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             }
         } else if !panel.isVisible {
             showPlayer()
+        }
+    }
+
+    private func synchronizePendingPreview() {
+        guard let preview = presentation.pendingPreviewItem else { return }
+        let latest = playbackController.items.first { $0.id == preview.id }
+        guard let latest else {
+            presentation.clearPendingPreview()
+            return
+        }
+        if latest.status == .failed || latest.status == .played {
+            presentation.clearPendingPreview()
+        } else {
+            presentation.updatePendingPreview(with: latest)
         }
     }
 
@@ -877,6 +893,7 @@ private final class NowSpeakingPresentation: ObservableObject {
     @Published var historyProjectFilter: String?
     @Published var historySearchQuery = ""
     @Published var isViewingArchive = false
+    @Published private(set) var pendingPreviewItem: TTSItem?
     private var hoverExitTask: Task<Void, Never>?
 
     init(isMiniPlayer: Bool) {
@@ -922,6 +939,24 @@ private final class NowSpeakingPresentation: ObservableObject {
         selectedAttachmentText = attachmentID == nil ? nil : text
         selectedAttachmentImage = attachmentID == nil ? nil : image
     }
+
+    func previewPendingItem(_ item: TTSItem) {
+        pendingPreviewItem = item
+        selectAttachment(nil)
+    }
+
+    func updatePendingPreview(with item: TTSItem?) {
+        guard let preview = pendingPreviewItem else { return }
+        guard let item, item.id == preview.id else {
+            pendingPreviewItem = nil
+            return
+        }
+        pendingPreviewItem = item
+    }
+
+    func clearPendingPreview() {
+        pendingPreviewItem = nil
+    }
 }
 
 private struct NowSpeakingHUDView: View {
@@ -939,27 +974,42 @@ private struct NowSpeakingHUDView: View {
                 summary(item: item, accent: accent)
 
                 if presentation.isExpanded {
-                    if !item.briefAttachments.isEmpty {
-                        attachmentStrip(item: item, accent: accent)
-                    }
-                    Divider().overlay(Color.white.opacity(0.11))
-                    if let attachment = selectedAttachment(for: item) {
-                        attachmentPreview(attachment, item: item, accent: accent)
-                            .transition(.opacity)
-                    } else {
+                    if isPreviewingPending {
+                        Divider().overlay(Color.white.opacity(0.11))
                         ReadAlongTranscriptView(
                             text: item.text,
                             timings: item.wordTimings,
-                            currentTime: playbackTime,
-                            duration: playbackDuration,
+                            currentTime: 0,
+                            duration: 0,
                             accent: accent,
-                            onSeek: { seek(item: item, to: $0) }
+                            onSeek: { _ in }
                         )
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .transition(.opacity)
+                        Divider().overlay(Color.white.opacity(0.11))
+                        pendingPreviewStatus(for: item)
+                    } else {
+                        if !item.briefAttachments.isEmpty {
+                            attachmentStrip(item: item, accent: accent)
+                        }
+                        Divider().overlay(Color.white.opacity(0.11))
+                        if let attachment = selectedAttachment(for: item) {
+                            attachmentPreview(attachment, item: item, accent: accent)
+                                .transition(.opacity)
+                        } else {
+                            ReadAlongTranscriptView(
+                                text: item.text,
+                                timings: item.wordTimings,
+                                currentTime: playbackTime,
+                                duration: playbackDuration,
+                                accent: accent,
+                                onSeek: { seek(item: item, to: $0) }
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+                        Divider().overlay(Color.white.opacity(0.11))
+                        timeline(accent: accent)
+                        controls(item: item, accent: accent)
                     }
-                    Divider().overlay(Color.white.opacity(0.11))
-                    timeline(accent: accent)
-                    controls(item: item, accent: accent)
                 } else {
                     ProgressView(value: progress)
                         .progressViewStyle(.linear)
@@ -989,7 +1039,9 @@ private struct NowSpeakingHUDView: View {
                         .accessibilityHidden(true)
                 }
             }
-            .accessibilityLabel("Now speaking. \(item.nowSpeakingTitle). \(item.nowSpeakingContext)")
+            .accessibilityLabel(
+                "\(isPreviewingPending ? "Pending update" : "Now speaking"). \(item.nowSpeakingTitle). \(item.nowSpeakingContext)"
+            )
         } else if isWindowedMode {
             PlayerHistoryView(controller: controller, presentation: presentation)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1087,16 +1139,33 @@ private struct NowSpeakingHUDView: View {
                 .accessibilityLabel("Open agent session")
             }
 
-            Button(action: isWindowedMode ? stopPlayback : onHide) {
-                Image(systemName: "xmark")
+            Button(action: isWindowedMode ? dismissPreviewOrStop : onHide) {
+                Image(systemName: isPreviewingPending ? "chevron.backward" : "xmark")
                     .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
             }
             .buttonStyle(.plain)
-            .help(isWindowedMode ? "Stop" : "Hide player")
-            .accessibilityLabel(isWindowedMode ? "Stop" : "Hide player")
+            .help(isPreviewingPending ? "Back to history" : (isWindowedMode ? "Stop" : "Hide player"))
+            .accessibilityLabel(isPreviewingPending ? "Back to history" : (isWindowedMode ? "Stop" : "Hide player"))
         }
+    }
+
+    private func pendingPreviewStatus(for item: TTSItem) -> some View {
+        HStack(spacing: 8) {
+            if item.status == .generating {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "clock")
+            }
+            Text(item.status == .generating ? "Generating audio…" : "Audio ready — waiting to play")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(item.status == .generating ? "Generating audio" : "Audio ready and waiting to play")
     }
 
     private func attachmentStrip(item: TTSItem, accent: Color) -> some View {
@@ -1466,7 +1535,16 @@ private struct NowSpeakingHUDView: View {
     }
 
     private var displayedItem: TTSItem? {
-        controller.currentItem ?? presentation.lingeringItem
+        controller.currentItem ?? pendingPreviewItem ?? presentation.lingeringItem
+    }
+
+    private var pendingPreviewItem: TTSItem? {
+        guard let preview = presentation.pendingPreviewItem else { return nil }
+        return controller.items.first(where: { $0.id == preview.id }) ?? preview
+    }
+
+    private var isPreviewingPending: Bool {
+        controller.currentItem == nil && pendingPreviewItem != nil
     }
 
     private var isLingering: Bool {
@@ -1482,6 +1560,9 @@ private struct NowSpeakingHUDView: View {
     }
 
     private var statusSymbol: String {
+        if isPreviewingPending {
+            return pendingPreviewItem?.status == .generating ? "ellipsis" : "clock"
+        }
         if isLingering { return "arrow.counterclockwise" }
         return controller.isPaused ? "pause.fill" : "waveform"
     }
@@ -1499,6 +1580,14 @@ private struct NowSpeakingHUDView: View {
             presentation.lingeringItem = nil
         } else {
             controller.stop()
+        }
+    }
+
+    private func dismissPreviewOrStop() {
+        if isPreviewingPending {
+            presentation.clearPendingPreview()
+        } else {
+            stopPlayback()
         }
     }
 
@@ -1528,7 +1617,13 @@ private struct PlayerHistoryView: View {
                 List(filteredItems.prefix(60)) { item in
                     PlayerHistoryRow(
                         item: item,
-                        action: { controller.playNow(item) },
+                        action: {
+                            if item.status == .generating {
+                                presentation.previewPendingItem(item)
+                            } else {
+                                controller.playNow(item)
+                            }
+                        },
                         onRetry: { controller.retryGeneration(item) },
                         isRetrying: controller.isRetrying(item),
                         onArchive: { controller.setArchived(!item.archived, for: item) }
@@ -1607,9 +1702,9 @@ private struct PlayerHistoryRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(item.status == .generating || item.status == .failed || !FileManager.default.fileExists(atPath: item.outputFile))
-            .opacity(item.status == .generating ? 0.62 : 1)
-            .help(item.status == .generating ? "Generating audio" : "Play now")
+            .disabled(item.status == .failed || (item.status != .generating && !FileManager.default.fileExists(atPath: item.outputFile)))
+            .opacity(item.status == .generating ? 0.78 : 1)
+            .help(item.status == .generating ? "Open update while audio is generated" : "Play now")
             .accessibilityLabel(accessibilityLabel)
 
             if item.status == .generating {
@@ -1665,7 +1760,7 @@ private struct PlayerHistoryRow: View {
 
     private var accessibilityLabel: String {
         let title = item.subjectLabel ?? item.text
-        if item.status == .generating { return "Generating audio for \(title)" }
+        if item.status == .generating { return "Open pending update \(title)" }
         if item.status == .failed { return "Failed synthesis for \(title)" }
         return "Play now \(title)"
     }
