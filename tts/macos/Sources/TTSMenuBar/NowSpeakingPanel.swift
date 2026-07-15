@@ -254,7 +254,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
         presentation.clearPendingPreview()
         if item.isAttachmentPlayback,
-           presentation.selectedAttachmentID == item.attachmentID {
+           presentation.selectedAttachmentID == item.attachmentID
+        {
             presentation.selectAttachment(nil)
         }
         lastCurrentItem = item
@@ -281,7 +282,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             presentation.clearPendingPreview()
             return
         }
-        if (latest.status == .failed || latest.status == .played), !latest.isPendingQuestion {
+        if latest.status == .failed || latest.status == .played, !latest.isPendingQuestion {
             presentation.clearPendingPreview()
         } else {
             presentation.updatePendingPreview(with: latest)
@@ -345,7 +346,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     func toggleMiniPlayer() {
         let useMiniPlayer = !presentation.isMiniPlayer
-        if useMiniPlayer && presentation.isExpanded {
+        if useMiniPlayer, presentation.isExpanded {
             preferencesStore.setExpandedSize(panel.frame.size)
         }
         preferencesStore.setMiniPlayer(useMiniPlayer)
@@ -643,9 +644,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         lingerTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
-            guard self.playbackController.currentItem == nil else { return }
-            self.lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
-            self.beginFadeOut()
+            guard playbackController.currentItem == nil else { return }
+            lingerCountdown.pause(at: ProcessInfo.processInfo.systemUptime)
+            beginFadeOut()
         }
     }
 
@@ -666,10 +667,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
         fadeTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(Layout.fadeSeconds * 1_000_000_000))
-            guard !Task.isCancelled, let self, self.isFading else { return }
-            guard self.playbackController.currentItem == nil,
-                  !self.presentation.isHovered else { return }
-            self.hide()
+            guard !Task.isCancelled, let self, isFading else { return }
+            guard playbackController.currentItem == nil,
+                  !presentation.isHovered else { return }
+            hide()
         }
     }
 
@@ -760,28 +761,28 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         geometrySaveTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled, let self else { return }
-            self.geometrySaveTask = nil
-            self.preferencesStore.setOrigin(self.panel.frame.origin)
-            if self.presentation.isExpanded {
-                self.preferencesStore.setExpandedSize(self.panel.frame.size)
+            geometrySaveTask = nil
+            preferencesStore.setOrigin(panel.frame.origin)
+            if presentation.isExpanded {
+                preferencesStore.setExpandedSize(panel.frame.size)
             }
         }
     }
 }
 
 extension NowSpeakingPanelController: NSToolbarDelegate {
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+    func toolbarDefaultItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.flexibleSpace, Self.historySearchItemIdentifier, Self.historyFilterItemIdentifier]
     }
 
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+    func toolbarAllowedItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.flexibleSpace, Self.historySearchItemIdentifier, Self.historyFilterItemIdentifier]
     }
 
     func toolbar(
-        _ toolbar: NSToolbar,
+        _: NSToolbar,
         itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
+        willBeInsertedIntoToolbar _: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
         case Self.historySearchItemIdentifier:
@@ -823,15 +824,15 @@ final class PassiveHUDPanel: NSPanel {
 }
 
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
 }
 
 private struct PlayerResizeRegions: NSViewRepresentable {
-    func makeNSView(context: Context) -> PlayerResizeRegionsView {
+    func makeNSView(context _: Context) -> PlayerResizeRegionsView {
         PlayerResizeRegionsView()
     }
 
-    func updateNSView(_ nsView: PlayerResizeRegionsView, context: Context) {}
+    func updateNSView(_: PlayerResizeRegionsView, context _: Context) {}
 }
 
 private final class PlayerResizeRegionsView: NSView {
@@ -846,7 +847,7 @@ private final class PlayerResizeRegionsView: NSView {
         edges(at: point).isEmpty ? nil : self
     }
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         activeEdges = edges(at: convert(event.locationInWindow, from: nil))
@@ -854,7 +855,7 @@ private final class PlayerResizeRegionsView: NSView {
         initialPointer = NSEvent.mouseLocation
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    override func mouseDragged(with _: NSEvent) {
         guard !activeEdges.isEmpty,
               let window,
               let initialFrame,
@@ -877,7 +878,7 @@ private final class PlayerResizeRegionsView: NSView {
         window.setFrame(frame, display: true)
     }
 
-    override func mouseUp(with event: NSEvent) {
+    override func mouseUp(with _: NSEvent) {
         initialFrame = nil
         initialPointer = nil
         activeEdges = []
@@ -967,8 +968,8 @@ private final class NowSpeakingPresentation: ObservableObject {
         hoverExitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(220))
             guard !Task.isCancelled, let self else { return }
-            self.hoverExitTask = nil
-            self.isHovered = false
+            hoverExitTask = nil
+            isHovered = false
         }
     }
 
@@ -1008,36 +1009,438 @@ private final class NowSpeakingPresentation: ObservableObject {
 }
 
 struct QuestionSubmission: Equatable {
-    let text: String
-    let suggestionIndex: Int?
+    let questionID: String
+    let answer: String?
+    let suggestionIDs: [String]
+    let attachmentURLs: [String]
+
+    var suggestionID: String? { suggestionIDs.count == 1 ? suggestionIDs.first : nil }
+    var isSkipped: Bool { answer == nil && attachmentURLs.isEmpty }
+}
+
+struct QuestionChoiceConfiguration: Equatable {
+    let id: String
+    let type: TTSQuestionType
+
+    init(id: String, type: TTSQuestionType = .singleChoice) {
+        self.id = id
+        self.type = type
+    }
+}
+
+struct SuggestionDraftState: Equatable {
+    var title: String
+    var editedText: String?
+    var attachmentURLs: [URL] = []
+
+    var answer: String? {
+        let edited = editedText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !edited.isEmpty { return edited }
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
+struct QuestionDraftState: Equatable {
+    var freeformText = ""
+    var selectedSuggestionIDs: [String] = []
+    var suggestions: [String: SuggestionDraftState] = [:]
+    var attachmentURLs: [URL] = []
+
+    var selectedSuggestionID: String? { selectedSuggestionIDs.first }
+
+    func suggestion(_ id: String) -> SuggestionDraftState? { suggestions[id] }
 }
 
 struct QuestionComposerModel: Equatable {
-    private(set) var draft = ""
-    private(set) var selectedSuggestionIndex: Int?
+    private(set) var selectedQuestionID: String?
+    private(set) var drafts: [String: QuestionDraftState] = [:]
+    private(set) var questionTypes: [String: TTSQuestionType] = [:]
 
-    var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    mutating func prepare(questionIDs: [String]) {
+        prepare(questions: questionIDs.map { QuestionChoiceConfiguration(id: $0) })
     }
 
-    var submission: QuestionSubmission? {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        return QuestionSubmission(text: text, suggestionIndex: selectedSuggestionIndex)
+    mutating func prepare(questions: [QuestionChoiceConfiguration]) {
+        let available = Set(questions.map(\.id))
+        drafts = drafts.filter { available.contains($0.key) }
+        questionTypes = Dictionary(uniqueKeysWithValues: questions.map { ($0.id, $0.type) })
+        for question in questions where drafts[question.id] == nil {
+            drafts[question.id] = QuestionDraftState()
+        }
+        if selectedQuestionID.map({ available.contains($0) }) != true {
+            selectedQuestionID = questions.first?.id
+        }
     }
 
-    mutating func select(suggestion: TTSSuggestion, at index: Int) {
-        draft = suggestion.title
-        selectedSuggestionIndex = index
+    func draft(for questionID: String) -> QuestionDraftState {
+        drafts[questionID] ?? QuestionDraftState()
     }
 
-    mutating func updateDraft(_ value: String) {
-        draft = value
+    mutating func selectQuestion(_ questionID: String) {
+        selectedQuestionID = questionID
+        if drafts[questionID] == nil {
+            drafts[questionID] = QuestionDraftState()
+        }
+    }
+
+    mutating func updateDraft(_ value: String, for questionID: String) {
+        ensureDraft(for: questionID)
+        drafts[questionID]?.freeformText = value
+        guard questionType(for: questionID) == .singleChoice,
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        drafts[questionID]?.selectedSuggestionIDs = []
+    }
+
+    mutating func selectSuggestion(id: String, title: String, for questionID: String) {
+        ensureDraft(for: questionID)
+        if drafts[questionID]?.suggestions[id] == nil {
+            drafts[questionID]?.suggestions[id] = SuggestionDraftState(title: title)
+        } else {
+            drafts[questionID]?.suggestions[id]?.title = title
+        }
+        if questionType(for: questionID) == .multipleChoice {
+            if let index = drafts[questionID]?.selectedSuggestionIDs.firstIndex(of: id) {
+                drafts[questionID]?.selectedSuggestionIDs.remove(at: index)
+            } else {
+                drafts[questionID]?.selectedSuggestionIDs.append(id)
+            }
+        } else {
+            drafts[questionID]?.selectedSuggestionIDs = [id]
+        }
+    }
+
+    mutating func applySuggestionEdit(
+        _ text: String,
+        suggestionID: String,
+        suggestionTitle: String,
+        attachments: [URL],
+        for questionID: String
+    ) {
+        ensureDraft(for: questionID)
+        drafts[questionID]?.suggestions[suggestionID] = SuggestionDraftState(
+            title: suggestionTitle,
+            editedText: text,
+            attachmentURLs: Self.deduplicated(attachments)
+        )
+        if questionType(for: questionID) == .multipleChoice {
+            if drafts[questionID]?.selectedSuggestionIDs.contains(suggestionID) != true {
+                drafts[questionID]?.selectedSuggestionIDs.append(suggestionID)
+            }
+        } else {
+            drafts[questionID]?.selectedSuggestionIDs = [suggestionID]
+        }
+    }
+
+    mutating func addAttachments(_ urls: [URL], for questionID: String) {
+        ensureDraft(for: questionID)
+        let current = drafts[questionID]?.attachmentURLs ?? []
+        drafts[questionID]?.attachmentURLs = Self.deduplicated(current + urls)
+    }
+
+    mutating func removeAttachment(_ url: URL, for questionID: String) {
+        ensureDraft(for: questionID)
+        let path = url.standardizedFileURL.path
+        drafts[questionID]?.attachmentURLs.removeAll { $0.standardizedFileURL.path == path }
+    }
+
+    mutating func removeEditedSuggestionAttachment(
+        _ url: URL,
+        suggestionID: String,
+        for questionID: String
+    ) {
+        ensureDraft(for: questionID)
+        let path = url.standardizedFileURL.path
+        drafts[questionID]?.suggestions[suggestionID]?.attachmentURLs.removeAll {
+            $0.standardizedFileURL.path == path
+        }
+    }
+
+    func submissions(questionIDs: [String]) -> [QuestionSubmission] {
+        questionIDs.map { questionID in
+            let value = draft(for: questionID)
+            let selectedAnswers = value.selectedSuggestionIDs.compactMap {
+                value.suggestions[$0]?.answer
+            }
+            let selection = selectedAnswers.joined(separator: ", ")
+            let note = value.freeformText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let answer: String?
+            if questionType(for: questionID) == .multipleChoice,
+               !selection.isEmpty,
+               !note.isEmpty
+            {
+                answer = "\(selection)\n\nAdditional note: \(note)"
+            } else {
+                let combined = selection.isEmpty ? note : selection
+                answer = combined.isEmpty ? nil : combined
+            }
+            let selectedAttachments = value.selectedSuggestionIDs.flatMap {
+                value.suggestions[$0]?.attachmentURLs ?? []
+            }
+            return QuestionSubmission(
+                questionID: questionID,
+                answer: answer,
+                suggestionIDs: value.selectedSuggestionIDs,
+                attachmentURLs: Self.deduplicated(
+                    value.attachmentURLs + selectedAttachments
+                ).map(\.standardizedFileURL.path)
+            )
+        }
     }
 
     mutating func reset() {
-        draft = ""
-        selectedSuggestionIndex = nil
+        selectedQuestionID = nil
+        drafts = [:]
+        questionTypes = [:]
+    }
+
+    private mutating func ensureDraft(for questionID: String) {
+        if drafts[questionID] == nil {
+            drafts[questionID] = QuestionDraftState()
+        }
+    }
+
+    private func questionType(for questionID: String) -> TTSQuestionType {
+        questionTypes[questionID] ?? .singleChoice
+    }
+
+    private static func deduplicated(_ urls: [URL]) -> [URL] {
+        var paths = Set<String>()
+        return urls.filter { paths.insert($0.standardizedFileURL.path).inserted }
+    }
+}
+
+private struct SuggestionEditorContext: Identifiable {
+    let questionID: String
+    let suggestionID: String
+    let suggestionTitle: String
+    let suggestionDescription: String
+    let existingText: String?
+    let existingAttachments: [URL]
+
+    var id: String { "\(questionID)::\(suggestionID)" }
+}
+
+private struct ImmediateClickTarget: NSViewRepresentable {
+    let onSingleClick: () -> Void
+    let onDoubleClick: () -> Void
+
+    func makeNSView(context _: Context) -> ImmediateClickNSView {
+        ImmediateClickNSView(onSingleClick: onSingleClick, onDoubleClick: onDoubleClick)
+    }
+
+    func updateNSView(_ nsView: ImmediateClickNSView, context _: Context) {
+        nsView.onSingleClick = onSingleClick
+        nsView.onDoubleClick = onDoubleClick
+    }
+}
+
+private final class ImmediateClickNSView: NSView {
+    var onSingleClick: () -> Void
+    var onDoubleClick: () -> Void
+
+    init(onSingleClick: @escaping () -> Void, onDoubleClick: @escaping () -> Void) {
+        self.onSingleClick = onSingleClick
+        self.onDoubleClick = onDoubleClick
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) { nil }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1 {
+            onSingleClick()
+        } else if event.clickCount == 2 {
+            onDoubleClick()
+        }
+    }
+
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+}
+
+private struct SuggestionEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let context: SuggestionEditorContext
+    let onSave: (String, [URL]) -> Void
+    @State private var text: String
+    @State private var attachments: [URL]
+    @State private var isDropTarget = false
+    @FocusState private var editorFocused: Bool
+
+    init(
+        context: SuggestionEditorContext,
+        onSave: @escaping (String, [URL]) -> Void
+    ) {
+        self.context = context
+        self.onSave = onSave
+        _text = State(initialValue: context.existingText ?? context.suggestionTitle)
+        _attachments = State(initialValue: context.existingAttachments)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "pencil.and.outline")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Personalize this answer")
+                        .font(.headline)
+                    if let description = context.suggestionDescription.nonemptyValue {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Close editor")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack(alignment: .bottomTrailing) {
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .focused($editorFocused)
+
+                    Button {
+                        addFiles(pickFiles())
+                    } label: {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                            .background(.regularMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(8)
+                    .help("Attach files")
+                    .accessibilityLabel("Attach files")
+
+                    if isDropTarget {
+                        Label("Drop to attach", systemImage: "paperclip")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(.regularMaterial, in: Capsule())
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                            .padding(9)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(minHeight: 260)
+                .background(
+                    isDropTarget ? Color.accentColor.opacity(0.09) : Color(nsColor: .textBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 11)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11)
+                        .stroke(
+                            isDropTarget || editorFocused
+                                ? Color.accentColor.opacity(isDropTarget ? 0.9 : 0.45)
+                                : Color.primary.opacity(0.1),
+                            lineWidth: isDropTarget ? 1.5 : 1
+                        )
+                }
+                .dropDestination(for: URL.self) { urls, _ in
+                    let files = urls.filter(\.isFileURL)
+                    addFiles(files)
+                    return !files.isEmpty
+                } isTargeted: { isDropTarget = $0 }
+
+                if !attachments.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 5) {
+                            ForEach(attachments, id: \.standardizedFileURL.path) { url in
+                                HStack(spacing: 4) {
+                                    Image(systemName: "paperclip")
+                                    Text(url.lastPathComponent).lineLimit(1)
+                                    Button {
+                                        attachments.removeAll {
+                                            $0.standardizedFileURL.path == url.standardizedFileURL.path
+                                        }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Remove \(url.lastPathComponent)")
+                                }
+                                .font(.caption2.weight(.medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color.accentColor.opacity(0.1), in: Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(14)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Text("⌘↩ to save")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save answer") {
+                    onSave(text.trimmingCharacters(in: .whitespacesAndNewlines), attachments)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .frame(width: 600, height: 450)
+        .onAppear { editorFocused = true }
+    }
+
+    private func addFiles(_ urls: [URL]) {
+        var paths = Set(attachments.map(\.standardizedFileURL.path))
+        attachments.append(contentsOf: urls.filter { paths.insert($0.standardizedFileURL.path).inserted })
+    }
+
+    private func pickFiles() -> [URL] {
+        let panel = NSOpenPanel()
+        panel.title = "Attach files to your answer"
+        panel.prompt = "Attach"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        return panel.runModal() == .OK ? panel.urls : []
+    }
+}
+
+private extension String {
+    var nonemptyValue: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }
 
@@ -1049,6 +1452,8 @@ private struct NowSpeakingHUDView: View {
     let onToggleMiniPlayer: () -> Void
     let onHide: () -> Void
     @State private var questionComposer = QuestionComposerModel()
+    @State private var suggestionEditor: SuggestionEditorContext?
+    @State private var isAnswerDropTarget = false
 
     var body: some View {
         if let item = displayedItem {
@@ -1113,6 +1518,21 @@ private struct NowSpeakingHUDView: View {
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .onChange(of: item.id) { _ in
                 questionComposer.reset()
+                prepareComposer(for: item)
+            }
+            .onAppear {
+                prepareComposer(for: item)
+            }
+            .sheet(item: $suggestionEditor) { context in
+                SuggestionEditorSheet(context: context) { text, attachments in
+                    questionComposer.applySuggestionEdit(
+                        text,
+                        suggestionID: context.suggestionID,
+                        suggestionTitle: context.suggestionTitle,
+                        attachments: attachments,
+                        for: context.questionID
+                    )
+                }
             }
             .overlay {
                 if presentation.isExpanded, !isWindowedMode {
@@ -1140,7 +1560,9 @@ private struct NowSpeakingHUDView: View {
     }
 
     private func questionPrompt(item: TTSItem, accent: Color) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
+        let questions = displayQuestions(for: item)
+        let current = selectedQuestion(in: questions)
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "questionmark.bubble.fill")
                     .font(.system(size: 21, weight: .semibold))
@@ -1150,14 +1572,12 @@ private struct NowSpeakingHUDView: View {
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Question from \(item.displayAgent)")
+                    Text(item.bundleTitle?.nonemptyValue ?? "Question from \(item.displayAgent)")
                         .font(.headline)
-                    if let workspaceLabel = item.workspaceDisplayLabel {
-                        Text(workspaceLabel)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    Text([item.displayAgent, item.workspaceDisplayLabel].compactMap(\.self).joined(separator: " · "))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer()
 
@@ -1184,83 +1604,92 @@ private struct NowSpeakingHUDView: View {
                 .accessibilityLabel("Hide question")
             }
 
-            ScrollView {
-                Text(item.text)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineSpacing(4)
+            if let description = item.bundleDescription?.nonemptyValue {
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
                     .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 98)
-            .accessibilityLabel("Question")
 
-            if item.isPendingQuestion {
-                if let suggestions = item.suggestions, !suggestions.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 9) {
-                            ForEach(Array(suggestions.enumerated()), id: \.offset) { index, suggestion in
-                                suggestionButton(
-                                    suggestion,
-                                    index: index,
-                                    selected: questionComposer.selectedSuggestionIndex == index,
-                                    accent: accent
-                                )
+            if !item.briefAttachments.isEmpty {
+                contextAttachmentRow(
+                    item.briefAttachments,
+                    label: "Shared context",
+                    item: item,
+                    accent: accent
+                )
+            }
+
+            if questions.count > 1 {
+                questionTabs(questions, accent: accent)
+            }
+
+            if let question = current {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(question.title)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .textSelection(.enabled)
+                            if let description = question.description?.nonemptyValue {
+                                Text(description)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineSpacing(3)
+                                    .textSelection(.enabled)
                             }
                         }
-                        .padding(.vertical, 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let attachments = question.attachments, !attachments.isEmpty {
+                            contextAttachmentRow(
+                                attachments,
+                                label: "Question context",
+                                item: item,
+                                accent: accent
+                            )
+                        }
+
+                        if question.status == .pending, item.isPendingQuestion {
+                            pendingQuestionContent(question, item: item, accent: accent)
+                        } else if let response = question.response {
+                            sentResponse(response, accent: accent)
+                        } else if question.status == .skipped {
+                            Label("Skipped", systemImage: "forward.end.circle")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Suggested answers")
+                    .padding(.vertical, 2)
                 }
+                .frame(maxHeight: .infinity)
+                .accessibilityLabel("Question \(question.title)")
+            }
 
-                HStack(alignment: .bottom, spacing: 10) {
-                    TextField(
-                        "Write your answer…",
-                        text: Binding(
-                            get: { questionComposer.draft },
-                            set: { questionComposer.updateDraft($0) }
-                        ),
-                        axis: .vertical
-                    )
-                    .lineLimit(1...3)
-                    .textFieldStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 11)
-                            .stroke(accent.opacity(0.22), lineWidth: 0.8)
-                    }
-                    .accessibilityLabel("Answer")
-                    .onSubmit { submitAnswer(for: item) }
-
-                    Button { submitAnswer(for: item) } label: {
-                        Label("Send", systemImage: "arrow.up")
+            if item.isPendingQuestion {
+                HStack(spacing: 10) {
+                    Text("All questions are optional. Blanks will be skipped.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button {
+                        submitAnswers(for: item, questions: questions)
+                    } label: {
+                        Label(questions.count > 1 ? "Send answers" : "Send", systemImage: "arrow.up")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Color.black.opacity(0.82))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(accent, in: RoundedRectangle(cornerRadius: 11))
+                            .padding(.horizontal, 15)
+                            .padding(.vertical, 9)
+                            .background(accent, in: RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
-                    .disabled(!questionComposer.canSend)
-                    .opacity(questionComposer.canSend ? 1 : 0.45)
+                    .disabled(!canSubmit(item: item, questions: questions))
+                    .opacity(canSubmit(item: item, questions: questions) ? 1 : 0.45)
                     .keyboardShortcut(.return, modifiers: [.command])
-                    .accessibilityHint("Sends the editable answer to the asking agent")
+                    .accessibilityHint("Submits every tab together; unanswered questions are skipped")
                 }
-            } else if let response = item.response {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(accent)
-                    Text("Answer sent")
-                        .font(.subheadline.weight(.semibold))
-                    Text(response.answer)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .accessibilityElement(children: .combine)
             }
 
             if !isPreviewingPending {
@@ -1273,49 +1702,473 @@ private struct NowSpeakingHUDView: View {
         .accessibilityLabel("Question from \(item.displayAgent)")
     }
 
-    private func suggestionButton(
+    @ViewBuilder
+    private func pendingQuestionContent(
+        _ question: TTSQuestion,
+        item: TTSItem,
+        accent: Color
+    ) -> some View {
+        let draft = questionComposer.draft(for: question.id)
+        if let suggestions = question.suggestions, !suggestions.isEmpty {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(question.type == .multipleChoice ? "Choose any that apply" : "Choose one")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(Array(suggestions.enumerated()), id: \.offset) { index, suggestion in
+                    suggestionCard(
+                        suggestion,
+                        id: suggestionID(suggestion, index: index),
+                        question: question,
+                        item: item,
+                        selected: draft.selectedSuggestionIDs.contains(suggestionID(suggestion, index: index)),
+                        accent: accent
+                    )
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Suggested answers")
+        }
+
+        let answerAttachments = questionComposer.draft(for: question.id).attachmentURLs
+        VStack(alignment: .leading, spacing: 6) {
+            Text(question.type == .multipleChoice ? "Additional note" : "Your answer")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 6) {
+                TextField(
+                    "Write anything…",
+                    text: Binding(
+                        get: { questionComposer.draft(for: question.id).freeformText },
+                        set: { questionComposer.updateDraft($0, for: question.id) }
+                    ),
+                    axis: .vertical
+                )
+                .lineLimit(1 ... 4)
+                .textFieldStyle(.plain)
+
+                Button {
+                    questionComposer.addAttachments(pickFiles(), for: question.id)
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(accent)
+                .help("Attach files")
+                .accessibilityLabel("Attach files to this answer")
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .background(
+                isAnswerDropTarget ? accent.opacity(0.11) : Color.white.opacity(0.08),
+                in: RoundedRectangle(cornerRadius: 11)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 11)
+                    .stroke(
+                        isAnswerDropTarget ? accent : accent.opacity(0.22),
+                        lineWidth: isAnswerDropTarget ? 1.4 : 0.8
+                    )
+            }
+            .overlay(alignment: .bottomLeading) {
+                if isAnswerDropTarget {
+                    Label("Drop to attach", systemImage: "paperclip")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                let files = urls.filter(\.isFileURL)
+                questionComposer.addAttachments(files, for: question.id)
+                return !files.isEmpty
+            } isTargeted: { isAnswerDropTarget = $0 }
+            .accessibilityLabel("Freeform answer for \(question.title)")
+
+            if !answerAttachments.isEmpty {
+                answerAttachmentChips(
+                    answerAttachments,
+                    questionID: question.id,
+                    suggestionID: nil,
+                    accent: accent
+                )
+            }
+        }
+    }
+
+    private func questionTabs(_ questions: [TTSQuestion], accent: Color) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
+                    let selected = questionComposer.selectedQuestionID == question.id
+                    let answered = !questionComposer.submissions(questionIDs: [question.id])[0].isSkipped
+                    Button {
+                        questionComposer.selectQuestion(question.id)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("\(index + 1)")
+                                .font(.caption2.monospacedDigit().weight(.bold))
+                                .frame(width: 18, height: 18)
+                                .background(selected ? Color.black.opacity(0.16) : accent.opacity(0.13), in: Circle())
+                            Text(question.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            if answered {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .foregroundStyle(selected ? Color.black.opacity(0.82) : Color.primary)
+                        .background(
+                            selected ? accent : Color.white.opacity(0.065),
+                            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Question \(index + 1): \(question.title)")
+                }
+            }
+            .padding(.vertical, 1)
+        }
+        .accessibilityLabel("Question tabs")
+    }
+
+    private func suggestionCard(
         _ suggestion: TTSSuggestion,
-        index: Int,
+        id: String,
+        question: TTSQuestion,
+        item: TTSItem,
         selected: Bool,
         accent: Color
     ) -> some View {
-        Button {
-            questionComposer.select(suggestion: suggestion, at: index)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(suggestion.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(suggestion.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        let draft = questionComposer.draft(for: question.id)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    questionComposer.selectSuggestion(id: id, title: suggestion.title, for: question.id)
+                } label: {
+                    Image(systemName: choiceSymbol(for: question.type, selected: selected))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(selected ? accent : Color.secondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    "\(question.type == .multipleChoice && selected ? "Deselect" : "Select") \(suggestion.title)"
+                )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(suggestion.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if let description = suggestion.description?.nonemptyValue {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .overlay {
+                    ImmediateClickTarget(
+                        onSingleClick: {
+                            questionComposer.selectSuggestion(
+                                id: id,
+                                title: suggestion.title,
+                                for: question.id
+                            )
+                        },
+                        onDoubleClick: {
+                            openSuggestionEditor(suggestion, id: id, questionID: question.id)
+                        }
+                    )
+                }
+
+                Button {
+                    openSuggestionEditor(suggestion, id: id, questionID: question.id)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 26, height: 26)
+                        .background(Color.white.opacity(0.08), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Personalize this suggestion")
+                .accessibilityLabel("Personalize \(suggestion.title)")
             }
-            .frame(width: 190, alignment: .leading)
-            .padding(11)
-            .background(
-                selected ? accent.opacity(0.18) : Color.white.opacity(0.065),
-                in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(selected ? accent : accent.opacity(0.16), lineWidth: selected ? 1.3 : 0.7)
+
+            if let attachments = suggestion.attachments, !attachments.isEmpty {
+                compactAttachmentButtons(attachments, item: item, accent: accent)
+            }
+
+            if let suggestionDraft = draft.suggestion(id),
+               let edited = suggestionDraft.editedText?.nonemptyValue
+            {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Personalized answer", systemImage: "pencil.line")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(accent)
+                    Text(edited)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                    if !suggestionDraft.attachmentURLs.isEmpty {
+                        answerAttachmentChips(
+                            suggestionDraft.attachmentURLs,
+                            questionID: question.id,
+                            suggestionID: id,
+                            accent: accent
+                        )
+                    }
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
         }
-        .buttonStyle(.plain)
+        .padding(11)
+        .background(
+            selected ? accent.opacity(0.16) : Color.white.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(selected ? accent : accent.opacity(0.14), lineWidth: selected ? 1.2 : 0.7)
+        }
         .accessibilityLabel(suggestion.title)
-        .accessibilityHint("Fills the editable answer field. It will not send automatically.")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityHint(
+            question.type == .multipleChoice
+                ? "Click to toggle this option. Double-click or use the pencil to personalize."
+                : "Click to select without changing the freeform answer. Double-click or use the pencil to personalize."
+        )
     }
 
-    private func submitAnswer(for item: TTSItem) {
-        guard let submission = questionComposer.submission else { return }
-        controller.answer(
-            item,
-            text: submission.text,
-            suggestionIndex: submission.suggestionIndex
+    private func answerAttachmentChips(
+        _ urls: [URL],
+        questionID: String,
+        suggestionID: String?,
+        accent: Color
+    ) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(urls, id: \.standardizedFileURL.path) { url in
+                    HStack(spacing: 5) {
+                        Image(systemName: "doc")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(url.lastPathComponent)
+                            .lineLimit(1)
+                        Button {
+                            if let suggestionID {
+                                questionComposer.removeEditedSuggestionAttachment(
+                                    url,
+                                    suggestionID: suggestionID,
+                                    for: questionID
+                                )
+                            } else {
+                                questionComposer.removeAttachment(url, for: questionID)
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove \(url.lastPathComponent)")
+                    }
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(accent.opacity(0.1), in: Capsule())
+                }
+            }
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func contextAttachmentRow(
+        _ attachments: [TTSAttachment],
+        label: String,
+        item: TTSItem,
+        accent: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            compactAttachmentButtons(attachments, item: item, accent: accent)
+        }
+    }
+
+    private func compactAttachmentButtons(
+        _ attachments: [TTSAttachment],
+        item: TTSItem,
+        accent: Color
+    ) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(attachments) { attachment in
+                    Button {
+                        openSupportingAttachment(attachment, item: item)
+                    } label: {
+                        Label(attachment.label, systemImage: attachmentSymbol(attachment))
+                            .font(.caption2.weight(.semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.07), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(accent)
+                    .help(attachmentHelp(attachment))
+                }
+            }
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func sentResponse(_ response: TTSResponse, accent: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Answer sent")
+                    .font(.subheadline.weight(.semibold))
+                if let answer = response.answer.nonemptyValue {
+                    Text(answer)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                if let attachments = response.attachments, !attachments.isEmpty {
+                    ForEach(attachments) { attachment in
+                        Label(attachment.sourceFile, systemImage: "paperclip")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func displayQuestions(for item: TTSItem) -> [TTSQuestion] {
+        if let questions = item.questions, !questions.isEmpty { return questions }
+        return [TTSQuestion(
+            id: "legacy::\(item.id)",
+            title: item.text,
+            suggestions: item.suggestions,
+            status: item.questionStatus ?? .pending,
+            response: item.response
+        )]
+    }
+
+    private func selectedQuestion(in questions: [TTSQuestion]) -> TTSQuestion? {
+        let selected = questionComposer.selectedQuestionID ?? questions.first?.id
+        return questions.first { $0.id == selected } ?? questions.first
+    }
+
+    private func prepareComposer(for item: TTSItem) {
+        questionComposer.prepare(questions: displayQuestions(for: item).map {
+            QuestionChoiceConfiguration(id: $0.id, type: $0.type)
+        })
+    }
+
+    private func suggestionID(_ suggestion: TTSSuggestion, index: Int) -> String {
+        suggestion.id?.nonemptyValue ?? "suggestion-\(index)"
+    }
+
+    private func openSuggestionEditor(
+        _ suggestion: TTSSuggestion,
+        id: String,
+        questionID: String
+    ) {
+        let draft = questionComposer.draft(for: questionID)
+        let suggestionDraft = draft.suggestion(id)
+        suggestionEditor = SuggestionEditorContext(
+            questionID: questionID,
+            suggestionID: id,
+            suggestionTitle: suggestion.title,
+            suggestionDescription: suggestion.description ?? "",
+            existingText: suggestionDraft?.editedText,
+            existingAttachments: suggestionDraft?.attachmentURLs ?? []
         )
-        questionComposer.reset()
+    }
+
+    private func choiceSymbol(for type: TTSQuestionType, selected: Bool) -> String {
+        switch (type, selected) {
+        case (.singleChoice, true): "largecircle.fill.circle"
+        case (.singleChoice, false): "circle"
+        case (.multipleChoice, true): "checkmark.square.fill"
+        case (.multipleChoice, false): "square"
+        }
+    }
+
+    private func openSupportingAttachment(_ attachment: TTSAttachment, item: TTSItem) {
+        if attachment.kind == .narratedText || attachment.kind == .audio, attachment.isPlayable {
+            controller.playAttachment(attachment, from: item)
+        } else {
+            controller.openAttachment(attachment)
+        }
+    }
+
+    private func canSubmit(item: TTSItem, questions: [TTSQuestion]) -> Bool {
+        if item.questions?.isEmpty == false { return true }
+        return questionComposer.submissions(questionIDs: questions.map(\.id)).first?.isSkipped == false
+    }
+
+    private func submitAnswers(for item: TTSItem, questions: [TTSQuestion]) {
+        let submissions = questionComposer.submissions(questionIDs: questions.map(\.id))
+        if item.questions?.isEmpty == false {
+            controller.submitBundle(
+                item,
+                drafts: submissions.map { submission in
+                    TTSQuestionDraft(
+                        questionID: submission.questionID,
+                        answer: submission.answer ?? "",
+                        suggestionID: submission.suggestionID,
+                        attachmentURLs: submission.attachmentURLs.map(URL.init(fileURLWithPath:)),
+                        interaction: interaction(for: submission),
+                        suggestionIDs: submission.suggestionIDs
+                    )
+                }
+            )
+        } else if let submission = submissions.first, let answer = submission.answer {
+            let suggestionIndex = item.suggestions?.enumerated().first {
+                suggestionID($0.element, index: $0.offset) == submission.suggestionID
+            }?.offset
+            controller.answer(item, text: answer, suggestionIndex: suggestionIndex)
+        }
+    }
+
+    private func interaction(for submission: QuestionSubmission) -> String? {
+        guard !submission.suggestionIDs.isEmpty else {
+            return submission.answer == nil ? nil : "freeform"
+        }
+        let draft = questionComposer.draft(for: submission.questionID)
+        let edited = submission.suggestionIDs.contains {
+            draft.suggestion($0)?.editedText?.nonemptyValue != nil
+        }
+        return edited ? "suggestion_edited" : "suggestion"
+    }
+
+    private func pickFiles() -> [URL] {
+        let panel = NSOpenPanel()
+        panel.title = "Attach files to your answer"
+        panel.prompt = "Attach"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        return panel.runModal() == .OK ? panel.urls : []
     }
 
     private func summary(item: TTSItem, accent: Color) -> some View {
@@ -1489,7 +2342,8 @@ private struct NowSpeakingHUDView: View {
             case .narratedText, .audio:
                 if attachment.isPlayable {
                     if item.isAttachmentPlayback,
-                       item.attachmentID == attachment.id {
+                       item.attachmentID == attachment.id
+                    {
                         presentation.selectAttachment(nil)
                     } else {
                         presentation.selectAttachment(
@@ -1580,7 +2434,8 @@ private struct NowSpeakingHUDView: View {
             }
 
             if attachment.kind == .diagram,
-               let source = presentation.selectedAttachmentText ?? attachment.text {
+               let source = presentation.selectedAttachmentText ?? attachment.text
+            {
                 MermaidDiagramView(
                     source: source,
                     accentHue: WorkspaceAccent.paletteIndex(forWorkspacePath: item.workspacePath)
@@ -1588,7 +2443,8 @@ private struct NowSpeakingHUDView: View {
                 .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             } else if attachment.kind == .image,
-               let image = presentation.selectedAttachmentImage {
+                      let image = presentation.selectedAttachmentImage
+            {
                 GeometryReader { proxy in
                     Image(nsImage: image)
                         .resizable()
@@ -1654,22 +2510,22 @@ private struct NowSpeakingHUDView: View {
 
     private func attachmentSymbol(_ attachment: TTSAttachment) -> String {
         switch attachment.kind {
-        case .narratedText: return attachment.isPlayable ? "waveform" : "doc.text"
-        case .image: return "photo"
-        case .diagram: return "flowchart"
-        case .audio: return "speaker.wave.2"
-        case .file: return "paperclip"
+        case .narratedText: attachment.isPlayable ? "waveform" : "doc.text"
+        case .image: "photo"
+        case .diagram: "flowchart"
+        case .audio: "speaker.wave.2"
+        case .file: "paperclip"
         }
     }
 
     private func attachmentHelp(_ attachment: TTSAttachment) -> String {
         switch (attachment.kind, attachment.status) {
-        case (_, .failed): return attachment.error ?? "Attachment preparation failed"
-        case (.narratedText, .preparing): return "Read while narration is prepared"
-        case (.narratedText, .ready), (.audio, .ready): return "Play \(attachment.label)"
-        case (.image, _), (.diagram, _): return "Preview \(attachment.label)"
-        case (.file, _): return "Open \(attachment.label)"
-        case (.audio, .preparing): return "Preparing audio"
+        case (_, .failed): attachment.error ?? "Attachment preparation failed"
+        case (.narratedText, .preparing): "Read while narration is prepared"
+        case (.narratedText, .ready), (.audio, .ready): "Play \(attachment.label)"
+        case (.image, _), (.diagram, _): "Preview \(attachment.label)"
+        case (.file, _): "Open \(attachment.label)"
+        case (.audio, .preparing): "Preparing audio"
         }
     }
 
@@ -1693,7 +2549,7 @@ private struct NowSpeakingHUDView: View {
                         }
                     }
                 ),
-                in: 0...max(playbackDuration, 1),
+                in: 0 ... max(playbackDuration, 1),
                 onEditingChanged: { isEditing in
                     guard !isEditing, isLingering, let item = presentation.lingeringItem else { return }
                     controller.replay(item, startingAt: presentation.lingeringTime)
@@ -1943,7 +2799,7 @@ private struct PlayerHistoryView: View {
         let query = presentation.historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
         return [item.nowSpeakingTitle, item.text, item.displayAgent, item.workspaceName]
-            .compactMap { $0 }
+            .compactMap(\.self)
             .contains { $0.localizedCaseInsensitiveContains(query) }
     }
 }

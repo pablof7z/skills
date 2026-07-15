@@ -33,9 +33,28 @@ enum TTSQuestionStatus: String, Codable, Equatable {
     var isTerminal: Bool { self != .pending }
 }
 
+enum TTSQuestionType: String, Codable, Equatable {
+    case singleChoice = "single_choice"
+    case multipleChoice = "multiple_choice"
+}
+
 struct TTSSuggestion: Codable, Equatable {
     var title: String
-    var description: String
+    var description: String? = nil
+    var id: String? = nil
+    var attachments: [TTSAttachment]? = nil
+}
+
+struct TTSAnswerAttachment: Codable, Identifiable, Equatable {
+    var id: String
+    var label: String
+    var sourceFile: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case label
+        case sourceFile = "source_file"
+    }
 }
 
 struct TTSResponse: Codable, Equatable {
@@ -44,6 +63,9 @@ struct TTSResponse: Codable, Equatable {
     var modified: Bool
     var answeredAt: Int64
     var interaction: String
+    var suggestionID: String? = nil
+    var suggestionIDs: [String]? = nil
+    var attachments: [TTSAnswerAttachment]? = nil
 
     enum CodingKeys: String, CodingKey {
         case answer
@@ -51,6 +73,66 @@ struct TTSResponse: Codable, Equatable {
         case modified
         case answeredAt = "answered_at"
         case interaction
+        case suggestionID = "suggestion_id"
+        case suggestionIDs = "suggestion_ids"
+        case attachments
+    }
+}
+
+struct TTSQuestion: Codable, Identifiable, Equatable {
+    var id: String
+    var title: String
+    var type: TTSQuestionType = .singleChoice
+    var description: String? = nil
+    var attachments: [TTSAttachment]? = nil
+    var suggestions: [TTSSuggestion]? = nil
+    var status: TTSQuestionStatus = .pending
+    var response: TTSResponse? = nil
+}
+
+struct TTSQuestionDraft: Equatable {
+    var questionID: String
+    var answer: String
+    var suggestionID: String? = nil
+    var attachmentURLs: [URL] = []
+    var interaction: String? = nil
+    var suggestionIDs: [String] = []
+}
+
+extension TTSQuestion {
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case type
+        case description
+        case attachments
+        case suggestions
+        case status
+        case response
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        type = try container.decodeIfPresent(TTSQuestionType.self, forKey: .type) ?? .singleChoice
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        attachments = try container.decodeIfPresent([TTSAttachment].self, forKey: .attachments)
+        suggestions = try container.decodeIfPresent([TTSSuggestion].self, forKey: .suggestions)
+        status = try container.decodeIfPresent(TTSQuestionStatus.self, forKey: .status) ?? .pending
+        response = try container.decodeIfPresent(TTSResponse.self, forKey: .response)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(attachments, forKey: .attachments)
+        try container.encodeIfPresent(suggestions, forKey: .suggestions)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(response, forKey: .response)
     }
 }
 
@@ -122,6 +204,7 @@ struct TTSAttachment: Codable, Identifiable, Equatable {
     var audioFile: String? = nil
     var wordTimings: [TTSWordTiming]? = nil
     var error: String? = nil
+    var description: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -133,6 +216,7 @@ struct TTSAttachment: Codable, Identifiable, Equatable {
         case audioFile = "audio_file"
         case wordTimings = "word_timings"
         case error
+        case description
     }
 
     var isPlayable: Bool {
@@ -186,6 +270,9 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var playbackInitiator: TTSPlaybackInitiator? = nil
     var engagement: TTSEngagement? = nil
     var userActivity: TTSUserActivity? = nil
+    var bundleTitle: String? = nil
+    var bundleDescription: String? = nil
+    var questions: [TTSQuestion]? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -227,6 +314,9 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case playbackInitiator = "playback_initiator"
         case engagement
         case userActivity = "user_activity"
+        case bundleTitle = "bundle_title"
+        case bundleDescription = "bundle_description"
+        case questions
     }
 
     var displayAgent: String {
@@ -285,7 +375,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     }
 
     var isQuestion: Bool {
-        kind == .question || questionStatus != nil
+        kind == .question || questionStatus != nil || questions != nil
     }
 
     var isPendingQuestion: Bool {
@@ -341,7 +431,10 @@ struct TTSItem: Codable, Identifiable, Equatable {
             supersededBy: supersededBy,
             playbackInitiator: nil,
             engagement: nil,
-            userActivity: nil
+            userActivity: nil,
+            bundleTitle: bundleTitle,
+            bundleDescription: bundleDescription,
+            questions: questions
         )
     }
 

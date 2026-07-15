@@ -506,16 +506,65 @@ if args.command == "wait":
     while True:
         with operation_lock(exclusive=False):
             item = read_item(args.id)
+        questions = item.get("questions") or []
+        for question in questions:
+            response = question.get("response")
+            if not isinstance(response, dict):
+                continue
+            singular = response.get("suggestion_id")
+            plural = response.get("suggestion_ids")
+            if not isinstance(plural, list):
+                plural = [singular] if singular else []
+                response["suggestion_ids"] = plural
+            if not singular and plural:
+                response["suggestion_id"] = plural[0]
         question_status = item.get("question_status")
         playback_status = item.get("status")
+        if questions and all(question.get("status") != "pending" for question in questions):
+            answered = [question for question in questions if question.get("status") == "answered"]
+            attachment_paths = []
+            for question in questions:
+                response = question.get("response") or {}
+                for attachment in response.get("attachments") or []:
+                    path = attachment.get("source_file") or attachment.get("path")
+                    if path:
+                        attachment_paths.append(path)
+            emit({
+                "id": item["id"],
+                "status": "answered" if answered else "skipped",
+                "bundle_title": item.get("bundle_title"),
+                "bundle_description": item.get("bundle_description"),
+                "questions": questions,
+                "attachments": item.get("attachments") or [],
+                "answer_attachment_paths": attachment_paths,
+                "reason": item.get("archive_reason"),
+                "superseded_by": item.get("superseded_by") or [],
+            })
+            raise SystemExit(0)
         if question_status and question_status != "pending":
             response = item.get("response") or {}
+            singular = response.get("suggestion_id")
+            plural = response.get("suggestion_ids")
+            if not isinstance(plural, list):
+                plural = [singular] if singular else []
+                response["suggestion_ids"] = plural
+            if not singular and plural:
+                response["suggestion_id"] = plural[0]
+            answer_attachment_paths = [
+                attachment.get("source_file") or attachment.get("path")
+                for attachment in response.get("attachments") or []
+                if attachment.get("source_file") or attachment.get("path")
+            ]
             emit({
                 "id": item["id"],
                 "status": question_status,
                 "answer": response.get("answer"),
                 "suggestion_index": response.get("suggestion_index"),
+                "suggestion_id": response.get("suggestion_id"),
+                "suggestion_ids": response.get("suggestion_ids") or [],
                 "modified": response.get("modified"),
+                "response": response,
+                "answer_attachment_paths": answer_attachment_paths,
                 "reason": item.get("archive_reason"),
                 "superseded_by": item.get("superseded_by") or [],
             })

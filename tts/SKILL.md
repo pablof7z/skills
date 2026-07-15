@@ -116,14 +116,8 @@ do not add shell-specific process-management examples to the skill.
 
 ## Questions and answers
 
-Use `--ask` when the spoken message is a question that should remain available
-for an answer. The command waits until the user answers or an agent supersedes
-the question, and its JSON output includes the answer. Run the command
-with the execution environment's asynchronous process capability when other work
-should continue while the question is pending.
-
-Offer optional answer ideas with `--suggestions` as a JSON array of title and
-description pairs:
+Use legacy bare `--ask` for one question. Offer optional answer ideas with
+`--suggestions` as title and description pairs:
 
 ```bash
 ./scripts/tts --ask \
@@ -131,8 +125,43 @@ description pairs:
   --message "Which direction should I take?"
 ```
 
-Suggestions are editable starting points. The player always includes a freeform
-input, so never add a `Something else`, `Other`, or equivalent suggestion.
+Use `--ask '<json>'` or `--ask @questions.json` for one or more related optional
+questions. The JSON requires a nonempty `questions` array. It may include a root
+`title`, `description`, and `attachments`; every question requires `title` and
+may include `description`, `attachments`, `suggestions`, and `type`. Type is
+`single_choice` by default; use `multiple_choice` when several suggestions may
+be selected. Every suggestion requires `title` and may include `description`
+and `attachments`. Attachments
+may be path strings or objects with `path` plus optional `label` and
+`description`:
+
+```bash
+./scripts/tts --ask '{
+  "title": "Release choices",
+  "attachments": [{"path": "./context.md", "label": "Release context"}],
+  "questions": [{
+    "title": "Which rollout should I use?",
+    "suggestions": [{"title": "Progressive", "description": "Start narrowly."}]
+  }, {
+    "title": "Which teams should I notify?",
+    "type": "multiple_choice",
+    "suggestions": [{"title": "Support"}, {"title": "Operations"}]
+  }]
+}'
+```
+
+Add context attachments only when they materially help the decision. Question
+and suggestion attachments are copied durably and remain scoped to their owner.
+They are not read as part of the main question prompt.
+
+Suggestions are editable starting points. The player always includes freeform
+input for both types, so never add `Something else`, `Other`, or an equivalent
+suggestion. Single choice uses radio-style selection; multiple choice uses
+checkbox-style selection. The user submits the whole bundle atomically; a blank
+question is skipped. The
+command returns only after that submission (or supersession), including answers
+and answer-attachment paths in its JSON output. Use the execution environment's
+asynchronous process capability when other work should continue meanwhile.
 `--ask` is incompatible with `--no-play`.
 
 Every invocation prints a machine-readable result containing its stable `id`;

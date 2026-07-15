@@ -38,6 +38,11 @@ enum QueueOperationError: Error, LocalizedError, Equatable {
     case noReplacements
     case emptyReason
     case supersessionCycle
+    case bundleRequiresAtomicSubmission(String)
+    case invalidBundleQuestions(String)
+    case invalidBundleDrafts(String)
+    case invalidSuggestionID(String)
+    case invalidAnswerAttachment(String)
 
     var errorDescription: String? {
         switch self {
@@ -49,6 +54,11 @@ enum QueueOperationError: Error, LocalizedError, Equatable {
         case .noReplacements: "At least one replacement item is required."
         case .emptyReason: "A supersession reason is required."
         case .supersessionCycle: "Supersession would create a cycle."
+        case let .bundleRequiresAtomicSubmission(id): "Question bundle requires one atomic submission: \(id)"
+        case let .invalidBundleQuestions(message): "Invalid question bundle: \(message)"
+        case let .invalidBundleDrafts(message): "Invalid question drafts: \(message)"
+        case let .invalidSuggestionID(id): "Suggestion ID was not found: \(id)"
+        case let .invalidAnswerAttachment(path): "Answer attachment is not a readable file: \(path)"
         }
     }
 }
@@ -153,15 +163,19 @@ struct QueueStore {
         var value = proposed
         value.kind = value.kind ?? persisted.kind
         value.suggestions = value.suggestions ?? persisted.suggestions
+        value.bundleTitle = value.bundleTitle ?? persisted.bundleTitle
+        value.bundleDescription = value.bundleDescription ?? persisted.bundleDescription
         if persisted.questionStatus?.isTerminal == true,
            value.questionStatus?.isTerminal != true {
             value.questionStatus = persisted.questionStatus
             value.response = persisted.response
             value.supersededBy = persisted.supersededBy
+            value.questions = persisted.questions
         } else {
             value.questionStatus = value.questionStatus ?? persisted.questionStatus
             value.response = value.response ?? persisted.response
             value.supersededBy = value.supersededBy ?? persisted.supersededBy
+            value.questions = value.questions ?? persisted.questions
         }
         // Generic playback/generation saves are never archive operations. A
         // stale copy commonly carries the legacy explicit `false`; preserve a
@@ -201,23 +215,35 @@ struct QueueStore {
     ) throws -> TTSItem {
         try withOperationsLock {
             var value = try requiredPendingQuestion(id: id)
+            if let questions = value.questions, questions.count > 1 {
+                throw QueueOperationError.bundleRequiresAtomicSubmission(id)
+            }
             let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw QueueOperationError.emptyAnswer }
+            let nestedSuggestions = value.questions?.first?.suggestions
+            let availableSuggestions = nestedSuggestions ?? value.suggestions
             if let suggestionIndex {
-                guard let suggestions = value.suggestions,
+                guard let suggestions = availableSuggestions,
                       suggestions.indices.contains(suggestionIndex) else {
                     throw QueueOperationError.invalidSuggestionIndex(suggestionIndex)
                 }
             }
-            let selectedTitle = suggestionIndex.flatMap { value.suggestions?[$0].title }
-            value.response = TTSResponse(
+            let selectedSuggestion = suggestionIndex.flatMap { availableSuggestions?[$0] }
+            let response = TTSResponse(
                 answer: trimmed,
                 suggestionIndex: suggestionIndex,
-                modified: selectedTitle.map { $0 != trimmed } ?? false,
+                modified: selectedSuggestion.map { $0.title != trimmed } ?? false,
                 answeredAt: now,
-                interaction: interaction ?? (suggestionIndex == nil ? "freeform" : "suggestion")
+                interaction: interaction ?? (suggestionIndex == nil ? "freeform" : "suggestion"),
+                suggestionID: selectedSuggestion?.id,
+                suggestionIDs: selectedSuggestion?.id.map { [$0] }
             )
+            value.response = response
             value.questionStatus = .answered
+            if value.questions?.count == 1 {
+                value.questions?[0].status = .answered
+                value.questions?[0].response = response
+            }
             try saveUnlocked(value)
             return value
         }
@@ -231,10 +257,140 @@ struct QueueStore {
     ) throws -> TTSItem {
         try withOperationsLock {
             var value = try requiredPendingQuestion(id: id)
+            if let questions = value.questions, questions.count > 1 {
+                throw QueueOperationError.bundleRequiresAtomicSubmission(id)
+            }
             value.questionStatus = .skipped
+            if value.questions?.count == 1 {
+                value.questions?[0].status = .skipped
+                value.questions?[0].response = nil
+            }
             try saveUnlocked(value)
             try saveOperation(QueueOperation(
                 kind: .skip,
+                sourceIDs: [id],
+                replacementIDs: [],
+                reason: nil,
+                actor: actor,
+                createdAt: now
+            ))
+            return value
+        }
+    }
+
+    @discardableResult
+    func submitBundle(
+        id: String,
+        drafts: [TTSQuestionDraft],
+        actor: String? = nil,
+        now: Int64 = Int64(Date().timeIntervalSince1970)
+    ) throws -> TTSItem {
+        try withOperationsLock {
+            var value = try requiredPendingQuestion(id: id)
+            guard let questions = value.questions, !questions.isEmpty else {
+                throw QueueOperationError.invalidBundleQuestions("questions must not be empty")
+            }
+            let questionIDs = questions.map(\.id)
+            guard Set(questionIDs).count == questionIDs.count else {
+                throw QueueOperationError.invalidBundleQuestions("question IDs must be unique")
+            }
+            let draftIDs = drafts.map(\.questionID)
+            guard Set(draftIDs).count == draftIDs.count else {
+                throw QueueOperationError.invalidBundleDrafts("question IDs must not be repeated")
+            }
+            guard Set(draftIDs) == Set(questionIDs), drafts.count == questions.count else {
+                throw QueueOperationError.invalidBundleDrafts("provide exactly one draft for every question")
+            }
+            guard questions.allSatisfy({ $0.status == .pending }) else {
+                throw QueueOperationError.questionAlreadyResolved(id)
+            }
+
+            let draftsByID = Dictionary(uniqueKeysWithValues: drafts.map { ($0.questionID, $0) })
+            for question in questions {
+                let draft = draftsByID[question.id]!
+                let selectedIDs = Self.selectedSuggestionIDs(for: draft)
+                guard Set(selectedIDs).count == selectedIDs.count else {
+                    throw QueueOperationError.invalidBundleDrafts(
+                        "selected suggestion IDs must be unique for question \(question.id)"
+                    )
+                }
+                if question.type == .singleChoice, selectedIDs.count > 1 {
+                    throw QueueOperationError.invalidBundleDrafts(
+                        "question \(question.id) accepts only one suggestion"
+                    )
+                }
+                for suggestionID in selectedIDs {
+                    guard question.suggestions?.contains(where: { $0.id == suggestionID }) == true else {
+                        throw QueueOperationError.invalidSuggestionID(suggestionID)
+                    }
+                }
+                for url in draft.attachmentURLs {
+                    guard url.isFileURL, Self.isReadableRegularFile(url) else {
+                        throw QueueOperationError.invalidAnswerAttachment(url.path)
+                    }
+                }
+            }
+
+            var copiedURLs: [URL] = []
+            var itemWasSaved = false
+            defer {
+                if !itemWasSaved {
+                    for url in copiedURLs { try? FileManager.default.removeItem(at: url) }
+                }
+            }
+
+            var updatedQuestions: [TTSQuestion] = []
+            for var question in questions {
+                let draft = draftsByID[question.id]!
+                let trimmed = draft.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                let selectedIDs = Self.selectedSuggestionIDs(for: draft)
+                let answerAttachments = try copyAnswerAttachments(
+                    draft.attachmentURLs,
+                    item: value,
+                    questionID: question.id,
+                    copiedURLs: &copiedURLs
+                )
+                guard !trimmed.isEmpty || !answerAttachments.isEmpty else {
+                    question.status = .skipped
+                    question.response = nil
+                    updatedQuestions.append(question)
+                    continue
+                }
+
+                let selectedSuggestions = selectedIDs.compactMap { suggestionID in
+                    question.suggestions?.first { $0.id == suggestionID }
+                }
+                let canonicalSuggestionAnswer = selectedSuggestions
+                    .map(\.title)
+                    .joined(separator: ", ")
+                let legacySuggestionID = question.type == .singleChoice ? selectedIDs.first : nil
+                let legacySuggestionIndex = legacySuggestionID.flatMap { suggestionID in
+                    question.suggestions?.firstIndex { $0.id == suggestionID }
+                }
+                question.status = .answered
+                question.response = TTSResponse(
+                    answer: trimmed,
+                    suggestionIndex: legacySuggestionIndex,
+                    modified: selectedIDs.isEmpty ? false : canonicalSuggestionAnswer != trimmed,
+                    answeredAt: now,
+                    interaction: draft.interaction
+                        ?? (selectedIDs.isEmpty
+                            ? (answerAttachments.isEmpty ? "freeform" : "attachments")
+                            : "suggestion"),
+                    suggestionID: legacySuggestionID,
+                    suggestionIDs: selectedIDs.isEmpty ? nil : selectedIDs,
+                    attachments: answerAttachments.isEmpty ? nil : answerAttachments
+                )
+                updatedQuestions.append(question)
+            }
+
+            value.questions = updatedQuestions
+            value.questionStatus = .answered
+            value.response = nil
+            try saveUnlocked(value)
+            itemWasSaved = true
+            try saveOperation(QueueOperation(
+                kind: .answer,
                 sourceIDs: [id],
                 replacementIDs: [],
                 reason: nil,
@@ -337,6 +493,84 @@ struct QueueStore {
         guard let value = try itemUnlocked(id: id) else { throw QueueOperationError.itemNotFound(id) }
         guard value.isPendingQuestion else { throw QueueOperationError.questionAlreadyResolved(id) }
         return value
+    }
+
+    private static func selectedSuggestionIDs(for draft: TTSQuestionDraft) -> [String] {
+        if !draft.suggestionIDs.isEmpty { return draft.suggestionIDs }
+        return draft.suggestionID.map { [$0] } ?? []
+    }
+
+    private func copyAnswerAttachments(
+        _ sourceURLs: [URL],
+        item: TTSItem,
+        questionID: String,
+        copiedURLs: inout [URL]
+    ) throws -> [TTSAnswerAttachment] {
+        guard !sourceURLs.isEmpty else { return [] }
+        let itemAssets = item.assetDirectory.flatMap { path -> URL? in
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : URL(fileURLWithPath: trimmed, isDirectory: true)
+        } ?? stateDirectory
+            .appendingPathComponent("assets", isDirectory: true)
+            .appendingPathComponent(Self.safePathComponent(item.id), isDirectory: true)
+        let destinationDirectory = itemAssets
+            .appendingPathComponent("answer-attachments", isDirectory: true)
+            .appendingPathComponent(Self.safePathComponent(questionID), isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: destinationDirectory,
+            withIntermediateDirectories: true
+        )
+
+        return try sourceURLs.map { originalURL in
+            let accessed = originalURL.startAccessingSecurityScopedResource()
+            defer { if accessed { originalURL.stopAccessingSecurityScopedResource() } }
+            let sourceURL = originalURL.resolvingSymlinksInPath()
+            guard Self.isReadableRegularFile(sourceURL) else {
+                throw QueueOperationError.invalidAnswerAttachment(originalURL.path)
+            }
+            let label = originalURL.lastPathComponent.isEmpty ? "Attachment" : originalURL.lastPathComponent
+            let destination = Self.availableDestination(
+                named: label,
+                in: destinationDirectory
+            )
+            try FileManager.default.copyItem(at: sourceURL, to: destination)
+            copiedURLs.append(destination)
+            return TTSAnswerAttachment(
+                id: "\(Self.safePathComponent(questionID))-answer-\(UUID().uuidString.lowercased())",
+                label: label,
+                sourceFile: destination.path
+            )
+        }
+    }
+
+    private static func isReadableRegularFile(_ url: URL) -> Bool {
+        guard FileManager.default.isReadableFile(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey]) else { return false }
+        return values.isRegularFile == true
+    }
+
+    private static func safePathComponent(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let result = value.unicodeScalars.map { allowed.contains($0) ? Character(String($0)) : "-" }
+        let string = String(result).trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        return string.isEmpty ? "item" : string
+    }
+
+    private static func availableDestination(named filename: String, in directory: URL) -> URL {
+        let original = URL(fileURLWithPath: filename).lastPathComponent
+        let fallback = original.isEmpty ? "attachment" : original
+        let extensionName = URL(fileURLWithPath: fallback).pathExtension
+        let stem = URL(fileURLWithPath: fallback).deletingPathExtension().lastPathComponent
+        var candidate = directory.appendingPathComponent(fallback)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            let nextName = extensionName.isEmpty
+                ? "\(stem)-\(suffix)"
+                : "\(stem)-\(suffix).\(extensionName)"
+            candidate = directory.appendingPathComponent(nextName)
+            suffix += 1
+        }
+        return candidate
     }
 
     private func saveOperation(_ operation: QueueOperation) throws {
