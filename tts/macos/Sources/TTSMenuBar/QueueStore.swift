@@ -111,6 +111,12 @@ struct QueueStore {
         }
     }
 
+    func itemsChangeToken() throws -> Date {
+        try prepare()
+        let attributes = try FileManager.default.attributesOfItem(atPath: itemsDirectory.path)
+        return attributes[.modificationDate] as? Date ?? .distantPast
+    }
+
     private func loadItemsUnlocked() throws -> [TTSItem] {
         try prepare()
         let urls = try FileManager.default.contentsOfDirectory(
