@@ -20,6 +20,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private var refreshTimer: Timer?
     private var playbackStartTask: Task<Void, Never>?
     private var automaticallyPausedItemID: String?
+    private var retryingItemIDs = Set<String>()
     private var started = false
 
     init(
@@ -237,6 +238,54 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             play(requested)
         } catch {
             NSLog("Unable to play selected TTS item: %@", error.localizedDescription)
+        }
+    }
+
+    func isRetrying(_ item: TTSItem) -> Bool {
+        retryingItemIDs.contains(item.id)
+    }
+
+    func retryGeneration(_ item: TTSItem) {
+        guard item.status == .failed, !isRetrying(item) else { return }
+        guard let command = retryCommand(for: item) else {
+            recordRetryFailure(for: item, message: "The TTS command is no longer available.")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command)
+        var arguments = ["--message", item.text, "--voice-id", item.voice]
+        if let subject = item.subject, !subject.isEmpty {
+            arguments += ["--subject", subject]
+        }
+        if let agentName = item.agentName, !agentName.isEmpty {
+            arguments += ["--agent-name", agentName]
+        }
+        process.arguments = arguments
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["TTS_STATE_DIR"] = store.stateDirectory.path
+        if let workspace = item.workspace, !workspace.isEmpty {
+            environment["TTS_WORKSPACE"] = workspace
+        }
+        if let sessionID = item.sessionID, !sessionID.isEmpty {
+            environment["TTS_SESSION_ID"] = sessionID
+            environment["TTS_SESSION_STORAGE_ID"] = sessionID
+        }
+        process.environment = environment
+        process.terminationHandler = { [weak self] _ in
+            Task { @MainActor in
+                self?.retryingItemIDs.remove(item.id)
+                self?.refresh()
+            }
+        }
+
+        do {
+            retryingItemIDs.insert(item.id)
+            try process.run()
+        } catch {
+            retryingItemIDs.remove(item.id)
+            recordRetryFailure(for: item, message: "Unable to start retry: \(error.localizedDescription)")
         }
     }
 
@@ -569,6 +618,22 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         failed.status = .failed
         failed.completedAt = Int64(Date().timeIntervalSince1970)
         failed.error = message
+        try? store.save(failed)
+        replaceItem(failed)
+    }
+
+    private func retryCommand(for item: TTSItem) -> String? {
+        let candidates = [
+            item.retryCommand,
+            NSString(string: "~/.agents/skills/tts/scripts/tts").expandingTildeInPath,
+        ].compactMap { $0 }
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private func recordRetryFailure(for item: TTSItem, message: String) {
+        var failed = item
+        failed.error = message
+        failed.completedAt = Int64(Date().timeIntervalSince1970)
         try? store.save(failed)
         replaceItem(failed)
     }

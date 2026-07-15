@@ -1477,6 +1477,8 @@ private struct PlayerHistoryView: View {
                     PlayerHistoryRow(
                         item: item,
                         action: { controller.playNow(item) },
+                        onRetry: { controller.retryGeneration(item) },
+                        isRetrying: controller.isRetrying(item),
                         onArchive: { controller.setArchived(!item.archived, for: item) }
                     )
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -1539,6 +1541,8 @@ private struct PlayerHistoryView: View {
 private struct PlayerHistoryRow: View {
     let item: TTSItem
     let action: () -> Void
+    let onRetry: () -> Void
+    let isRetrying: Bool
     let onArchive: () -> Void
 
     var body: some View {
@@ -1571,7 +1575,7 @@ private struct PlayerHistoryRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(item.status == .generating || !FileManager.default.fileExists(atPath: item.outputFile))
+            .disabled(item.status == .generating || item.status == .failed || !FileManager.default.fileExists(atPath: item.outputFile))
             .opacity(item.status == .generating ? 0.62 : 1)
             .help(item.status == .generating ? "Generating audio" : "Play now")
             .accessibilityLabel(accessibilityLabel)
@@ -1585,6 +1589,22 @@ private struct PlayerHistoryRow: View {
                     Text(item.timestampLabel())
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
+                    if item.status == .failed {
+                        Button(action: onRetry) {
+                            if isRetrying {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 18, height: 18)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .frame(width: 18, height: 18)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isRetrying)
+                        .help(isRetrying ? "Retrying synthesis" : "Retry synthesis")
+                        .accessibilityLabel(isRetrying ? "Retrying synthesis" : "Retry synthesis")
+                    }
                     Button(action: onArchive) {
                         Image(systemName: item.archived ? "tray.and.arrow.up" : "archivebox")
                             .frame(width: 18, height: 18)
@@ -1602,14 +1622,16 @@ private struct PlayerHistoryRow: View {
         if item.status == .generating {
             return "Generating audio…"
         } else if item.status == .failed {
-            return "Failed"
+            return item.error.map { "Failed: \($0)" } ?? "Failed"
         }
         return item.text
     }
 
     private var accessibilityLabel: String {
         let title = item.subjectLabel ?? item.text
-        return item.status == .generating ? "Generating audio for \(title)" : "Play now \(title)"
+        if item.status == .generating { return "Generating audio for \(title)" }
+        if item.status == .failed { return "Failed synthesis for \(title)" }
+        return "Play now \(title)"
     }
 }
 

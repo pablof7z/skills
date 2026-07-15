@@ -497,6 +497,20 @@ struct QueueStoreTests {
     }
 
     @Test
+    func preservesRetryCommandWhenSavingAndLoadingItem() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        var failed = item(id: "failed", createdAt: 10)
+        failed.status = .failed
+        failed.retryCommand = "/tmp/tts"
+
+        try store.save(failed)
+
+        #expect(try store.loadItems().first?.retryCommand == "/tmp/tts")
+    }
+
+    @Test
     func keepsFullSessionIdentifierForDisplay() {
         var value = item(id: "session", createdAt: 10)
         value.sessionID = "019c-live-menu-uat-full-session"

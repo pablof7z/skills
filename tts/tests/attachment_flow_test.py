@@ -193,7 +193,8 @@ class AttachmentFlowTests(unittest.TestCase):
                 self.assertEqual(len(item_files), 1, result.stderr)
                 failed = json.loads(item_files[0].read_text(encoding="utf-8"))
                 self.assertEqual(failed["status"], "failed")
-                self.assertEqual(failed["error"], "Speech generation failed.")
+                self.assertEqual(failed["error"], "TTS request failed with HTTP 500")
+                self.assertEqual(failed["retry_command"], str(tts_command))
                 self.assertIsNotNone(failed["completed_at"])
             finally:
                 server.shutdown()
