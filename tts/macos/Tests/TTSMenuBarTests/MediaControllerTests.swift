@@ -1,0 +1,217 @@
+import Foundation
+import Testing
+@testable import TTSMenuBar
+
+@Suite @MainActor
+struct MediaControllerTests {
+    @Test
+    func pausesAndResumesOnlyTheOwnedSession() async throws {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        let controller = makeController(backend: backend)
+
+        #expect(await controller.prepareForSpeech())
+        #expect(backend.pauseCalls == 1)
+        #expect(backend.session?.isPlaying == false)
+        #expect(controller.hasActiveLease)
+
+        controller.scheduleResume(after: 0, resumeAllowed: { true })
+        try await waitUntil { !controller.hasActiveLease }
+
+        #expect(backend.playCalls == 1)
+        #expect(backend.session?.isPlaying == true)
+    }
+
+    @Test
+    func pendingResumeCannotOverrideNewSpeech() async throws {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        let controller = makeController(backend: backend)
+        #expect(await controller.prepareForSpeech())
+
+        controller.scheduleResume(after: 0.05, resumeAllowed: { true })
+        try await Task.sleep(for: .milliseconds(5))
+        #expect(!(await controller.prepareForSpeech()))
+        try await Task.sleep(for: .milliseconds(70))
+
+        #expect(backend.playCalls == 0)
+        #expect(backend.session?.isPlaying == false)
+        #expect(controller.hasActiveLease)
+    }
+
+    @Test
+    func queuedSpeechAtResumeBoundaryKeepsTheLeasePaused() async throws {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        let controller = makeController(backend: backend)
+        #expect(await controller.prepareForSpeech())
+        let queueState = TestQueueState(isIdle: false)
+
+        controller.scheduleResume(after: 0, resumeAllowed: { queueState.isIdle })
+        try await Task.sleep(for: .milliseconds(10))
+
+        #expect(backend.playCalls == 0)
+        #expect(controller.hasActiveLease)
+        queueState.isIdle = true
+        controller.scheduleResume(after: 0, resumeAllowed: { queueState.isIdle })
+        try await waitUntil { !controller.hasActiveLease }
+        #expect(backend.playCalls == 1)
+    }
+
+    @Test
+    func queueChangeDuringResumeRepausesMedia() async throws {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        let controller = makeController(backend: backend)
+        #expect(await controller.prepareForSpeech())
+        var queueIsIdle = true
+        backend.onPlay = { queueIsIdle = false }
+
+        controller.scheduleResume(after: 0, resumeAllowed: { queueIsIdle })
+        try await waitUntil { backend.pauseCalls == 2 }
+
+        #expect(backend.playCalls == 1)
+        #expect(backend.session?.isPlaying == false)
+        #expect(controller.hasActiveLease)
+    }
+
+    @Test
+    func newSpeechRepausesAnInflightStaleResume() async throws {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        backend.playDelay = 0.03
+        let controller = makeController(backend: backend)
+        #expect(await controller.prepareForSpeech())
+
+        controller.scheduleResume(after: 0, resumeAllowed: { true })
+        try await waitUntil { backend.playStarted }
+        #expect(!(await controller.prepareForSpeech()))
+        try await waitUntil { backend.pauseCalls == 2 }
+
+        #expect(backend.playCalls == 1)
+        #expect(backend.session?.isPlaying == false)
+        #expect(controller.hasActiveLease)
+    }
+
+    @Test
+    func changedContentIsNeverResumed() async throws {
+        let backend = TestMediaControlBackend(session: session(content: "track-a", playing: true))
+        let controller = makeController(backend: backend)
+        #expect(await controller.prepareForSpeech())
+        backend.session = session(content: "track-b", playing: false)
+
+        controller.scheduleResume(after: 0, resumeAllowed: { true })
+        try await waitUntil { !controller.hasActiveLease }
+
+        #expect(backend.playCalls == 0)
+        #expect(backend.session?.isPlaying == false)
+    }
+
+    @Test
+    func unverifiedPauseDoesNotDelaySpeechOrCreateOwnership() async {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        backend.pauseChangesState = false
+        let controller = makeController(backend: backend)
+
+        #expect(!(await controller.prepareForSpeech()))
+        #expect(!controller.hasActiveLease)
+        #expect(backend.pauseCalls == 1)
+    }
+
+    private func makeController(backend: TestMediaControlBackend) -> MediaController {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("media-controller-tests-\(UUID().uuidString)")
+        let preferences = PlayerPreferencesStore(stateDirectory: directory)
+        return MediaController(
+            preferencesStore: preferences,
+            backends: [backend],
+            verificationAttempts: 3,
+            verificationDelay: 0.001
+        )
+    }
+
+    private func session(
+        content: String = "track-a",
+        playing: Bool
+    ) -> MediaSessionSnapshot {
+        MediaSessionSnapshot(
+            bundleIdentifier: "com.example.player",
+            processIdentifier: 42,
+            contentIdentifier: content,
+            title: "Silent track",
+            artist: "Tests",
+            album: nil,
+            isPlaying: playing
+        )
+    }
+
+    private func waitUntil(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        for _ in 0..<100 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        Issue.record("Condition did not become true before timeout.")
+    }
+}
+
+@MainActor
+private final class TestMediaControlBackend: MediaControlBackend {
+    let name = "test"
+    var session: MediaSessionSnapshot?
+    var pauseCalls = 0
+    var playCalls = 0
+    var pauseChangesState = true
+    var onPlay: (() -> Void)?
+    var playDelay: TimeInterval = 0
+    var playStarted = false
+
+    init(session: MediaSessionSnapshot?) {
+        self.session = session
+    }
+
+    func sessions() async throws -> [MediaSessionSnapshot] {
+        session.map { [$0] } ?? []
+    }
+
+    func pause(_: MediaSessionSnapshot) async throws -> Bool {
+        pauseCalls += 1
+        if pauseChangesState, let session {
+            self.session = replacingPlaybackState(of: session, with: false)
+        }
+        return true
+    }
+
+    func play(_: MediaSessionSnapshot) async throws -> Bool {
+        playCalls += 1
+        playStarted = true
+        if playDelay > 0 {
+            try await Task.sleep(for: .seconds(playDelay))
+        }
+        onPlay?()
+        if let session {
+            self.session = replacingPlaybackState(of: session, with: true)
+        }
+        return true
+    }
+
+    private func replacingPlaybackState(
+        of session: MediaSessionSnapshot,
+        with isPlaying: Bool
+    ) -> MediaSessionSnapshot {
+        MediaSessionSnapshot(
+            bundleIdentifier: session.bundleIdentifier,
+            processIdentifier: session.processIdentifier,
+            contentIdentifier: session.contentIdentifier,
+            title: session.title,
+            artist: session.artist,
+            album: session.album,
+            isPlaying: isPlaying
+        )
+    }
+}
+
+@MainActor
+private final class TestQueueState {
+    var isIdle: Bool
+
+    init(isIdle: Bool) {
+        self.isIdle = isIdle
+    }
+}

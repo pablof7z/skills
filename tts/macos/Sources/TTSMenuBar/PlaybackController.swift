@@ -141,7 +141,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         isAudioPlaying = false
         currentItemID = nil
         automaticallyPausedItemID = nil
-        mediaController.resumePausedAppsImmediately()
+        mediaController.shutdown()
     }
 
     func togglePause() {

@@ -56,7 +56,17 @@ extension PlaybackController {
         if hasQueuedItem {
             refresh()
         } else {
-            mediaController.resumePausedApps(after: mediaController.mediaResumeDelay)
+            mediaController.scheduleResume(after: mediaController.mediaResumeDelay) { [weak self] in
+                self?.mediaResumeAllowed() ?? false
+            }
+        }
+    }
+
+    private func mediaResumeAllowed() -> Bool {
+        guard player == nil else { return false }
+        guard let persisted = try? store.loadItems() else { return false }
+        return !persisted.contains { item in
+            item.status == .queued || item.status == .playing
         }
     }
 

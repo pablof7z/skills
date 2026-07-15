@@ -162,7 +162,7 @@ extension PlaybackController {
             isAudioPlaying = false
             try? store.save(item)
             replaceItem(item)
-            mediaController.resumePausedAppsImmediately()
+            mediaController.releaseForSpeechPause()
         } else if automaticallyPausedItemID == item.id {
             automaticallyPausedItemID = nil
             item.status = .playing
@@ -173,27 +173,22 @@ extension PlaybackController {
     }
 
     private func beginPlayback(_ audioPlayer: AVAudioPlayer, for item: TTSItem) {
-        let pausedMedia = mediaController.pausePlayingApps()
-        if pausedMedia {
-            let delay = mediaController.mediaHandoffDelay
-            playbackStartTask?.cancel()
-            playbackStartTask = Task { @MainActor [weak self, weak audioPlayer] in
+        playbackStartTask?.cancel()
+        playbackStartTask = Task { @MainActor [weak self, weak audioPlayer] in
+            guard let self, let audioPlayer, self.player === audioPlayer else { return }
+            let pausedMedia = await self.mediaController.prepareForSpeech()
+            if pausedMedia {
+                let delay = self.mediaController.mediaHandoffDelay
                 try? await Task.sleep(for: .seconds(max(0, delay)))
-                guard !Task.isCancelled, let self, let audioPlayer, self.player === audioPlayer else { return }
-                self.playbackStartTask = nil
-                guard !self.isPlaybackBlocked else { return }
-                guard audioPlayer.play() else {
-                    self.finishCurrent(success: false, error: "The audio device refused playback.")
-                    return
-                }
-                self.isAudioPlaying = true
             }
-        } else {
+            guard !Task.isCancelled, self.player === audioPlayer else { return }
+            self.playbackStartTask = nil
+            guard !self.isPlaybackBlocked else { return }
             guard audioPlayer.play() else {
-                finishCurrent(success: false, error: "The audio device refused playback.")
+                self.finishCurrent(success: false, error: "The audio device refused playback.")
                 return
             }
-            isAudioPlaying = true
+            self.isAudioPlaying = true
         }
     }
 }
