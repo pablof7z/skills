@@ -41,9 +41,10 @@ an exception:
   --attach "Supporting context" <path>
 ```
 
-Generation runs in the foreground. If the execution environment supports it,
-you can run the whole command in the background; do not detach it with shell
-process-management syntax.
+Generation runs in the foreground. If the execution environment supports
+asynchronous commands, it can keep the command running while you do other work.
+Use the environment's execution handle and completion-wait mechanism; do not
+detach the command with shell process-management syntax.
 
 After generating the primary audio, the script prepares narrated text
 attachments, queues normal playback, and prints JSON with the TTS `id`, output
@@ -52,8 +53,9 @@ path, and `queued` status. With `--no-play`, it prints `generated` instead.
 ## Conditional guidance
 
 - **Questions**: Before using `--ask`, read
-  [asking-questions.md](references/asking-questions.md). Bare `--ask` uses
-  `--message`; a structured question bundle supplies its own spoken content.
+  [asking-questions.md](references/asking-questions.md). Both bare and structured
+  asks require `--message` for the main spoken update and `--wait` for an
+  agent-chosen bounded blocking interval.
   Submitted answers, selected-suggestion details, and answer-attachment paths
   return in the TTS tool output.
 - **Attachments or formatted code**: Read

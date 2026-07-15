@@ -303,12 +303,13 @@ queue_command() {
     return 1
   fi
 
-  python3 - "$STATE_DIR" "$@" <<'PY'
+  TTS_MENU_SELF="$SCRIPT_DIR/tts-menu" python3 - "$STATE_DIR" "$@" <<'PY'
 import argparse
 import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import tempfile
 import time
@@ -330,6 +331,37 @@ def fail(message, code=1):
 
 def emit(value):
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def duration(value):
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([smh]?)", value.strip(), re.IGNORECASE)
+    if not match:
+        raise argparse.ArgumentTypeError("use a positive duration such as 30s, 5m, or 1h")
+    amount = float(match.group(1))
+    multiplier = {"": 1, "s": 1, "m": 60, "h": 3600}[match.group(2).lower()]
+    seconds = amount * multiplier
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("duration must be positive")
+    return seconds
+
+
+def describe_duration(seconds):
+    if seconds >= 3600 and seconds % 3600 == 0:
+        amount, unit = seconds / 3600, "hour"
+    elif seconds >= 60 and seconds % 60 == 0:
+        amount, unit = seconds / 60, "minute"
+    else:
+        amount, unit = seconds, "second"
+    rendered = str(int(amount)) if amount.is_integer() else f"{amount:g}"
+    return f"{rendered} {unit}{'' if amount == 1 else 's'}"
+
+
+def compact_duration(seconds):
+    if seconds >= 3600 and seconds % 3600 == 0:
+        return f"{seconds / 3600:g}h"
+    if seconds >= 60 and seconds % 60 == 0:
+        return f"{seconds / 60:g}m"
+    return f"{seconds:g}s"
 
 
 def read_item(item_id):
@@ -426,7 +458,7 @@ get_parser.add_argument("id")
 
 wait_parser = commands.add_parser("wait")
 wait_parser.add_argument("id")
-wait_parser.add_argument("--timeout", type=float)
+wait_parser.add_argument("--timeout", type=duration, required=True)
 wait_parser.add_argument("--poll-interval", type=float, default=0.25, help=argparse.SUPPRESS)
 
 archive_parser = commands.add_parser("archive")
@@ -498,11 +530,9 @@ if args.command == "get":
     raise SystemExit(0)
 
 if args.command == "wait":
-    if args.timeout is not None and args.timeout < 0:
-        fail("--timeout must be non-negative")
     if args.poll_interval <= 0:
         fail("--poll-interval must be positive")
-    deadline = None if args.timeout is None else time.monotonic() + args.timeout
+    deadline = time.monotonic() + args.timeout
     while True:
         with operation_lock(exclusive=False):
             item = read_item(args.id)
@@ -571,9 +601,22 @@ if args.command == "wait":
         if not question_status and playback_status in ("generated", "played", "failed"):
             emit({"id": item["id"], "status": playback_status})
             raise SystemExit(0)
-        if deadline is not None and time.monotonic() >= deadline:
-            emit({"id": item["id"], "status": "timeout"})
-            raise SystemExit(124)
+        if time.monotonic() >= deadline:
+            waited = describe_duration(args.timeout)
+            next_wait = compact_duration(args.timeout)
+            menu_command = os.environ.get("TTS_MENU_SELF", "<skill-dir>/scripts/tts-menu")
+            wait_command = f"{menu_command} queue wait {item['id']} --timeout {next_wait}"
+            emit({
+                "id": item["id"],
+                "status": "pending",
+                "waited_seconds": args.timeout,
+                "guidance": (
+                    f"The user hasn't replied after {waited}. Decide whether their answer is needed now. "
+                    f"To block for another bounded interval, run: {wait_command}"
+                ),
+                "wait_command": wait_command,
+            })
+            raise SystemExit(0)
         time.sleep(args.poll_interval)
 
 now = int(time.time())

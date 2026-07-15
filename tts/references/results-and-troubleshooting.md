@@ -25,7 +25,7 @@ stable item ID and output path. `--no-play` cannot be combined with `--ask`.
 <skill-dir>/scripts/tts-menu status --json
 <skill-dir>/scripts/tts-menu queue list --mine
 <skill-dir>/scripts/tts-menu queue get <id>
-<skill-dir>/scripts/tts-menu queue wait <id>
+<skill-dir>/scripts/tts-menu queue wait <id> --timeout 5m
 ```
 
 Treat engagement as evidence, not proof that the user heard an update.
