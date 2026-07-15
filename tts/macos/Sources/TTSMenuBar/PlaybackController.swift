@@ -12,6 +12,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     @Published private(set) var isGloballyPaused = false
     @Published private(set) var isSystemOutputMuted = false
     @Published private(set) var generationProgressNow = Date()
+    @Published private(set) var historyTimestampNow = Date()
 
     private let store: QueueStore
     private let mediaController: MediaController
@@ -24,6 +25,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private var automaticallyPausedItemID: String?
     private var retryingItemIDs = Set<String>()
     private var started = false
+    private var lastHistoryTimestampRefresh = Date.distantPast
 
     init(
         store: QueueStore = QueueStore(),
@@ -421,6 +423,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     private func refresh() {
         do {
+            let now = Date()
             let persistedPause = store.isGlobalPlaybackPaused()
             if persistedPause != isGloballyPaused {
                 isGloballyPaused = persistedPause
@@ -436,7 +439,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                 items = loaded
             }
             if loaded.contains(where: { $0.status == .generating && !$0.isAttachmentPlayback }) {
-                generationProgressNow = Date()
+                generationProgressNow = now
+            }
+            if now.timeIntervalSince(lastHistoryTimestampRefresh) >= 1 {
+                historyTimestampNow = now
+                lastHistoryTimestampRefresh = now
             }
             if let player {
                 let nextTime = player.currentTime

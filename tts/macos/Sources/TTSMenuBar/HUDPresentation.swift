@@ -13,12 +13,23 @@ enum WorkspaceAccent {
     static let count = 360
 
     static func color(forWorkspacePath path: String?) -> Color {
-        let hue = Double(paletteIndex(forWorkspacePath: path)) / Double(count)
+        color(forStableLabel: projectLabel(forWorkspacePath: path))
+    }
+
+    static func color(forAgentName name: String) -> Color {
+        color(forStableLabel: "agent:\\(name)")
+    }
+
+    static func color(forStableLabel label: String) -> Color {
+        let hue = Double(paletteIndex(forStableLabel: label)) / Double(count)
         return Color(hue: hue, saturation: 0.58, brightness: 0.78)
     }
 
     static func paletteIndex(forWorkspacePath path: String?) -> Int {
-        let label = projectLabel(forWorkspacePath: path)
+        paletteIndex(forStableLabel: projectLabel(forWorkspacePath: path))
+    }
+
+    static func paletteIndex(forStableLabel label: String) -> Int {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in label.utf8 {
             hash ^= UInt64(byte)
