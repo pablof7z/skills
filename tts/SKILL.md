@@ -26,9 +26,12 @@ spoken update, put the words to say in `--message`:
 Keep the seed name and subject stable across the same work session. Write the
 subject in 5 to 10 words. Do not repeat the agent identity in the message.
 
-When an update has useful supporting material—a proposal, visual, detailed
-findings, or decision context—attach it. Treat supporting material as a normal
-part of a substantive update, not an exception:
+When an update has useful supporting material—screenshots, mockups, a proposal,
+detailed findings, or decision context—attach it. Attachments let the user
+expand a concise update in different directions: inspect visuals, open an
+auxiliary artifact, or hear expanded Markdown or text as a deeper narrated
+branch. Treat supporting material as a normal part of a substantive update, not
+an exception:
 
 ```bash
 <skill-dir>/scripts/tts \
