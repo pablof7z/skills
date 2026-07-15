@@ -13,6 +13,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private static let historyToolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
+    private static let historyBackItemIdentifier = NSToolbarItem.Identifier("TTSHistoryBack")
     private static let historyFilterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
     private static let historySearchItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearch")
 
@@ -44,6 +45,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     private var observedMiniPlayer: Bool
     private var isFading = false
     private var historyFilterToolbarItem: NSMenuToolbarItem?
+    private var historyBackToolbarItem: NSToolbarItem?
 
     /// Whether the controller drives the floating-HUD chrome. When `true` the
     /// controller owns the panel's frame and lifetime: custom edge-resize,
@@ -144,8 +146,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             presentation: presentation,
             sessionOpener: sessionOpener,
             isWindowedMode: windowedMode,
-            onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() },
-            onHide: { [weak self] in self?.dismissPlayerContent() }
+            onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() }
         )
         // The floating HUD is always a dark glass overlay by design; a normal
         // window should instead follow the system's light/dark appearance.
@@ -241,6 +242,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     func refresh() {
+        defer { updateHistoryBackButton() }
         updateWindowLevel()
         updateHistoryFilterMenu()
         synchronizePendingPreview()
@@ -254,22 +256,33 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             return
         }
         guard let item = playbackController.currentItem else {
-            if PendingQuestionRetention.shouldRetain(
+            if windowedMode {
+                if presentation.pendingPreviewItem != nil {
+                    if !panel.isVisible { showPlayer() }
+                } else {
+                    presentation.lingeringItem = nil
+                    presentation.lingeringTime = 0
+                    presentation.lingeringDuration = 0
+                    lastCurrentItem = nil
+                    activeItemID = nil
+                    sessionOpener.clear()
+                    showIdleIfNeeded()
+                }
+            } else if PendingQuestionRetention.shouldRetain(
                 lastCurrentItem: lastCurrentItem,
                 lingeringItem: presentation.lingeringItem
             ) {
                 sessionOpener.refresh(rawIdentifier: lastCurrentItem?.iTermSessionID)
                 beginLingerIfNeeded()
                 if !panel.isVisible { showPlayer() }
-            } else if windowedMode {
-                sessionOpener.clear()
-                showIdleIfNeeded()
             } else {
                 sessionOpener.refresh(rawIdentifier: lastCurrentItem?.iTermSessionID)
                 beginLingerIfNeeded()
             }
             return
         }
+
+        presentation.revealAutomatically(itemID: item.id)
 
         if presentation.lingeringItem != nil || lingerTask != nil || isFading {
             cancelLingerDismissal(resetCountdown: true, restoreOpacity: true)
@@ -375,16 +388,18 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             setPlayerVisible(false)
             return
         }
+        let hiddenItemID = playbackController.currentItem?.id
+            ?? presentation.pendingPreviewItem?.id
+            ?? presentation.lingeringItem?.id
+        presentation.showHistory(hiding: hiddenItemID)
         presentation.clearPendingPreview()
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
         presentation.lingeringDuration = 0
-        lastCurrentItem = nil
-        activeItemID = nil
-        if playbackController.currentItem != nil {
-            playbackController.stop()
-        }
+        lastCurrentItem = playbackController.currentItem
+        activeItemID = playbackController.currentItem?.id
         showIdleIfNeeded()
+        updateHistoryBackButton()
     }
 
     func toggleMiniPlayer() {
@@ -448,6 +463,19 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         toolbar.autosavesConfiguration = false
         panel.toolbarStyle = .unified
         panel.toolbar = toolbar
+    }
+
+    private func updateHistoryBackButton() {
+        guard windowedMode else { return }
+        let itemID = playbackController.currentItem?.id
+            ?? presentation.pendingPreviewItem?.id
+            ?? presentation.lingeringItem?.id
+        historyBackToolbarItem?.isEnabled = itemID != nil
+            && presentation.hiddenItemID != itemID
+    }
+
+    @objc private func navigateBackToHistory() {
+        dismissPlayerContent()
     }
 
     private func updateHistoryFilterMenu() {
@@ -603,6 +631,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     private func presentationDidChange() {
         updateQuestionInputAvailability()
+        updateHistoryBackButton()
         let miniPlayer = presentation.isMiniPlayer
         if miniPlayer != observedMiniPlayer {
             observedMiniPlayer = miniPlayer
@@ -824,11 +853,21 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
 extension NowSpeakingPanelController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.historySearchItemIdentifier, Self.historyFilterItemIdentifier]
+        [
+            Self.historyBackItemIdentifier,
+            .flexibleSpace,
+            Self.historySearchItemIdentifier,
+            Self.historyFilterItemIdentifier,
+        ]
     }
 
     func toolbarAllowedItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.historySearchItemIdentifier, Self.historyFilterItemIdentifier]
+        [
+            Self.historyBackItemIdentifier,
+            .flexibleSpace,
+            Self.historySearchItemIdentifier,
+            Self.historyFilterItemIdentifier,
+        ]
     }
 
     func toolbar(
@@ -837,6 +876,21 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
         willBeInsertedIntoToolbar _: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
+        case Self.historyBackItemIdentifier:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Back"
+            item.paletteLabel = "Back to Queue"
+            item.image = NSImage(
+                systemSymbolName: "chevron.left",
+                accessibilityDescription: "Back to queue"
+            )
+            item.target = self
+            item.action = #selector(navigateBackToHistory)
+            item.toolTip = "Back to queue"
+            item.isNavigational = true
+            historyBackToolbarItem = item
+            updateHistoryBackButton()
+            return item
         case Self.historySearchItemIdentifier:
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Search"
@@ -995,6 +1049,7 @@ private final class NowSpeakingPresentation: ObservableObject {
     @Published var historySearchQuery = ""
     @Published var isViewingArchive = false
     @Published private(set) var pendingPreviewItem: TTSItem?
+    @Published private(set) var hiddenItemID: String?
     private var hoverExitTask: Task<Void, Never>?
 
     init(isMiniPlayer: Bool) {
@@ -1042,7 +1097,24 @@ private final class NowSpeakingPresentation: ObservableObject {
     }
 
     func previewPendingItem(_ item: TTSItem) {
+        hiddenItemID = nil
         pendingPreviewItem = item
+        selectAttachment(nil)
+    }
+
+    func revealForDirectSelection(itemID _: String) {
+        hiddenItemID = nil
+    }
+
+    func revealAutomatically(itemID: String) {
+        hiddenItemID = PlayerNavigationPolicy.hiddenItemID(
+            afterAutomaticallySelecting: itemID,
+            currentlyHidden: hiddenItemID
+        )
+    }
+
+    func showHistory(hiding itemID: String?) {
+        hiddenItemID = itemID
         selectAttachment(nil)
     }
 
@@ -1077,6 +1149,19 @@ enum PendingQuestionRetention {
             lingeringItem: lingeringItem,
             lastCurrentItem: lastCurrentItem
         ) != nil
+    }
+}
+
+enum PlayerNavigationPolicy {
+    static func shouldDisplay(itemID: String?, hiddenItemID: String?) -> Bool {
+        itemID != nil && itemID != hiddenItemID
+    }
+
+    static func hiddenItemID(
+        afterAutomaticallySelecting itemID: String,
+        currentlyHidden hiddenItemID: String?
+    ) -> String? {
+        hiddenItemID == itemID ? hiddenItemID : nil
     }
 }
 
@@ -1629,7 +1714,6 @@ private struct NowSpeakingHUDView: View {
     @ObservedObject var sessionOpener: AgentSessionOpener
     let isWindowedMode: Bool
     let onToggleMiniPlayer: () -> Void
-    let onHide: () -> Void
     @State private var questionComposer = QuestionComposerModel()
     @StateObject private var answerEditorPresenter = AnswerEditorPresenter()
     @State private var isAnswerDropTarget = false
@@ -1768,17 +1852,6 @@ private struct NowSpeakingHUDView: View {
                     .accessibilityLabel("Open agent session")
                 }
 
-                Button {
-                    answerEditorPresenter.cancel()
-                    onHide()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Hide question")
-                .accessibilityLabel("Hide question")
             }
 
             if let primaryMessage = item.primaryMessage?.nonemptyValue {
@@ -2487,15 +2560,6 @@ private struct NowSpeakingHUDView: View {
                 .accessibilityLabel("Open agent session")
             }
 
-            Button(action: onHide) {
-                Image(systemName: "xmark")
-                    .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-            }
-            .buttonStyle(.plain)
-            .help(isWindowedMode ? "Back to history" : "Hide player")
-            .accessibilityLabel(isWindowedMode ? "Back to history" : "Hide player")
         }
     }
 
@@ -2827,15 +2891,6 @@ private struct NowSpeakingHUDView: View {
                     controller.togglePause()
                 }
             }
-            controlButton(symbol: "stop.fill", label: "Stop", accent: accent) {
-                if isPreviewingPending {
-                    presentation.clearPendingPreview()
-                } else if isLingering {
-                    presentation.lingeringItem = nil
-                } else {
-                    controller.stop()
-                }
-            }
             controlButton(symbol: "goforward.15", label: "Forward 15 seconds", accent: accent) {
                 if isLingering || isPreviewingPending {
                     controller.replay(
@@ -2898,7 +2953,12 @@ private struct NowSpeakingHUDView: View {
     }
 
     private var displayedItem: TTSItem? {
-        controller.currentItem ?? pendingPreviewItem ?? presentation.lingeringItem
+        let item = controller.currentItem ?? pendingPreviewItem ?? presentation.lingeringItem
+        guard PlayerNavigationPolicy.shouldDisplay(
+            itemID: item?.id,
+            hiddenItemID: presentation.hiddenItemID
+        ) else { return nil }
+        return item
     }
 
     private var pendingPreviewItem: TTSItem? {
@@ -2967,6 +3027,7 @@ private struct PlayerHistoryView: View {
                     PlayerHistoryRow(
                         item: item,
                         action: {
+                            presentation.revealForDirectSelection(itemID: item.id)
                             if item.status == .generating || item.isPendingQuestion {
                                 presentation.previewPendingItem(item)
                             } else {
@@ -3065,6 +3126,7 @@ private struct PlayerHistoryRow: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 8)
+                        questionIndicator
                         Text(item.timestampLabel(now: timestampNow))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tertiary)
@@ -3132,6 +3194,26 @@ private struct PlayerHistoryRow: View {
         return item.text
     }
 
+    @ViewBuilder
+    private var questionIndicator: some View {
+        if item.isPendingQuestion {
+            Label("Answer needed", systemImage: "questionmark.bubble.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.12), in: Capsule())
+                .help("Contains unanswered questions")
+                .accessibilityLabel("Unanswered questions")
+        } else if item.isQuestion {
+            Image(systemName: "questionmark.bubble")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .help("Contains questions")
+                .accessibilityLabel("Contains questions")
+        }
+    }
+
     private var summary: String {
         guard item.nowSpeakingTitle != detail else { return detail }
         return "\(item.nowSpeakingTitle) — \(detail)"
@@ -3143,6 +3225,8 @@ private struct PlayerHistoryRow: View {
 
     private var accessibilityLabel: String {
         let title = item.subjectLabel ?? item.text
+        if item.isPendingQuestion { return "Answer needed for \(title)" }
+        if item.isQuestion { return "Question item \(title)" }
         if item.status == .generating { return "Open pending update \(title)" }
         if item.status == .failed { return "Failed synthesis for \(title)" }
         return "Play now \(title)"
