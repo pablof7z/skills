@@ -46,6 +46,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     private var isFading = false
     private var historyFilterToolbarItem: NSMenuToolbarItem?
     private var historyBackToolbarItem: NSToolbarItem?
+    private var didBringToFrontForActiveContent = false
+    private var windowedOpacityTask: Task<Void, Never>?
 
     /// Whether the controller drives the floating-HUD chrome. When `true` the
     /// controller owns the panel's frame and lifetime: custom edge-resize,
@@ -99,6 +101,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         playerPreferencesObservation = playerPreferencesStore.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
                 self?.updateWindowLevel()
+                self?.updateWindowedOpacity()
             }
         }
         presentationObservation = presentation.objectWillChange.sink { [weak self] _ in
@@ -145,6 +148,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             controller: playbackController,
             presentation: presentation,
             sessionOpener: sessionOpener,
+            playerPreferencesStore: playerPreferencesStore,
             isWindowedMode: windowedMode,
             onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() }
         )
@@ -230,6 +234,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         setUpPanelObservations()
 
         activeItemID = nil
+        didBringToFrontForActiveContent = false
         lastCurrentItem = retainedPendingQuestion
         if playbackController.currentItem == nil {
             presentation.lingeringItem = retainedPendingQuestion
@@ -237,17 +242,19 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         if wasVisible {
             refresh()
         } else {
+            updateWindowLevel()
             updateActivationPolicy()
         }
     }
 
     func refresh() {
         defer { updateHistoryBackButton() }
-        updateWindowLevel()
         updateHistoryFilterMenu()
         synchronizePendingPreview()
         synchronizeLingeringQuestion()
         updateQuestionInputAvailability()
+        updateWindowLevel()
+        updateWindowedOpacity()
         guard isPlayerVisible else {
             sessionOpener.clear()
             if panel.isVisible || activeItemID != nil {
@@ -303,14 +310,21 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         if activeItemID != item.id {
             activeItemID = item.id
             if windowedMode, panel.isVisible {
-                // Leave the window exactly where the user placed/sized it; just surface it.
-                panel.orderFront(nil)
+                // Bring the window to the front once when active playback begins,
+                // unless the user asked for a strictly normal window that never
+                // auto-raises. Always-on-top modes are handled by updateWindowLevel.
+                if !didBringToFrontForActiveContent,
+                   playerPreferencesStore.preferences.floatnessMode == .bringToFrontWhenPlaying
+                {
+                    panel.orderFront(nil)
+                }
             } else {
                 showPlayer()
             }
         } else if !panel.isVisible {
             showPlayer()
         }
+        didBringToFrontForActiveContent = isShowingActiveContent
     }
 
     private func synchronizePendingPreview() {
@@ -449,10 +463,53 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     private func updateWindowLevel() {
         guard windowedMode else { return }
-        panel.level = playerPreferencesStore.preferences.keepsWindowOnTopWhilePlaying
-            && playbackController.isAudioPlaying
-            ? .floating
-            : .normal
+        let mode = playerPreferencesStore.preferences.floatnessMode
+        switch mode {
+        case .normal:
+            panel.level = .normal
+        case .bringToFrontWhenPlaying:
+            panel.level = .normal
+        case .alwaysOnTop:
+            panel.level = .floating
+        case .alwaysOnTopWhilePlaying:
+            panel.level = isShowingActiveContent ? .floating : .normal
+        }
+    }
+
+    /// Whether the windowed player is currently showing active playback content
+    /// (a current item, a lingering item, or a pending question) instead of the
+    /// idle history queue. This is what "while playing" means for floatness: a
+    /// pending question that is awaiting an answer keeps the player active even
+    /// after audio finishes, so the window stays on top until the user answers,
+    /// skips, or supersedes it.
+    private var isShowingActiveContent: Bool {
+        guard windowedMode else { return false }
+        if playbackController.currentItem != nil { return true }
+        if presentation.lingeringItem != nil { return true }
+        if presentation.pendingPreviewItem != nil { return true }
+        return false
+    }
+
+    /// Drives the windowed-player transparency. When the user is not hovering,
+    /// the window fades to the saved opacity; on hover it animates back to fully
+    /// opaque so the player is always readable while being used.
+    private func updateWindowedOpacity() {
+        guard windowedMode, panel.isVisible else { return }
+        let target = effectiveWindowedOpacity
+        guard abs(panel.alphaValue - target) > 0.001 else { return }
+        windowedOpacityTask?.cancel()
+        windowedOpacityTask = nil
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().alphaValue = target
+        }
+    }
+
+    private var effectiveWindowedOpacity: CGFloat {
+        guard windowedMode else { return 1 }
+        if presentation.isHovered { return 1 }
+        return CGFloat(playerPreferencesStore.preferences.windowOpacity)
     }
 
     private func configureHistoryToolbar() {
@@ -563,6 +620,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         presentation.lingeringItem = nil
         lastCurrentItem = nil
         activeItemID = nil
+        didBringToFrontForActiveContent = false
+        updateWindowLevel()
+        updateWindowedOpacity()
         guard !panel.isVisible else { return }
         showPlayer()
     }
@@ -581,8 +641,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
                 panel.animator().alphaValue = 1
             }
         } else {
-            // Windowed mode is a normal window: show it opaque, no fade.
-            panel.alphaValue = 1
+            // Windowed mode: start at the effective opacity (saved transparency
+            // unless hovered), then order front.
+            panel.alphaValue = effectiveWindowedOpacity
             NSApp.unhideWithoutActivation()
             panel.orderFront(nil)
         }
@@ -641,6 +702,13 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         let isHovered = presentation.isHovered
         guard isHovered != observedHover else { return }
         observedHover = isHovered
+
+        // Windowed-player transparency reacts to hover regardless of whether
+        // content is lingering; hovering always restores full opacity.
+        if windowedMode {
+            updateWindowedOpacity()
+        }
+
         guard playbackController.currentItem == nil, presentation.lingeringItem != nil else { return }
 
         // Pending questions remain available until answered, skipped, or
@@ -663,6 +731,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0
+        didBringToFrontForActiveContent = false
         sessionOpener.clear()
         panel.orderOut(nil)
         panel.alphaValue = 1
@@ -1712,6 +1781,7 @@ private struct NowSpeakingHUDView: View {
     @ObservedObject var controller: PlaybackController
     @ObservedObject var presentation: NowSpeakingPresentation
     @ObservedObject var sessionOpener: AgentSessionOpener
+    @ObservedObject var playerPreferencesStore: PlayerPreferencesStore
     let isWindowedMode: Bool
     let onToggleMiniPlayer: () -> Void
     @State private var questionComposer = QuestionComposerModel()
@@ -1719,6 +1789,7 @@ private struct NowSpeakingHUDView: View {
     @State private var isAnswerDropTarget = false
     @State private var primaryMessageContentHeight: CGFloat = 150
     @State private var previewPlaybackOffset: TimeInterval = 0
+    @State private var isQuickSettingsPresented = false
 
     var body: some View {
         if let item = displayedItem {
@@ -2867,6 +2938,9 @@ private struct NowSpeakingHUDView: View {
 
     private func controls(item: TTSItem, accent: Color) -> some View {
         HStack(spacing: 12) {
+            if isWindowedMode {
+                quickSettingsButton(accent: accent)
+            }
             playbackRateButton(item: item, accent: accent)
             controlButton(symbol: "gobackward.15", label: "Back 15 seconds", accent: accent) {
                 if isLingering || isPreviewingPending {
@@ -2903,6 +2977,24 @@ private struct NowSpeakingHUDView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func quickSettingsButton(accent: Color) -> some View {
+        Button {
+            isQuickSettingsPresented.toggle()
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(Color.white.opacity(0.09), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Player floatness and transparency")
+        .accessibilityLabel("Player floatness and transparency")
+        .popover(isPresented: $isQuickSettingsPresented, arrowEdge: .bottom) {
+            QuickSettingsPopover(playerPreferencesStore: playerPreferencesStore)
+        }
     }
 
     private func playbackRateButton(item: TTSItem, accent: Color) -> some View {
@@ -3271,6 +3363,66 @@ private struct PlayerSurfaceStyle: ViewModifier {
                 .hudSurface(accent: accent)
                 .padding(8)
         }
+    }
+}
+
+private struct QuickSettingsPopover: View {
+    @ObservedObject var playerPreferencesStore: PlayerPreferencesStore
+
+    private var floatnessMode: Binding<FloatnessMode> {
+        Binding(
+            get: { playerPreferencesStore.preferences.floatnessMode },
+            set: { playerPreferencesStore.setFloatnessMode($0) }
+        )
+    }
+
+    private var windowOpacity: Binding<Double> {
+        Binding(
+            get: { playerPreferencesStore.preferences.windowOpacity },
+            set: { playerPreferencesStore.setWindowOpacity($0) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Floatness", systemImage: "pin")
+                    .font(.headline)
+                Picker("Floatness", selection: floatnessMode) {
+                    ForEach(FloatnessMode.allCases, id: \.self) { mode in
+                        Label(mode.label, systemImage: mode.symbolName).tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                Text("\"While playing\" keeps the window on top until a pending question is answered, skipped, or superseded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Transparency", systemImage: "circle.lefthalf.filled")
+                        .font(.headline)
+                    Spacer()
+                    Text(String(
+                        format: "%d%%",
+                        Int((1.0 - playerPreferencesStore.preferences.windowOpacity) * 100)
+                    ))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                }
+                Slider(value: windowOpacity, in: 0.2...1.0, step: 0.05)
+                Text("Hovering the player returns it to fully opaque.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(18)
+        .frame(width: 280)
     }
 }
 

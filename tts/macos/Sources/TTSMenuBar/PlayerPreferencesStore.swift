@@ -3,16 +3,46 @@ import Combine
 import Foundation
 import SwiftUI
 
+enum FloatnessMode: String, Codable, CaseIterable, Equatable {
+    case normal
+    case bringToFrontWhenPlaying
+    case alwaysOnTop
+    case alwaysOnTopWhilePlaying
+
+    var label: String {
+        switch self {
+        case .normal: "Normal"
+        case .bringToFrontWhenPlaying: "Bring to front when playing"
+        case .alwaysOnTop: "Always on top"
+        case .alwaysOnTopWhilePlaying: "Always on top while playing"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .normal: "rectangle"
+        case .bringToFrontWhenPlaying: "arrow.up.to.line"
+        case .alwaysOnTop: "pin.fill"
+        case .alwaysOnTopWhilePlaying: "pin"
+        }
+    }
+
+    static let defaultMode: FloatnessMode = .bringToFrontWhenPlaying
+}
+
 struct PlayerPreferences: Codable, Equatable {
     var pausesMedia: Bool
     var mediaHandoffDelay: Double
     var mediaResumeDelay: Double
-    var keepsWindowOnTopWhilePlaying: Bool
+    var floatnessMode: FloatnessMode
+    var windowOpacity: Double
 
     enum CodingKeys: String, CodingKey {
         case pausesMedia
         case mediaHandoffDelay
         case mediaResumeDelay
+        case floatnessMode
+        case windowOpacity
         case keepsWindowOnTopWhilePlaying
     }
 
@@ -20,12 +50,14 @@ struct PlayerPreferences: Codable, Equatable {
         pausesMedia: Bool = true,
         mediaHandoffDelay: Double = 2,
         mediaResumeDelay: Double = 3,
-        keepsWindowOnTopWhilePlaying: Bool = false
+        floatnessMode: FloatnessMode = .defaultMode,
+        windowOpacity: Double = 1.0
     ) {
         self.pausesMedia = pausesMedia
         self.mediaHandoffDelay = mediaHandoffDelay
         self.mediaResumeDelay = mediaResumeDelay
-        self.keepsWindowOnTopWhilePlaying = keepsWindowOnTopWhilePlaying
+        self.floatnessMode = floatnessMode
+        self.windowOpacity = Self.clampOpacity(windowOpacity)
     }
 
     init(from decoder: Decoder) throws {
@@ -37,14 +69,35 @@ struct PlayerPreferences: Codable, Equatable {
         mediaResumeDelay = Self.clamp(
             try container.decodeIfPresent(Double.self, forKey: .mediaResumeDelay) ?? 3
         )
-        keepsWindowOnTopWhilePlaying = try container.decodeIfPresent(
-            Bool.self,
-            forKey: .keepsWindowOnTopWhilePlaying
-        ) ?? false
+        if let mode = try container.decodeIfPresent(FloatnessMode.self, forKey: .floatnessMode) {
+            floatnessMode = mode
+        } else {
+            let legacy = try container.decodeIfPresent(
+                Bool.self,
+                forKey: .keepsWindowOnTopWhilePlaying
+            ) ?? false
+            floatnessMode = legacy ? .alwaysOnTopWhilePlaying : .defaultMode
+        }
+        windowOpacity = Self.clampOpacity(
+            try container.decodeIfPresent(Double.self, forKey: .windowOpacity) ?? 1.0
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pausesMedia, forKey: .pausesMedia)
+        try container.encode(mediaHandoffDelay, forKey: .mediaHandoffDelay)
+        try container.encode(mediaResumeDelay, forKey: .mediaResumeDelay)
+        try container.encode(floatnessMode, forKey: .floatnessMode)
+        try container.encode(windowOpacity, forKey: .windowOpacity)
     }
 
     static func clamp(_ delay: Double) -> Double {
         min(max(delay, 0), 10)
+    }
+
+    static func clampOpacity(_ opacity: Double) -> Double {
+        min(max(opacity, 0.2), 1.0)
     }
 }
 
@@ -71,7 +124,15 @@ final class PlayerPreferencesStore: ObservableObject {
     }
 
     func setKeepsWindowOnTopWhilePlaying(_ keepsOnTop: Bool) {
-        update { $0.keepsWindowOnTopWhilePlaying = keepsOnTop }
+        setFloatnessMode(keepsOnTop ? .alwaysOnTopWhilePlaying : .defaultMode)
+    }
+
+    func setFloatnessMode(_ mode: FloatnessMode) {
+        update { $0.floatnessMode = mode }
+    }
+
+    func setWindowOpacity(_ opacity: Double) {
+        update { $0.windowOpacity = PlayerPreferences.clampOpacity(opacity) }
     }
 
     private func update(_ mutation: (inout PlayerPreferences) -> Void) {
@@ -113,7 +174,7 @@ final class PlayerPreferencesWindowController: NSWindowController, NSWindowDeleg
         let view = PlayerPreferencesView(preferencesStore: preferencesStore)
         let hostingController = NSHostingController(rootView: view)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -175,10 +236,17 @@ private struct PlayerPreferencesView: View {
         )
     }
 
-    private var keepsWindowOnTopWhilePlaying: Binding<Bool> {
+    private var floatnessMode: Binding<FloatnessMode> {
         Binding(
-            get: { preferencesStore.preferences.keepsWindowOnTopWhilePlaying },
-            set: { preferencesStore.setKeepsWindowOnTopWhilePlaying($0) }
+            get: { preferencesStore.preferences.floatnessMode },
+            set: { preferencesStore.setFloatnessMode($0) }
+        )
+    }
+
+    private var windowOpacity: Binding<Double> {
+        Binding(
+            get: { preferencesStore.preferences.windowOpacity },
+            set: { preferencesStore.setWindowOpacity($0) }
         )
     }
 
@@ -205,11 +273,30 @@ private struct PlayerPreferencesView: View {
             }
 
             GroupBox("Windowed Player") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Keep window on top while speaking", isOn: keepsWindowOnTopWhilePlaying)
-                    Text("Applies only in Windowed Player mode. The floating HUD already stays on top.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Floatness", selection: floatnessMode) {
+                        ForEach(FloatnessMode.allCases, id: \.self) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Window transparency")
+                            Spacer()
+                            Text(String(
+                                format: "%d%%",
+                                Int((1.0 - preferencesStore.preferences.windowOpacity) * 100)
+                            ))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                        }
+                        Slider(value: windowOpacity, in: 0.2...1.0, step: 0.05)
+                        Text("Makes the windowed player translucent. Hovering the player returns it to fully opaque.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .padding(.vertical, 4)
             }
@@ -217,7 +304,7 @@ private struct PlayerPreferencesView: View {
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 460, height: 360, alignment: .topLeading)
+        .frame(width: 460, height: 420, alignment: .topLeading)
     }
 
     private func delayStepper(title: String, value: Binding<Double>) -> some View {
