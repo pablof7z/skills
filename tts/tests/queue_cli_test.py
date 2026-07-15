@@ -12,7 +12,7 @@ import tempfile
 import threading
 import unittest
 
-from tts.tests.attachment_flow_test import BlockingKokoroHandler, KokoroHandler
+from tts.tests.tts_test_support import BlockingKokoroHandler, KokoroHandler
 from http.server import ThreadingHTTPServer
 
 
