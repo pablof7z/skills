@@ -85,13 +85,77 @@ struct QueueStoreTests {
         store.setPausesMedia(false)
         store.setMediaHandoffDelay(1.5)
         store.setMediaResumeDelay(4.5)
-        store.setKeepsWindowOnTopWhilePlaying(true)
+        store.setFloatnessMode(.alwaysOnTop)
+        store.setWindowOpacity(0.6)
 
         let reloaded = PlayerPreferencesStore(stateDirectory: directory)
         #expect(!reloaded.preferences.pausesMedia)
         #expect(reloaded.preferences.mediaHandoffDelay == 1.5)
         #expect(reloaded.preferences.mediaResumeDelay == 4.5)
-        #expect(reloaded.preferences.keepsWindowOnTopWhilePlaying)
+        #expect(reloaded.preferences.floatnessMode == .alwaysOnTop)
+        #expect(reloaded.preferences.windowOpacity == 0.6)
+    }
+
+    @Test @MainActor
+    func migratesLegacyKeepOnTopPreferenceToFloatnessMode() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacy = """
+        {
+          "pausesMedia": true,
+          "mediaHandoffDelay": 2,
+          "mediaResumeDelay": 3,
+          "keepsWindowOnTopWhilePlaying": true
+        }
+        """
+        try? FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try? legacy.write(
+            to: directory.appendingPathComponent("player-preferences.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = PlayerPreferencesStore(stateDirectory: directory)
+        #expect(store.preferences.floatnessMode == .alwaysOnTopWhilePlaying)
+        #expect(store.preferences.windowOpacity == 1.0)
+    }
+
+    @Test @MainActor
+    func defaultsFloatnessModeToBringToFrontWhenLegacyPrefIsFalse() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacy = """
+        {
+          "keepsWindowOnTopWhilePlaying": false
+        }
+        """
+        try? FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try? legacy.write(
+            to: directory.appendingPathComponent("player-preferences.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let store = PlayerPreferencesStore(stateDirectory: directory)
+        #expect(store.preferences.floatnessMode == .bringToFrontWhenPlaying)
+    }
+
+    @Test @MainActor
+    func clampsWindowOpacityToValidRange() {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PlayerPreferencesStore(stateDirectory: directory)
+
+        store.setWindowOpacity(0.1)
+        #expect(store.preferences.windowOpacity == 0.2)
+        store.setWindowOpacity(1.5)
+        #expect(store.preferences.windowOpacity == 1.0)
     }
 
     @Test
