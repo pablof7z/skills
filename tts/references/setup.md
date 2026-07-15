@@ -13,7 +13,7 @@ Set this environment variable before running `<skill-dir>/scripts/tts`:
 - `KOKORO_API_KEY` for bearer-token auth
 - `KOKORO_CAPTIONED_API_ENDPOINT` to override the inferred
   `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
-- Swift from Xcode or the Command Line Tools for the macOS menu-bar app
+- Swift from Xcode or the Command Line Tools for the macOS app
 
 ## Suggested local env file
 

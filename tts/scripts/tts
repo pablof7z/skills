@@ -926,12 +926,12 @@ PY
     if command -v osascript >/dev/null 2>&1; then
       system_muted="$(osascript -e 'output muted of (get volume settings)' 2>/dev/null || printf 'false')"
     fi
-    printf 'Queued TTS in macOS menu bar: %s (%s queued)\n' "$item_id" "$queued_count" >&2
+    printf 'Queued TTS in macOS app: %s (%s queued)\n' "$item_id" "$queued_count" >&2
     if [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; then
       printf 'Attached %s durable item(s): %s\n' "${#ATTACHMENT_PATHS[@]}" "$ITEM_DIRECTORY/attachments" >&2
     fi
     if [ "$global_pause" = "paused" ]; then
-      echo "All TTS playback is paused. This audio was generated and queued, but it will not play until TTS is resumed from the menu bar." >&2
+      echo "All TTS playback is paused. This audio was generated and queued, but it will not play until TTS is resumed in the TTS app." >&2
     fi
     if [ "$system_muted" = "true" ]; then
       echo "System output is muted. This audio was generated and queued; TTS playback is paused automatically until output is unmuted." >&2
