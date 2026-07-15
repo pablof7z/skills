@@ -30,10 +30,11 @@ The workflow owns more than text generation:
 - A compact speed label on the floating player cycles through common playback rates and remembers the selected rate independently for each voice.
 - The menu-bar popup stays focused on queue operations—now playing, up next, and recent items—without duplicating the player or transcript.
 - In windowed mode, history keeps an update at its original generation time even when replayed. Fresh updates use compact relative times for their first day, then an absolute timestamp. The native titlebar toolbar keeps search beside the history filter; the filter menu switches between recent and archived updates. Swipe left on an update to archive it, or restore it from the archived view.
+- Preferences can keep the Windowed Player above other windows only while it is speaking; paused and idle history always return to normal window level.
 - The menu-bar popup can pause or resume all TTS playback without discarding queued audio. Its menu-bar badge shows how many items are waiting, and each generation reports the queue count plus a clear warning when global playback is paused.
-- Right-clicking the TTS status item exposes Show/Hide Player and Pause/Resume All as a compact native quick menu; left-click still opens the queue popup.
+- Right-clicking the TTS status item exposes Show/Hide Player, Pause/Resume All, and Preferences as a compact native quick menu; `Command`+`,` opens Preferences whenever the TTS app is active.
 - Muted macOS system output automatically pauses TTS without losing its position. Playback resumes after unmute only when mute caused the pause, and the generator tells the agent that the queued speech was not audible.
-- Music and Spotify keep playing during generation. After the MP3 arrives, active media can be paused; when something was actually paused, a short handoff keeps speech from starting on top of the transition. Paused media resumes afterward.
+- Music and Spotify keep playing during generation. After the MP3 arrives, the player can pause active media according to its local Preferences, then resumes only what it paused after the configured delay.
 
 The result is ambient awareness with provenance: you can hear that something changed, know which agent changed it, and revisit the exact words later.
 
@@ -57,6 +58,6 @@ Use `./scripts/tts-menu status` to inspect current playback and queue counts. Us
 
 ## What it touches
 
-`tts` sends the supplied message and narratable text attachments to the endpoint you configure. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, keeps queue state under `~/.local/state/tts`, and may pause or resume supported media apps on macOS. Set `TTS_SESSIONS_ROOT` to override the durable brief location and `TTS_MEDIA_CONTROL=0` to disable media control.
+`tts` sends the supplied message and narratable text attachments to the endpoint you configure. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state under `~/.local/state/tts`. On macOS, the player can pause and resume supported media apps according to its local Preferences. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
 
 See [setup](references/setup.md) for endpoint configuration and [SKILL.md](SKILL.md) for the exact agent-facing writing and invocation rules.

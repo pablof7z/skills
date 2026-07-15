@@ -5,10 +5,10 @@ import Foundation
 final class MediaController {
     private var pausedApps: [String] = []
     private var resumeTask: Task<Void, Never>?
-    private let environment: [String: String]
+    private let preferencesStore: PlayerPreferencesStore
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
-        self.environment = environment
+    init(preferencesStore: PlayerPreferencesStore) {
+        self.preferencesStore = preferencesStore
     }
 
     func pausePlayingApps() -> Bool {
@@ -51,16 +51,20 @@ final class MediaController {
         }
     }
 
+    var mediaHandoffDelay: TimeInterval {
+        preferencesStore.preferences.mediaHandoffDelay
+    }
+
+    var mediaResumeDelay: TimeInterval {
+        preferencesStore.preferences.mediaResumeDelay
+    }
+
     private var mediaControlEnabled: Bool {
-        let value = environment["TTS_MEDIA_CONTROL"]?.lowercased() ?? "1"
-        return !["0", "false", "no", "off"].contains(value)
+        preferencesStore.preferences.pausesMedia
     }
 
     private var mediaApps: [String] {
-        (environment["TTS_MEDIA_APPS"] ?? "Music,Spotify")
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        ["Music", "Spotify"]
     }
 
     private func appIsRunning(_ name: String) -> Bool {

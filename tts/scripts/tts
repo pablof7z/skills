@@ -179,9 +179,6 @@ usage() {
   echo "  --suggestions json         Suggested answers as JSON [[title, description], ...]." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
   echo "  --no-play                  Generate without playback; JSON output includes the MP3 path." >&2
-  echo "  --no-media-pause           Do not pause/resume media apps." >&2
-  echo "  --handoff-delay seconds    Gap after pausing active media before speech (default: 2)." >&2
-  echo "  --resume-delay seconds     Delay before resuming paused media." >&2
   echo "Example: ./scripts/tts --message 'The fix is ready.' --attach 'Why this matters' ./why.md --attach 'Screenshot' ./screen.png" >&2
 }
 
@@ -191,9 +188,6 @@ ASK_PAYLOAD_SOURCE=""
 SUGGESTIONS_JSON="[]"
 RAW_BUNDLE_JSON=""
 QUESTION_BUNDLE_FILE=""
-MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
-HANDOFF_DELAY="${TTS_MEDIA_HANDOFF_DELAY_SECONDS:-2}"
-RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
 SUBJECT=""
 AGENT_NAME=""
 VOICE_ID=""
@@ -595,7 +589,6 @@ write_macos_item_record() {
     "$ATTACHMENT_MANIFEST" \
     "$ITEM_DIRECTORY" \
     "$SCRIPT_DIR/tts" \
-    "$HANDOFF_DELAY" \
     "$ITEM_CREATED_AT" \
     "$status" \
     "$completed_at" \
@@ -626,7 +619,6 @@ import tempfile
     attachment_manifest,
     asset_directory,
     retry_command,
-    media_handoff_delay,
     created_at,
     status,
     completed_at,
@@ -723,7 +715,6 @@ item = {
     "duration": None,
     "error": optional(error),
     "word_timings": word_timings,
-    "media_handoff_delay": float(media_handoff_delay),
     "attachments": attachments,
     "asset_directory": optional(asset_directory),
     "retry_command": optional(retry_command),
@@ -783,11 +774,7 @@ begin_macos_generation() {
     return 1
   fi
 
-  if env \
-    TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
-    TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
-    TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
-    "$menu_command" start >/dev/null; then
+  if "$menu_command" start >/dev/null; then
     MACOS_GENERATION_ACTIVE=1
     MACOS_ITEM_FILE="$item_file"
     return 0
@@ -887,12 +874,7 @@ queue_macos_playback() {
     return 1
   fi
 
-  resume_paused_media 0
-  if env \
-    TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
-    TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
-    TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
-    "$menu_command" start >/dev/null; then
+  if "$menu_command" start >/dev/null; then
     MACOS_GENERATION_ACTIVE=0
     MACOS_ITEM_FILE="$item_file"
     if python3 - "$item_file" <<'PY'
@@ -1006,26 +988,6 @@ while [ "$#" -gt 0 ]; do
         exit 1
       fi
       SUGGESTIONS_JSON="$2"
-      shift 2
-      ;;
-    --no-media-pause)
-      MEDIA_CONTROL=0
-      shift
-      ;;
-    --handoff-delay)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --handoff-delay requires a value in seconds." >&2
-        exit 1
-      fi
-      HANDOFF_DELAY="$2"
-      shift 2
-      ;;
-    --resume-delay)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --resume-delay requires a value in seconds." >&2
-        exit 1
-      fi
-      RESUME_DELAY="$2"
       shift 2
       ;;
     --agent-name)
@@ -1278,11 +1240,6 @@ if [ -n "$VOICE_ID" ] && [ -n "${POSITIONAL[1]:-}" ]; then
   exit 1
 fi
 
-if ! [[ "$HANDOFF_DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-  echo "Error: --handoff-delay must be a non-negative number of seconds." >&2
-  exit 1
-fi
-
 if [ -n "$RAW_BUNDLE_JSON" ]; then
   DISPLAY_TEXT="$(python3 - "$RAW_BUNDLE_JSON" <<'PY'
 import json
@@ -1377,85 +1334,6 @@ TMP_ERR="/tmp/tts_error_${RANDOM}.log"
 CAPTION_RESPONSE_FILE="/tmp/tts_caption_${RANDOM}.json"
 TIMESTAMPS_FILE="${TTS_TIMESTAMPS_FILE:-$ITEM_DIRECTORY/message-timings.json}"
 mkdir -p "$(dirname -- "$OUTPUT_FILE")" "$(dirname -- "$TIMESTAMPS_FILE")"
-PAUSED_MEDIA_APPS=()
-
-media_control_enabled() {
-  case "$MEDIA_CONTROL" in
-    0|false|False|FALSE|no|No|NO|off|Off|OFF)
-      return 1
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-}
-
-app_is_running() {
-  local app="$1"
-  pgrep -x "$app" >/dev/null 2>&1
-}
-
-scriptable_player_state() {
-  local app="$1"
-  osascript -e "tell application \"$app\" to player state as string" 2>/dev/null || true
-}
-
-scriptable_player_command() {
-  local app="$1"
-  local command="$2"
-  osascript -e "tell application \"$app\" to $command" >/dev/null 2>&1
-}
-
-pause_media_if_playing() {
-  if ! media_control_enabled || ! command -v osascript >/dev/null 2>&1 || ! command -v pgrep >/dev/null 2>&1; then
-    return
-  fi
-
-  local app state
-  local paused_now=()
-  local media_apps="${TTS_MEDIA_APPS:-Music,Spotify}"
-  local old_ifs="$IFS"
-  IFS=','
-  # shellcheck disable=SC2206
-  local apps=($media_apps)
-  IFS="$old_ifs"
-
-  for app in "${apps[@]}"; do
-    app=$(printf '%s' "$app" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    if [ -z "$app" ] || ! app_is_running "$app"; then
-      continue
-    fi
-
-    state="$(scriptable_player_state "$app")"
-    if [ "$state" = "playing" ]; then
-      if scriptable_player_command "$app" "pause"; then
-        PAUSED_MEDIA_APPS+=("$app")
-        paused_now+=("$app")
-      fi
-    fi
-  done
-
-  if [ "${#paused_now[@]}" -gt 0 ]; then
-    echo "Paused media: ${paused_now[*]}" >&2
-  fi
-}
-
-resume_paused_media() {
-  if [ "${#PAUSED_MEDIA_APPS[@]}" -eq 0 ]; then
-    return
-  fi
-
-  local delay="${1:-$RESUME_DELAY}"
-  sleep "$delay" 2>/dev/null || true
-
-  local app
-  for app in "${PAUSED_MEDIA_APPS[@]}"; do
-    if app_is_running "$app"; then
-      scriptable_player_command "$app" "play" || true
-    fi
-  done
-  PAUSED_MEDIA_APPS=()
-}
 
 cleanup() {
   local exit_code=$?
@@ -1465,7 +1343,6 @@ cleanup() {
     mark_macos_generation_failed
   fi
   rm -f "$TMP_ERR" "$CAPTION_RESPONSE_FILE"
-  resume_paused_media
   release_speech_gate
   exit "$exit_code"
 }
@@ -1526,10 +1403,6 @@ if [ -n "$PLAY_EXISTING_FILE" ]; then
   fi
 
   acquire_speech_gate
-  pause_media_if_playing
-  if [ "${#PAUSED_MEDIA_APPS[@]}" -gt 0 ]; then
-    sleep "$HANDOFF_DELAY" 2>/dev/null || true
-  fi
 
   update_existing_playback_status "playing"
   if command -v afplay >/dev/null 2>&1; then
@@ -1735,9 +1608,6 @@ if [ -n "$AGENT_NAME" ]; then
 fi
 nohup env \
   TTS_CALLER_PPID="${TTS_CALLER_PPID:-$PPID}" \
-  TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
-  TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
-  TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
   TTS_ITEM_ID="$ITEM_ID" \
   "$0" "${playback_args[@]}" \
   </dev/null >>"$log_file" 2>&1 &

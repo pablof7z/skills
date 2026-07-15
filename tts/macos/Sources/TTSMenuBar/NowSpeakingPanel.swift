@@ -18,6 +18,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     private let playbackController: PlaybackController
     private let preferencesStore: HUDPreferencesStore
+    private let playerPreferencesStore: PlayerPreferencesStore
     private let presentation: NowSpeakingPresentation
     private let sessionOpener: AgentSessionOpener
     private var panel: NSWindow
@@ -25,6 +26,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     @Published private(set) var isPlayerVisible: Bool
     @Published private(set) var isWindowedMode: Bool
     private var playbackObservation: AnyCancellable?
+    private var playerPreferencesObservation: AnyCancellable?
     private var presentationObservation: AnyCancellable?
     private var screenObservation: AnyCancellable?
     private var moveObservation: AnyCancellable?
@@ -66,10 +68,12 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     init(
         controller: PlaybackController,
         preferencesStore: HUDPreferencesStore,
+        playerPreferencesStore: PlayerPreferencesStore,
         sessionOpener: AgentSessionOpener = AgentSessionOpener()
     ) {
         playbackController = controller
         self.preferencesStore = preferencesStore
+        self.playerPreferencesStore = playerPreferencesStore
         self.sessionOpener = sessionOpener
         let windowed = preferencesStore.preferences.isWindowedModeEnabled
         windowedMode = windowed
@@ -88,6 +92,11 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         playbackObservation = controller.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
+            }
+        }
+        playerPreferencesObservation = playerPreferencesStore.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in
+                self?.updateWindowLevel()
             }
         }
         presentationObservation = presentation.objectWillChange.sink { [weak self] _ in
@@ -224,6 +233,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     func refresh() {
+        updateWindowLevel()
         updateHistoryFilterMenu()
         synchronizePendingPreview()
         synchronizeLingeringQuestion()
@@ -312,6 +322,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     func shutdown() {
         playbackObservation?.cancel()
+        playerPreferencesObservation?.cancel()
         presentationObservation?.cancel()
         screenObservation?.cancel()
         moveObservation?.cancel()
@@ -387,6 +398,14 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             panel.setAccessibilityLabel("Now speaking")
             configureResizeLimits(expanded: true)
         }
+    }
+
+    private func updateWindowLevel() {
+        guard windowedMode else { return }
+        panel.level = playerPreferencesStore.preferences.keepsWindowOnTopWhilePlaying
+            && playbackController.isAudioPlaying
+            ? .floating
+            : .normal
     }
 
     private func configureHistoryToolbar() {

@@ -17,12 +17,18 @@ struct TTSMenuBarApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = QueueStore()
-    private lazy var controller = PlaybackController(store: store)
+    private lazy var playerPreferencesStore = PlayerPreferencesStore(stateDirectory: store.stateDirectory)
+    private lazy var mediaController = MediaController(preferencesStore: playerPreferencesStore)
+    private lazy var controller = PlaybackController(store: store, mediaController: mediaController)
     private lazy var hudPreferencesStore = HUDPreferencesStore(stateDirectory: store.stateDirectory)
     private lazy var instanceLock = MenuInstanceLock(store: store)
     private lazy var nowSpeakingPanel = NowSpeakingPanelController(
         controller: controller,
-        preferencesStore: hudPreferencesStore
+        preferencesStore: hudPreferencesStore,
+        playerPreferencesStore: playerPreferencesStore
+    )
+    private lazy var preferencesWindowController = PlayerPreferencesWindowController(
+        preferencesStore: playerPreferencesStore
     )
     private var statusItem: NSStatusItem?
     private var controllerObservation: AnyCancellable?
@@ -35,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        configureMainMenu()
         configureStatusItem()
         nowSpeakingPanel.refresh()
         controller.start()
@@ -70,6 +77,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         updateStatusItem()
+    }
+
+    private func configureMainMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+
+        let appMenu = NSMenu(title: "TTS")
+        appMenuItem.submenu = appMenu
+        let preferencesItem = NSMenuItem(
+            title: "Preferences…",
+            action: #selector(showPreferences),
+            keyEquivalent: ","
+        )
+        preferencesItem.keyEquivalentModifierMask = [.command]
+        preferencesItem.target = self
+        appMenu.addItem(preferencesItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func showQuickMenu(for event: NSEvent, button: NSStatusBarButton) {
@@ -112,6 +137,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pauseItem.target = self
         menu.addItem(pauseItem)
 
+        menu.addItem(.separator())
+        let preferencesItem = NSMenuItem(
+            title: "Preferences…",
+            action: #selector(showPreferences),
+            keyEquivalent: ","
+        )
+        preferencesItem.keyEquivalentModifierMask = [.command]
+        preferencesItem.target = self
+        menu.addItem(preferencesItem)
+
         NSMenu.popUpContextMenu(menu, with: event, for: button)
     }
 
@@ -128,6 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func toggleGlobalPlaybackFromQuickMenu() {
         controller.toggleGlobalPlaybackPause()
+    }
+
+    @objc
+    private func showPreferences() {
+        preferencesWindowController.show()
     }
 
     private func updateStatusItem() {
