@@ -13,7 +13,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     @Published private(set) var isSystemOutputMuted = false
     @Published private(set) var isAudioPlaying = false
     @Published private(set) var generationProgressNow = Date()
-    @Published private(set) var historyTimestampNow = Date()
+    let historyTimestampClock = HistoryTimestampClock()
+    private(set) var historyRevision = 0
 
     private let store: QueueStore
     private let mediaController: MediaController
@@ -27,7 +28,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private var retryingItemIDs = Set<String>()
     private var isAutomaticQueueAdvanceDeferred = false
     private var started = false
-    private var lastHistoryTimestampRefresh = Date.distantPast
+    private var lastItemsChangeToken: Date?
 
     init(
         store: QueueStore = QueueStore(),
@@ -469,17 +470,19 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                 isSystemOutputMuted = outputMuted
                 updatePlaybackForBlockingState()
             }
-            let loaded = try store.loadItems()
-            if loaded != items {
+            let itemsChangeToken = try store.itemsChangeToken()
+            let shouldReloadItems = itemsChangeToken != lastItemsChangeToken
+            let loaded = shouldReloadItems ? try store.loadItems() : items
+            lastItemsChangeToken = itemsChangeToken
+            let historyChanged = shouldReloadItems && loaded != items
+            if historyChanged {
+                historyRevision &+= 1
                 items = loaded
             }
             if loaded.contains(where: { $0.status == .generating && !$0.isAttachmentPlayback }) {
                 generationProgressNow = now
             }
-            if now.timeIntervalSince(lastHistoryTimestampRefresh) >= 1 {
-                historyTimestampNow = now
-                lastHistoryTimestampRefresh = now
-            }
+            historyTimestampClock.update(items: loaded, at: now, reschedule: historyChanged)
             if let player {
                 let nextTime = player.currentTime
                 let nextDuration = player.duration
@@ -749,6 +752,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     private func replaceItem(_ item: TTSItem) {
+        historyRevision &+= 1
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
         } else {
@@ -760,6 +764,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                 return $0.createdAt < $1.createdAt
             }
         }
+        historyTimestampClock.update(items: items, at: Date(), reschedule: true)
     }
 
     private func recordDirectInteraction() {
@@ -813,6 +818,42 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             item.engagement = .unattendedLikely
         } else {
             item.engagement = .unknown
+        }
+    }
+}
+
+@MainActor
+final class HistoryTimestampClock: ObservableObject {
+    @Published private(set) var now: Date
+    private var nextUpdateAt: Date
+
+    init(now: Date = Date()) {
+        self.now = now
+        nextUpdateAt = .distantPast
+    }
+
+    func update(items: [TTSItem], at candidate: Date, reschedule: Bool = false) {
+        guard reschedule || candidate >= nextUpdateAt else { return }
+        now = candidate
+        nextUpdateAt = HistoryTimestampPolicy.nextUpdate(after: candidate, items: items)
+    }
+}
+
+enum HistoryTimestampPolicy {
+    static func nextUpdate(after now: Date, items: [TTSItem]) -> Date {
+        items.reduce(Date.distantFuture) { earliest, item in
+            let elapsed = max(0, now.timeIntervalSince(item.createdDate))
+            let nextElapsed: TimeInterval
+            if elapsed < 60 {
+                nextElapsed = 60
+            } else if elapsed < 3_600 {
+                nextElapsed = (floor(elapsed / 60) + 1) * 60
+            } else if elapsed < 86_400 {
+                nextElapsed = (floor(elapsed / 3_600) + 1) * 3_600
+            } else {
+                return earliest
+            }
+            return min(earliest, item.createdDate.addingTimeInterval(nextElapsed))
         }
     }
 }

@@ -19,6 +19,19 @@ struct QueueStoreTests {
     }
 
     @Test
+    func itemChangeTokenAdvancesAfterAnAtomicQueueWrite() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+
+        let before = try store.itemsChangeToken()
+        try store.save(item(id: "new-item", createdAt: 10))
+        let after = try store.itemsChangeToken()
+
+        #expect(after > before)
+    }
+
+    @Test
     func recoversInterruptedPlayback() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -359,6 +372,38 @@ struct QueueStoreTests {
 
         #expect(label != "24h ago")
         #expect(!label.hasSuffix("ago"))
+    }
+
+    @Test
+    func schedulesHistoryTimestampRefreshesOnlyWhenLabelsCanChange() {
+        let now = Date(timeIntervalSince1970: 200_000)
+        let recent = item(id: "recent", createdAt: 199_970)
+        let minutes = item(id: "minutes", createdAt: 199_700)
+        let hours = item(id: "hours", createdAt: 189_200)
+        let absolute = item(id: "absolute", createdAt: 100_000)
+
+        #expect(HistoryTimestampPolicy.nextUpdate(after: now, items: [recent]) == Date(timeIntervalSince1970: 200_030))
+        #expect(HistoryTimestampPolicy.nextUpdate(after: now, items: [minutes]) == Date(timeIntervalSince1970: 200_060))
+        #expect(HistoryTimestampPolicy.nextUpdate(after: now, items: [hours]) == Date(timeIntervalSince1970: 203_600))
+        #expect(HistoryTimestampPolicy.nextUpdate(after: now, items: [absolute]) == .distantFuture)
+        #expect(HistoryTimestampPolicy.nextUpdate(after: now, items: [hours, recent]) == Date(timeIntervalSince1970: 200_030))
+    }
+
+    @Test @MainActor
+    func historyTimestampClockStaysQuietUntilTheNextLabelBoundary() {
+        let clock = HistoryTimestampClock(now: Date(timeIntervalSince1970: 200_000))
+        let recent = item(id: "recent", createdAt: 199_970)
+        var changes = 0
+        let observation = clock.objectWillChange.sink { changes += 1 }
+        defer { observation.cancel() }
+
+        clock.update(items: [recent], at: Date(timeIntervalSince1970: 200_000), reschedule: true)
+        let changesAfterScheduling = changes
+        clock.update(items: [recent], at: Date(timeIntervalSince1970: 200_029))
+        #expect(changes == changesAfterScheduling)
+
+        clock.update(items: [recent], at: Date(timeIntervalSince1970: 200_030))
+        #expect(changes == changesAfterScheduling + 1)
     }
 
     @Test
@@ -1081,6 +1126,12 @@ struct QueueStoreTests {
 
     @Test
     func playerBackNavigationSuppressesOnlyTheCurrentItem() {
+        #expect(!PlayerHistoryToolbarPolicy.rootItemIdentifiers.contains(
+            PlayerHistoryToolbarPolicy.backItemIdentifier
+        ))
+        #expect(PlayerHistoryToolbarPolicy.allowedItemIdentifiers.contains(
+            PlayerHistoryToolbarPolicy.backItemIdentifier
+        ))
         #expect(!PlayerNavigationPolicy.shouldDisplay(
             itemID: "question",
             hiddenItemID: "question"

@@ -13,11 +13,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         static let fadeSeconds: TimeInterval = 0.34
     }
 
-    private static let historyToolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
-    private static let historyBackItemIdentifier = NSToolbarItem.Identifier("TTSHistoryBack")
-    private static let historyFilterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
-    private static let historySearchItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearch")
-
     private let playbackController: PlaybackController
     private let preferencesStore: PlayerWindowPreferencesStore
     private let playerPreferencesStore: PlayerPreferencesStore
@@ -181,7 +176,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     func refresh() {
-        defer { updateHistoryBackButton() }
+        defer { updateHistoryNavigation() }
         updateHistoryFilterMenu()
         synchronizePendingPreview()
         synchronizeLingeringQuestion()
@@ -338,7 +333,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         lastCurrentItem = playbackController.currentItem
         activeItemID = playbackController.currentItem?.id
         showIdleIfNeeded()
-        updateHistoryBackButton()
+        updateHistoryNavigation()
     }
 
     func toggleMiniPlayer() {
@@ -382,7 +377,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private func configureHistoryToolbar() {
-        let toolbar = NSToolbar(identifier: Self.historyToolbarIdentifier)
+        let toolbar = NSToolbar(identifier: PlayerHistoryToolbarPolicy.toolbarIdentifier)
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
@@ -391,13 +386,24 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         panel.toolbar = toolbar
     }
 
-    private func updateHistoryBackButton() {
-        guard windowedMode else { return }
+    private func updateHistoryNavigation() {
+        guard windowedMode, let toolbar = panel.toolbar else { return }
         let itemID = playbackController.currentItem?.id
             ?? presentation.pendingPreviewItem?.id
             ?? presentation.lingeringItem?.id
-        historyBackToolbarItem?.isEnabled = itemID != nil
-            && presentation.hiddenItemID != itemID
+        let shouldShowBack = PlayerNavigationPolicy.shouldDisplay(
+            itemID: itemID,
+            hiddenItemID: presentation.hiddenItemID
+        )
+        let backIndex = toolbar.items.firstIndex {
+            $0.itemIdentifier == PlayerHistoryToolbarPolicy.backItemIdentifier
+        }
+        if shouldShowBack, backIndex == nil {
+            toolbar.insertItem(withItemIdentifier: PlayerHistoryToolbarPolicy.backItemIdentifier, at: 0)
+        } else if !shouldShowBack, let backIndex {
+            toolbar.removeItem(at: backIndex)
+            historyBackToolbarItem = nil
+        }
     }
 
     @objc private func navigateBackToHistory() {
@@ -540,7 +546,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     private func presentationDidChange() {
         updateQuestionInputAvailability()
-        updateHistoryBackButton()
+        updateHistoryNavigation()
         let miniPlayer = presentation.isMiniPlayer
         if miniPlayer != observedMiniPlayer {
             observedMiniPlayer = miniPlayer
@@ -790,21 +796,11 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
 extension NowSpeakingPanelController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
-            Self.historyBackItemIdentifier,
-            .flexibleSpace,
-            Self.historySearchItemIdentifier,
-            Self.historyFilterItemIdentifier,
-        ]
+        PlayerHistoryToolbarPolicy.rootItemIdentifiers
     }
 
     func toolbarAllowedItemIdentifiers(_: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
-            Self.historyBackItemIdentifier,
-            .flexibleSpace,
-            Self.historySearchItemIdentifier,
-            Self.historyFilterItemIdentifier,
-        ]
+        PlayerHistoryToolbarPolicy.allowedItemIdentifiers
     }
 
     func toolbar(
@@ -813,7 +809,7 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
         willBeInsertedIntoToolbar _: Bool
     ) -> NSToolbarItem? {
         switch itemIdentifier {
-        case Self.historyBackItemIdentifier:
+        case PlayerHistoryToolbarPolicy.backItemIdentifier:
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Back"
             item.paletteLabel = "Back to Queue"
@@ -826,9 +822,8 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
             item.toolTip = "Back to queue"
             item.isNavigational = true
             historyBackToolbarItem = item
-            updateHistoryBackButton()
             return item
-        case Self.historySearchItemIdentifier:
+        case PlayerHistoryToolbarPolicy.searchItemIdentifier:
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Search"
             item.paletteLabel = "Search History"
@@ -839,7 +834,7 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
             item.searchField.stringValue = presentation.historySearchQuery
             item.searchField.setAccessibilityLabel("Search speech history")
             return item
-        case Self.historyFilterItemIdentifier:
+        case PlayerHistoryToolbarPolicy.filterItemIdentifier:
             let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Filter"
             item.paletteLabel = "Filter History"
@@ -1100,6 +1095,26 @@ enum PlayerNavigationPolicy {
     ) -> String? {
         hiddenItemID == itemID ? hiddenItemID : nil
     }
+}
+
+enum PlayerHistoryToolbarPolicy {
+    static let toolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
+    static let backItemIdentifier = NSToolbarItem.Identifier("TTSHistoryBack")
+    static let filterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
+    static let searchItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearch")
+
+    static let rootItemIdentifiers: [NSToolbarItem.Identifier] = [
+        .flexibleSpace,
+        searchItemIdentifier,
+        filterItemIdentifier,
+    ]
+
+    static let allowedItemIdentifiers: [NSToolbarItem.Identifier] = [
+        backItemIdentifier,
+        .flexibleSpace,
+        searchItemIdentifier,
+        filterItemIdentifier,
+    ]
 }
 
 enum PlayerHoverContinuation {
@@ -1742,7 +1757,17 @@ private struct NowSpeakingHUDView: View {
                 "\(isPreviewingPending ? "Pending update" : "Now speaking"). \(item.nowSpeakingTitle). \(item.nowSpeakingContext)"
             )
         } else {
-            PlayerHistoryView(controller: controller, presentation: presentation)
+            PlayerHistoryView(
+                controller: controller,
+                presentation: presentation,
+                historyClock: controller.historyTimestampClock,
+                historyRevision: controller.historyRevision,
+                generationProgressNow: controller.isGenerating ? controller.generationProgressNow : .distantPast,
+                isViewingArchive: presentation.isViewingArchive,
+                historyProjectFilter: presentation.historyProjectFilter,
+                historySearchQuery: presentation.historySearchQuery
+            )
+                .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
@@ -2961,8 +2986,14 @@ private struct NowSpeakingHUDView: View {
 }
 
 private struct PlayerHistoryView: View {
-    @ObservedObject var controller: PlaybackController
-    @ObservedObject var presentation: NowSpeakingPresentation
+    let controller: PlaybackController
+    let presentation: NowSpeakingPresentation
+    @ObservedObject var historyClock: HistoryTimestampClock
+    let historyRevision: Int
+    let generationProgressNow: Date
+    let isViewingArchive: Bool
+    let historyProjectFilter: String?
+    let historySearchQuery: String
 
     var body: some View {
         Group {
@@ -2977,6 +3008,9 @@ private struct PlayerHistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(filteredItems.prefix(60)) { item in
+                    let generationProgress = item.status == .generating
+                        ? controller.generationProgress(for: item)
+                        : 0
                     PlayerHistoryRow(
                         item: item,
                         action: {
@@ -2989,8 +3023,8 @@ private struct PlayerHistoryView: View {
                         },
                         onRetry: { controller.retryGeneration(item) },
                         isRetrying: controller.isRetrying(item),
-                        generationProgress: controller.generationProgress(for: item),
-                        timestampNow: controller.historyTimestampNow,
+                        generationProgress: generationProgress,
+                        timestampNow: historyClock.now,
                         onArchive: { controller.setArchived(!item.archived, for: item) }
                     )
                         .listRowInsets(EdgeInsets(
@@ -3003,7 +3037,7 @@ private struct PlayerHistoryView: View {
                         .listRowBackground(
                             GenerationProgressRowBackground(
                                 item: item,
-                                progress: controller.generationProgress(for: item)
+                                progress: generationProgress
                             )
                         )
                 }
@@ -3013,32 +3047,45 @@ private struct PlayerHistoryView: View {
     }
 
     private var historyItems: [TTSItem] {
-        presentation.isViewingArchive ? controller.archivedHistoryItems : controller.activeHistoryItems
+        isViewingArchive ? controller.archivedHistoryItems : controller.activeHistoryItems
     }
 
     private var filteredItems: [TTSItem] {
         historyItems.filter { item in
-            let matchesProject = presentation.historyProjectFilter.map { item.workspaceName == $0 } ?? true
+            let matchesProject = historyProjectFilter.map { item.workspaceName == $0 } ?? true
             return matchesProject && matchesSearch(item)
         }
     }
 
     private var emptyStateTitle: String {
-        if !presentation.historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "No matching speech"
         }
-        if presentation.isViewingArchive {
-            return presentation.historyProjectFilter == nil ? "No archived speech" : "No archived speech for this project"
+        if isViewingArchive {
+            return historyProjectFilter == nil ? "No archived speech" : "No archived speech for this project"
         }
-        return presentation.historyProjectFilter == nil ? "No recent speech" : "No speech for this project"
+        return historyProjectFilter == nil ? "No recent speech" : "No speech for this project"
     }
 
     private func matchesSearch(_ item: TTSItem) -> Bool {
-        let query = presentation.historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
         return [item.nowSpeakingTitle, item.text, item.displayAgent, item.workspaceName]
             .compactMap(\.self)
             .contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+}
+
+extension PlayerHistoryView: @MainActor Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.controller === rhs.controller
+            && lhs.presentation === rhs.presentation
+            && lhs.historyClock === rhs.historyClock
+            && lhs.historyRevision == rhs.historyRevision
+            && lhs.generationProgressNow == rhs.generationProgressNow
+            && lhs.isViewingArchive == rhs.isViewingArchive
+            && lhs.historyProjectFilter == rhs.historyProjectFilter
+            && lhs.historySearchQuery == rhs.historySearchQuery
     }
 }
 
