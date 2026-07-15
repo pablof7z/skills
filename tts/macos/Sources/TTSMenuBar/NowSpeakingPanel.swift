@@ -14,6 +14,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     private static let historyToolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
     private static let historyFilterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
+    private static let historySearchItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearch")
 
     private let playbackController: PlaybackController
     private let preferencesStore: HUDPreferencesStore
@@ -356,6 +357,32 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
 
         let menu = NSMenu(title: "Filter History")
+        let recentItems = NSMenuItem(
+            title: "Recent",
+            action: #selector(selectHistoryArchive(_:)),
+            keyEquivalent: ""
+        )
+        recentItems.target = self
+        recentItems.representedObject = false
+        recentItems.state = presentation.isViewingArchive ? .off : .on
+        recentItems.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
+        menu.addItem(recentItems)
+
+        let archivedItems = NSMenuItem(
+            title: "Archived",
+            action: #selector(selectHistoryArchive(_:)),
+            keyEquivalent: ""
+        )
+        archivedItems.target = self
+        archivedItems.representedObject = true
+        archivedItems.state = presentation.isViewingArchive ? .on : .off
+        archivedItems.image = NSImage(systemSymbolName: "archivebox", accessibilityDescription: nil)
+        menu.addItem(archivedItems)
+        menu.addItem(.separator())
+
+        let projectsHeader = NSMenuItem(title: "Projects", action: nil, keyEquivalent: "")
+        projectsHeader.isEnabled = false
+        menu.addItem(projectsHeader)
         let allProjects = NSMenuItem(
             title: "All Projects",
             action: #selector(selectHistoryProject(_:)),
@@ -379,12 +406,24 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             menu.addItem(projectItem)
         }
         item.menu = menu
-        item.toolTip = presentation.historyProjectFilter.map { "History: \($0)" } ?? "Filter history by project"
+        let scope = presentation.isViewingArchive ? "Archived" : "Recent"
+        item.toolTip = presentation.historyProjectFilter.map {
+            "\(scope) history in \($0)"
+        } ?? "\(scope) history in all projects"
     }
 
     @objc private func selectHistoryProject(_ sender: NSMenuItem) {
         presentation.historyProjectFilter = sender.representedObject as? String
         updateHistoryFilterMenu()
+    }
+
+    @objc private func selectHistoryArchive(_ sender: NSMenuItem) {
+        presentation.isViewingArchive = (sender.representedObject as? Bool) == true
+        updateHistoryFilterMenu()
+    }
+
+    @objc private func historySearchChanged(_ sender: NSSearchField) {
+        presentation.historySearchQuery = sender.stringValue
     }
 
     private func showIdleIfNeeded() {
@@ -672,11 +711,11 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
 extension NowSpeakingPanelController: NSToolbarDelegate {
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.historyFilterItemIdentifier]
+        [.flexibleSpace, Self.historySearchItemIdentifier, Self.historyFilterItemIdentifier]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, Self.historyFilterItemIdentifier]
+        [.flexibleSpace, Self.historySearchItemIdentifier, Self.historyFilterItemIdentifier]
     }
 
     func toolbar(
@@ -684,18 +723,33 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
         itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
-        guard itemIdentifier == Self.historyFilterItemIdentifier else { return nil }
-        let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
-        item.label = "Filter"
-        item.paletteLabel = "Filter History"
-        item.image = NSImage(
-            systemSymbolName: "line.3.horizontal.decrease",
-            accessibilityDescription: "Filter history by project"
-        )
-        item.showsIndicator = true
-        historyFilterToolbarItem = item
-        updateHistoryFilterMenu()
-        return item
+        switch itemIdentifier {
+        case Self.historySearchItemIdentifier:
+            let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Search"
+            item.paletteLabel = "Search History"
+            item.searchField.placeholderString = "Search speech"
+            item.searchField.target = self
+            item.searchField.action = #selector(historySearchChanged(_:))
+            item.searchField.sendsSearchStringImmediately = true
+            item.searchField.stringValue = presentation.historySearchQuery
+            item.searchField.setAccessibilityLabel("Search speech history")
+            return item
+        case Self.historyFilterItemIdentifier:
+            let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Filter"
+            item.paletteLabel = "Filter History"
+            item.image = NSImage(
+                systemSymbolName: "line.3.horizontal.decrease",
+                accessibilityDescription: "Filter history"
+            )
+            item.showsIndicator = true
+            historyFilterToolbarItem = item
+            updateHistoryFilterMenu()
+            return item
+        default:
+            return nil
+        }
     }
 }
 
@@ -1460,9 +1514,7 @@ private struct PlayerHistoryView: View {
     @ObservedObject var presentation: NowSpeakingPresentation
 
     var body: some View {
-        VStack(spacing: 0) {
-            historyControls
-            Divider()
+        Group {
             if filteredItems.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "waveform")
@@ -1486,26 +1538,6 @@ private struct PlayerHistoryView: View {
                 .listStyle(.plain)
             }
         }
-    }
-
-    private var historyControls: some View {
-        HStack(spacing: 8) {
-            TextField("Search speech", text: $presentation.historySearchQuery)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Search speech history")
-            Button {
-                presentation.isViewingArchive.toggle()
-            } label: {
-                Label(
-                    presentation.isViewingArchive ? "Recent" : "Archive",
-                    systemImage: presentation.isViewingArchive ? "clock.arrow.circlepath" : "archivebox"
-                )
-            }
-            .help(presentation.isViewingArchive ? "View recent speech" : "View archived speech")
-            .accessibilityLabel(presentation.isViewingArchive ? "View recent speech" : "View archived speech")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     private var historyItems: [TTSItem] {
