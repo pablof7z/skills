@@ -1,9 +1,8 @@
 import Foundation
 
-struct HUDPreferences: Codable, Equatable {
+struct PlayerWindowPreferences: Codable, Equatable {
     var isPlayerVisible: Bool
     var isMiniPlayer: Bool
-    var isWindowedModeEnabled: Bool
     var originX: Double?
     var originY: Double?
     var expandedWidth: Double?
@@ -12,7 +11,6 @@ struct HUDPreferences: Codable, Equatable {
     init(
         isPlayerVisible: Bool = true,
         isMiniPlayer: Bool = false,
-        isWindowedModeEnabled: Bool = false,
         originX: Double? = nil,
         originY: Double? = nil,
         expandedWidth: Double? = nil,
@@ -20,7 +18,6 @@ struct HUDPreferences: Codable, Equatable {
     ) {
         self.isPlayerVisible = isPlayerVisible
         self.isMiniPlayer = isMiniPlayer
-        self.isWindowedModeEnabled = isWindowedModeEnabled
         self.originX = originX
         self.originY = originY
         self.expandedWidth = expandedWidth
@@ -31,7 +28,6 @@ struct HUDPreferences: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         isPlayerVisible = try container.decodeIfPresent(Bool.self, forKey: .isPlayerVisible) ?? true
         isMiniPlayer = try container.decodeIfPresent(Bool.self, forKey: .isMiniPlayer) ?? false
-        isWindowedModeEnabled = try container.decodeIfPresent(Bool.self, forKey: .isWindowedModeEnabled) ?? false
         originX = try container.decodeIfPresent(Double.self, forKey: .originX)
         originY = try container.decodeIfPresent(Double.self, forKey: .originY)
         expandedWidth = try container.decodeIfPresent(Double.self, forKey: .expandedWidth)
@@ -49,9 +45,9 @@ struct HUDPreferences: Codable, Equatable {
     }
 }
 
-final class HUDPreferencesStore {
+final class PlayerWindowPreferencesStore {
     let fileURL: URL
-    private(set) var preferences: HUDPreferences
+    private(set) var preferences: PlayerWindowPreferences
 
     init(stateDirectory: URL) {
         fileURL = stateDirectory.appendingPathComponent("hud-preferences.json")
@@ -65,11 +61,6 @@ final class HUDPreferencesStore {
 
     func setMiniPlayer(_ miniPlayer: Bool) {
         preferences.isMiniPlayer = miniPlayer
-        save()
-    }
-
-    func setWindowedMode(_ windowed: Bool) {
-        preferences.isWindowedModeEnabled = windowed
         save()
     }
 
@@ -99,10 +90,10 @@ final class HUDPreferencesStore {
         }
     }
 
-    private static func load(from fileURL: URL) -> HUDPreferences {
+    private static func load(from fileURL: URL) -> PlayerWindowPreferences {
         guard let data = try? Data(contentsOf: fileURL),
-              let preferences = try? JSONDecoder().decode(HUDPreferences.self, from: data) else {
-            return HUDPreferences()
+              let preferences = try? JSONDecoder().decode(PlayerWindowPreferences.self, from: data) else {
+            return PlayerWindowPreferences()
         }
         return preferences
     }

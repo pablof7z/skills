@@ -100,13 +100,13 @@ build_if_needed() {
 
   if [ ! -x "$BINARY" ] || [ -n "$newer" ]; then
     if ! command -v swift >/dev/null 2>&1; then
-      echo "Error: Swift is required to build the TTS menu-bar app." >&2
+      echo "Error: Swift is required to build the TTS macOS app." >&2
       return 1
     fi
 
     mkdir -p "$STATE_DIR"
     if ! swift build --package-path "$PACKAGE_DIR" --configuration release >>"$LOG_FILE" 2>&1; then
-      echo "Error: failed to build the TTS menu-bar app. Log: $LOG_FILE" >&2
+      echo "Error: failed to build the TTS macOS app. Log: $LOG_FILE" >&2
       tail -n 30 "$LOG_FILE" >&2 || true
       return 1
     fi
@@ -120,27 +120,27 @@ start_menu() {
   mkdir -p "$STATE_DIR/items"
 
   if pid="$(active_pid 2>/dev/null)"; then
-    printf 'TTS menu bar is running: pid %s\n' "$pid"
+    printf 'TTS app is running: pid %s\n' "$pid"
     return 0
   fi
 
   build_if_needed
   rm -f "$PID_FILE"
 
-  if ! open -gj -n "$APP_BUNDLE" --args --state-dir "$STATE_DIR"; then
-    echo "Error: Launch Services could not open the TTS menu-bar app." >&2
+  if ! open -n "$APP_BUNDLE" --args --state-dir "$STATE_DIR"; then
+    echo "Error: Launch Services could not open the TTS app." >&2
     return 1
   fi
 
   for _ in {1..60}; do
     if pid="$(active_pid 2>/dev/null)"; then
-      printf 'TTS menu bar started: pid %s\n' "$pid"
+      printf 'TTS app started: pid %s\n' "$pid"
       return 0
     fi
     sleep 0.1
   done
 
-  echo "Error: TTS menu-bar app did not start. Log: $LOG_FILE" >&2
+  echo "Error: TTS app did not start. Log: $LOG_FILE" >&2
   tail -n 30 "$LOG_FILE" >&2 || true
   return 1
 }
@@ -191,7 +191,7 @@ stop_menu() {
     rm -f "$PID_FILE"
     rm -rf "$LOCK_DIR"
     recover_interrupted_items
-    echo "TTS menu bar is not running."
+    echo "TTS app is not running."
     return 0
   fi
 
@@ -203,14 +203,14 @@ stop_menu() {
     sleep 0.1
   done
   if process_is_alive "$pid"; then
-    echo "Error: TTS menu-bar app did not stop." >&2
+    echo "Error: TTS app did not stop." >&2
     return 1
   fi
 
   rm -f "$PID_FILE"
   rm -rf "$LOCK_DIR"
   recover_interrupted_items
-  echo "TTS menu bar stopped."
+  echo "TTS app stopped."
 }
 
 print_status() {

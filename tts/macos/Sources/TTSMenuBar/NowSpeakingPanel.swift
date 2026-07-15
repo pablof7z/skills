@@ -19,7 +19,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     private static let historySearchItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearch")
 
     private let playbackController: PlaybackController
-    private let preferencesStore: HUDPreferencesStore
+    private let preferencesStore: PlayerWindowPreferencesStore
     private let playerPreferencesStore: PlayerPreferencesStore
     private let presentation: NowSpeakingPresentation
     private let sessionOpener: AgentSessionOpener
@@ -73,7 +73,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
     init(
         controller: PlaybackController,
-        preferencesStore: HUDPreferencesStore,
+        preferencesStore: PlayerWindowPreferencesStore,
         playerPreferencesStore: PlayerPreferencesStore,
         sessionOpener: AgentSessionOpener = AgentSessionOpener()
     ) {
@@ -81,14 +81,12 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         self.preferencesStore = preferencesStore
         self.playerPreferencesStore = playerPreferencesStore
         self.sessionOpener = sessionOpener
-        let windowed = preferencesStore.preferences.isWindowedModeEnabled
-        windowedMode = windowed
-        isWindowedMode = windowed
-        presentation = NowSpeakingPresentation(
-            isMiniPlayer: windowed ? false : preferencesStore.preferences.isMiniPlayer
-        )
-        isPlayerVisible = preferencesStore.preferences.isPlayerVisible
-        observedMiniPlayer = windowed ? false : preferencesStore.preferences.isMiniPlayer
+        let windowed = true
+        windowedMode = true
+        isWindowedMode = true
+        presentation = NowSpeakingPresentation(isMiniPlayer: false)
+        isPlayerVisible = true
+        observedMiniPlayer = false
         panel = Self.makeWindow(windowed: windowed, initialSize: Layout.expandedSize)
         super.init()
 
@@ -100,12 +98,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
                 self?.refresh()
             }
         }
-        playerPreferencesObservation = playerPreferencesStore.objectWillChange.sink { [weak self] _ in
-            Task { @MainActor in
-                self?.updateWindowLevel()
-                self?.updateWindowedOpacity()
-            }
-        }
         presentationObservation = presentation.objectWillChange.sink { [weak self] _ in
             Task { @MainActor in
                 self?.presentationDidChange()
@@ -115,12 +107,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             for: NSApplication.didChangeScreenParametersNotification
         ).sink { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.usesFloatingHUD else { return }
-                let size = self.needsExpandedLayout
-                    ? self.preferredExpandedSize
-                    : Layout.compactSize
-                self.configureResizeLimits(expanded: self.needsExpandedLayout)
-                self.positionPanel(size: size)
+                guard let self else { return }
+                self.scheduleGeometrySave()
             }
         }
         setUpPanelObservations()
@@ -150,16 +138,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             controller: playbackController,
             presentation: presentation,
             sessionOpener: sessionOpener,
-            playerPreferencesStore: playerPreferencesStore,
-            isWindowedMode: windowedMode,
-            onToggleMiniPlayer: { [weak self] in self?.toggleMiniPlayer() }
+            playerPreferencesStore: playerPreferencesStore
         )
-        // The floating HUD is always a dark glass overlay by design; a normal
-        // window should instead follow the system's light/dark appearance.
-        let rootView: AnyView = windowedMode
-            ? AnyView(content)
-            : AnyView(content.environment(\.colorScheme, .dark))
-        let hostingView = FirstMouseHostingView(rootView: rootView)
+        let hostingView = FirstMouseHostingView(rootView: content)
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
     }
@@ -199,67 +180,12 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
     }
 
-    func toggleWindowedMode() {
-        setWindowedMode(!windowedMode)
-    }
-
-    func setWindowedMode(_ windowed: Bool) {
-        guard windowed != windowedMode else { return }
-        let wasVisible = panel.isVisible
-        let retainedPendingQuestion = PendingQuestionRetention.retainedItem(
-            currentItem: playbackController.currentItem,
-            lingeringItem: presentation.lingeringItem,
-            lastCurrentItem: lastCurrentItem
-        )
-
-        cancelLingerDismissal(resetCountdown: true, restoreOpacity: false)
-        hoverAdvanceTask?.cancel()
-        hoverAdvanceTask = nil
-        playbackController.setAutomaticQueueAdvanceDeferred(false)
-        presentation.lingeringItem = nil
-        presentation.lingeringTime = 0
-        presentation.lingeringDuration = 0
-        presentation.setMiniPlayer(windowed ? false : preferencesStore.preferences.isMiniPlayer)
-        observedMiniPlayer = presentation.isMiniPlayer
-
-        moveObservation?.cancel()
-        resizeObservation?.cancel()
-        liveResizeEndObservation?.cancel()
-        closeObservation?.cancel()
-        panel.contentView = nil
-        panel.orderOut(nil)
-
-        windowedMode = windowed
-        isWindowedMode = windowed
-        preferencesStore.setWindowedMode(windowed)
-
-        panel = Self.makeWindow(windowed: windowed, initialSize: preferredExpandedSize)
-        configurePanel()
-        attachContentView()
-        setUpPanelObservations()
-
-        activeItemID = nil
-        didBringToFrontForActiveContent = false
-        lastCurrentItem = retainedPendingQuestion
-        if playbackController.currentItem == nil {
-            presentation.lingeringItem = retainedPendingQuestion
-        }
-        if wasVisible {
-            refresh()
-        } else {
-            updateWindowLevel()
-            updateActivationPolicy()
-        }
-    }
-
     func refresh() {
         defer { updateHistoryBackButton() }
         updateHistoryFilterMenu()
         synchronizePendingPreview()
         synchronizeLingeringQuestion()
         updateQuestionInputAvailability()
-        updateWindowLevel()
-        updateWindowedOpacity()
         guard isPlayerVisible else {
             sessionOpener.clear()
             if panel.isVisible || activeItemID != nil {
@@ -322,22 +248,11 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
         if activeItemID != item.id {
             activeItemID = item.id
-            if windowedMode, panel.isVisible {
-                // Bring the window to the front once when active playback begins,
-                // unless the user asked for a strictly normal window that never
-                // auto-raises. Always-on-top modes are handled by updateWindowLevel.
-                if !didBringToFrontForActiveContent,
-                   playerPreferencesStore.preferences.floatnessMode == .bringToFrontWhenPlaying
-                {
-                    panel.orderFront(nil)
-                }
-            } else {
-                showPlayer()
-            }
+            showPlayer()
         } else if !panel.isVisible {
             showPlayer()
         }
-        didBringToFrontForActiveContent = isShowingActiveContent
+        didBringToFrontForActiveContent = true
     }
 
     private func synchronizePendingPreview() {
@@ -369,15 +284,11 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private func updateQuestionInputAvailability() {
-        guard let passivePanel = panel as? PassiveHUDPanel else { return }
-        passivePanel.allowsQuestionEditing = playbackController.currentItem?.isPendingQuestion == true
-            || presentation.pendingPreviewItem?.isPendingQuestion == true
-            || presentation.lingeringItem?.isPendingQuestion == true
+        // A normal document window accepts focus whenever the user selects it.
     }
 
     func shutdown() {
         playbackObservation?.cancel()
-        playerPreferencesObservation?.cancel()
         presentationObservation?.cancel()
         screenObservation?.cancel()
         moveObservation?.cancel()
@@ -413,10 +324,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     private func dismissPlayerContent() {
-        guard windowedMode else {
-            setPlayerVisible(false)
-            return
-        }
         let hiddenItemID = playbackController.currentItem?.id
             ?? presentation.pendingPreviewItem?.id
             ?? presentation.lingeringItem?.id
@@ -435,12 +342,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     }
 
     func toggleMiniPlayer() {
-        let useMiniPlayer = !presentation.isMiniPlayer
-        if useMiniPlayer, presentation.isExpanded {
-            preferencesStore.setExpandedSize(panel.frame.size)
-        }
-        preferencesStore.setMiniPlayer(useMiniPlayer)
-        presentation.setMiniPlayer(useMiniPlayer)
+        return
     }
 
     private func configurePanel() {
@@ -477,57 +379,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             panel.setAccessibilityLabel("Now speaking")
             configureResizeLimits(expanded: true)
         }
-    }
-
-    private func updateWindowLevel() {
-        guard windowedMode else { return }
-        let mode = playerPreferencesStore.preferences.floatnessMode
-        switch mode {
-        case .normal:
-            panel.level = .normal
-        case .bringToFrontWhenPlaying:
-            panel.level = .normal
-        case .alwaysOnTop:
-            panel.level = .floating
-        case .alwaysOnTopWhilePlaying:
-            panel.level = isShowingActiveContent ? .floating : .normal
-        }
-    }
-
-    /// Whether the windowed player is currently showing active playback content
-    /// (a current item, a lingering item, or a pending question) instead of the
-    /// idle history queue. This is what "while playing" means for floatness: a
-    /// pending question that is awaiting an answer keeps the player active even
-    /// after audio finishes, so the window stays on top until the user answers,
-    /// skips, or supersedes it.
-    private var isShowingActiveContent: Bool {
-        guard windowedMode else { return false }
-        if playbackController.currentItem != nil { return true }
-        if presentation.lingeringItem != nil { return true }
-        if presentation.pendingPreviewItem != nil { return true }
-        return false
-    }
-
-    /// Drives the windowed-player transparency. When the user is not hovering,
-    /// the window fades to the saved opacity; on hover it animates back to fully
-    /// opaque so the player is always readable while being used.
-    private func updateWindowedOpacity() {
-        guard windowedMode, panel.isVisible else { return }
-        let target = effectiveWindowedOpacity
-        guard abs(panel.alphaValue - target) > 0.001 else { return }
-        windowedOpacityTask?.cancel()
-        windowedOpacityTask = nil
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().alphaValue = target
-        }
-    }
-
-    private var effectiveWindowedOpacity: CGFloat {
-        guard windowedMode else { return 1 }
-        if presentation.isHovered { return 1 }
-        return CGFloat(playerPreferencesStore.preferences.windowOpacity)
     }
 
     private func configureHistoryToolbar() {
@@ -639,34 +490,13 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         lastCurrentItem = nil
         activeItemID = nil
         didBringToFrontForActiveContent = false
-        updateWindowLevel()
-        updateWindowedOpacity()
         guard !panel.isVisible else { return }
         showPlayer()
     }
 
-    private func showPlayer() {
-        configureResizeLimits(expanded: needsExpandedLayout)
-        positionPanel(size: needsExpandedLayout ? preferredExpandedSize : Layout.compactSize)
-        if usesFloatingHUD {
-            // Fade the floating panel in above every space.
-            panel.alphaValue = 0
-            NSApp.unhideWithoutActivation()
-            panel.orderFrontRegardless()
-
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                panel.animator().alphaValue = 1
-            }
-        } else {
-            // Windowed mode: start at the effective opacity (saved transparency
-            // unless hovered), then order front.
-            panel.alphaValue = effectiveWindowedOpacity
-            NSApp.unhideWithoutActivation()
-            panel.orderFront(nil)
-        }
-        // panel.isVisible only flips true once ordered front, so this must run last.
-        updateActivationPolicy()
+    func showPlayer() {
+        isPlayerVisible = true
+        panel.makeKeyAndOrderFront(nil)
     }
 
     private func updateLayout(animated: Bool) {
@@ -724,7 +554,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         if windowedMode {
             // Hovering restores full opacity and temporarily holds the current
             // content instead of advancing the queue underneath the pointer.
-            updateWindowedOpacity()
             if isHovered {
                 hoverAdvanceTask?.cancel()
                 hoverAdvanceTask = nil
@@ -791,18 +620,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         updateActivationPolicy()
     }
 
-    /// Windowed mode should behave like a normal app (Dock icon, Cmd+Tab) only
-    /// while its window is actually on screen; otherwise this stays a menu-bar-only accessory.
     private func updateActivationPolicy() {
-        let shouldBeRegular = windowedMode && panel.isVisible
-        let target: NSApplication.ActivationPolicy = shouldBeRegular ? .regular : .accessory
-        guard NSApp.activationPolicy() != target else { return }
-        NSApp.setActivationPolicy(target)
-        if target == .regular {
-            // Without an activation nudge, LaunchServices/Dock can take several
-            // seconds (or never) to register the Dock tile after this policy change.
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        NSApp.setActivationPolicy(.regular)
     }
 
     private func beginLingerIfNeeded() {
@@ -1841,14 +1660,11 @@ private struct NowSpeakingHUDView: View {
     @ObservedObject var presentation: NowSpeakingPresentation
     @ObservedObject var sessionOpener: AgentSessionOpener
     @ObservedObject var playerPreferencesStore: PlayerPreferencesStore
-    let isWindowedMode: Bool
-    let onToggleMiniPlayer: () -> Void
     @State private var questionComposer = QuestionComposerModel()
     @StateObject private var answerEditorPresenter = AnswerEditorPresenter()
     @State private var isAnswerDropTarget = false
     @State private var primaryMessageContentHeight: CGFloat = 150
     @State private var previewPlaybackOffset: TimeInterval = 0
-    @State private var isQuickSettingsPresented = false
 
     var body: some View {
         if let item = displayedItem {
@@ -1908,7 +1724,7 @@ private struct NowSpeakingHUDView: View {
             .padding(.horizontal, presentation.isExpanded ? 18 : 14)
             .padding(.vertical, presentation.isExpanded ? 16 : 11)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .modifier(PlayerSurfaceStyle(isWindowedMode: isWindowedMode, accent: accent))
+            .background(Color(nsColor: .windowBackgroundColor))
             .onHover { presentation.updateHover($0) }
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .onChange(of: item.id) { _ in
@@ -1922,25 +1738,10 @@ private struct NowSpeakingHUDView: View {
                 prepareComposer(for: item)
             }
             .onDisappear { answerEditorPresenter.cancel() }
-            .overlay {
-                if presentation.isExpanded, !isWindowedMode {
-                    PlayerResizeRegions()
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if presentation.isExpanded, !isWindowedMode {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(11)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
-            }
             .accessibilityLabel(
                 "\(isPreviewingPending ? "Pending update" : "Now speaking"). \(item.nowSpeakingTitle). \(item.nowSpeakingContext)"
             )
-        } else if isWindowedMode {
+        } else {
             PlayerHistoryView(controller: controller, presentation: presentation)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -2660,22 +2461,6 @@ private struct NowSpeakingHUDView: View {
                     .accessibilityLabel("\(item.briefAttachments.count) attachments")
             }
 
-            if !isWindowedMode {
-                Button(action: onToggleMiniPlayer) {
-                    Image(
-                        systemName: presentation.isExpanded
-                            ? "arrow.down.right.and.arrow.up.left"
-                            : "arrow.up.left.and.arrow.down.right"
-                    )
-                    .font(.system(size: presentation.isExpanded ? 14 : 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                }
-                .buttonStyle(.plain)
-                .help(presentation.isExpanded ? "Use mini player" : "Expand player")
-                .accessibilityLabel(presentation.isExpanded ? "Use mini player" : "Expand player")
-            }
-
             if sessionOpener.canOpen(rawIdentifier: item.iTermSessionID) {
                 Button {
                     sessionOpener.open(rawIdentifier: item.iTermSessionID)
@@ -2998,9 +2783,6 @@ private struct NowSpeakingHUDView: View {
     private func controls(item: TTSItem, accent: Color) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
-                if isWindowedMode {
-                    quickSettingsButton(accent: accent)
-                }
                 playbackRateButton(item: item, accent: accent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -3046,24 +2828,6 @@ private struct NowSpeakingHUDView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func quickSettingsButton(accent: Color) -> some View {
-        Button {
-            isQuickSettingsPresented.toggle()
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.09), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .help("Player floatness and transparency")
-        .accessibilityLabel("Player floatness and transparency")
-        .popover(isPresented: $isQuickSettingsPresented, arrowEdge: .bottom) {
-            QuickSettingsPopover(playerPreferencesStore: playerPreferencesStore)
-        }
     }
 
     @ViewBuilder
@@ -3423,100 +3187,5 @@ private struct GenerationProgressRowBackground: View {
         } else {
             Color.clear
         }
-    }
-}
-
-private struct PlayerSurfaceStyle: ViewModifier {
-    let isWindowedMode: Bool
-    let accent: Color
-
-    func body(content: Content) -> some View {
-        if isWindowedMode {
-            content.background(Color(nsColor: .windowBackgroundColor))
-        } else {
-            content
-                .hudSurface(accent: accent)
-                .padding(8)
-        }
-    }
-}
-
-private struct QuickSettingsPopover: View {
-    @ObservedObject var playerPreferencesStore: PlayerPreferencesStore
-
-    private var floatnessMode: Binding<FloatnessMode> {
-        Binding(
-            get: { playerPreferencesStore.preferences.floatnessMode },
-            set: { playerPreferencesStore.setFloatnessMode($0) }
-        )
-    }
-
-    private var windowOpacity: Binding<Double> {
-        Binding(
-            get: { playerPreferencesStore.preferences.windowOpacity },
-            set: { playerPreferencesStore.setWindowOpacity($0) }
-        )
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Floatness", systemImage: "pin")
-                    .font(.headline)
-                Picker("Floatness", selection: floatnessMode) {
-                    ForEach(FloatnessMode.allCases, id: \.self) { mode in
-                        Label(mode.label, systemImage: mode.symbolName).tag(mode)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-                Text("\"While playing\" keeps the window on top until a pending question is answered, skipped, or superseded.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Label("Transparency", systemImage: "circle.lefthalf.filled")
-                        .font(.headline)
-                    Spacer()
-                    Text(String(
-                        format: "%d%%",
-                        Int((1.0 - playerPreferencesStore.preferences.windowOpacity) * 100)
-                    ))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                }
-                Slider(value: windowOpacity, in: 0.2...1.0, step: 0.05)
-                Text("Hovering the player returns it to fully opaque.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .frame(width: 280)
-    }
-}
-
-private extension View {
-    func hudSurface(accent: Color) -> some View {
-        background {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.black.opacity(0.26))
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(accent.opacity(0.055))
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(accent.opacity(0.28), lineWidth: 0.75)
-        }
-        .shadow(color: .black.opacity(0.3), radius: 20, y: 8)
     }
 }
