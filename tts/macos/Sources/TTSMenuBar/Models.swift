@@ -366,6 +366,12 @@ struct TTSItem: Codable, Identifiable, Equatable {
         subjectLabel ?? text
     }
 
+    var projectAgentLabel: String {
+        [workspaceName, displayAgent]
+            .compactMap { $0 }
+            .joined(separator: " - ")
+    }
+
     var nowSpeakingContext: String {
         [displayAgent, workspaceDisplayLabel, workspaceWorktreeLabel]
             .compactMap { $0 }
