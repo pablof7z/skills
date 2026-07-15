@@ -40,7 +40,7 @@ targets inside a protected main worktree are denied.
 
 ## Architecture
 
-The policy engine (`lib/worktreeguard_lite.py`) and the `wtg` CLI (`bin/wtg`)
+The policy package (`lib/worktreeguard_lite/`) and the `wtg` CLI (`bin/wtg`)
 are entirely harness-agnostic — the same code decides allow/deny for both
 Codex and Claude Code. Only the thin pieces that differ per harness are kept
 separate:
@@ -54,7 +54,7 @@ plugins/worktree-guard/
 |   |-- wtg                      # shared CLI / policy engine entrypoint
 |   |-- wtg-hook-codex           # Codex hook shim -> `wtg hook codex <event>`
 |   `-- wtg-hook-claude          # Claude Code hook shim -> `wtg hook claude <event>`
-|-- lib/worktreeguard_lite.py    # shared policy engine, state, logging
+|-- lib/worktreeguard_lite/      # shared CLI, hooks, policy, state, and logging modules
 `-- scripts/probe_worktreeguard_lite.py  # regression probe, runs both harnesses
 ```
 
@@ -63,7 +63,7 @@ plugin. Each hook command checks `$CLAUDE_PLUGIN_ROOT` first (set by Claude
 Code) and falls back to `$PLUGIN_ROOT` (set by Codex) to pick the harness and
 locate the plugin root, then dispatches to the matching `wtg-hook-<harness>`
 shim. Both shims run through the same `wtg hook <harness> <event>` surface in
-`worktreeguard_lite.py`, which handles `codex` and `claude` identically since
+`worktreeguard_lite`, which handles `codex` and `claude` identically since
 both harnesses use the same `PreToolUse` / `PermissionRequest` / `PostToolUse`
 / `SessionStart` / `Stop` hook event names and the same
 `hookSpecificOutput` JSON shape.

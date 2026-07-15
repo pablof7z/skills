@@ -14,7 +14,7 @@ import time
 import unittest
 from http.server import ThreadingHTTPServer
 
-from tts.tests.attachment_flow_test import KokoroHandler
+from tts.tests.tts_test_support import KokoroHandler
 
 
 class QuestionBundleCLITests(unittest.TestCase):

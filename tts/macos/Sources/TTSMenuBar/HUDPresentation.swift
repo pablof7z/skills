@@ -17,16 +17,24 @@ enum WorkspaceAccent {
     }
 
     static func color(forAgentName name: String) -> Color {
-        color(forStableLabel: "agent:\\(name)")
+        color(forPaletteIndex: paletteIndex(forAgentName: name))
     }
 
     static func color(forStableLabel label: String) -> Color {
-        let hue = Double(paletteIndex(forStableLabel: label)) / Double(count)
+        color(forPaletteIndex: paletteIndex(forStableLabel: label))
+    }
+
+    static func color(forPaletteIndex index: Int) -> Color {
+        let hue = Double(index) / Double(count)
         return Color(hue: hue, saturation: 0.58, brightness: 0.78)
     }
 
     static func paletteIndex(forWorkspacePath path: String?) -> Int {
         paletteIndex(forStableLabel: projectLabel(forWorkspacePath: path))
+    }
+
+    static func paletteIndex(forAgentName name: String) -> Int {
+        paletteIndex(forStableLabel: "agent:\(name)")
     }
 
     static func paletteIndex(forStableLabel label: String) -> Int {
