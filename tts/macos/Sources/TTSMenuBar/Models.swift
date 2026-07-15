@@ -57,6 +57,13 @@ struct TTSAnswerAttachment: Codable, Identifiable, Equatable {
     }
 }
 
+struct TTSSelectedSuggestion: Codable, Equatable {
+    var id: String
+    var title: String
+    var description: String? = nil
+    var modified: Bool
+}
+
 struct TTSResponse: Codable, Equatable {
     var answer: String
     var suggestionIndex: Int?
@@ -65,6 +72,7 @@ struct TTSResponse: Codable, Equatable {
     var interaction: String
     var suggestionID: String? = nil
     var suggestionIDs: [String]? = nil
+    var selectedSuggestions: [TTSSelectedSuggestion]? = nil
     var attachments: [TTSAnswerAttachment]? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -75,8 +83,15 @@ struct TTSResponse: Codable, Equatable {
         case interaction
         case suggestionID = "suggestion_id"
         case suggestionIDs = "suggestion_ids"
+        case selectedSuggestions = "selected_suggestions"
         case attachments
     }
+}
+
+struct TTSQuestionDraftSuggestion: Equatable {
+    var id: String
+    var title: String
+    var description: String? = nil
 }
 
 struct TTSQuestion: Codable, Identifiable, Equatable {
@@ -97,6 +112,7 @@ struct TTSQuestionDraft: Equatable {
     var attachmentURLs: [URL] = []
     var interaction: String? = nil
     var suggestionIDs: [String] = []
+    var selectedSuggestions: [TTSQuestionDraftSuggestion] = []
 }
 
 extension TTSQuestion {

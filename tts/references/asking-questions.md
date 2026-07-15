@@ -70,13 +70,15 @@ Attachment entries may be path strings or objects with `path` plus optional
 
 ## Suggestions and answer UI
 
-The player always gives the user a freeform input box. Never add `Something
+The player always gives the user a freeform answer editor. Never add `Something
 else`, `Other`, or an equivalent catch-all suggestion.
 
 - Single-choice questions present suggestions as radio-style choices.
 - Multiple-choice questions present suggestions as checkboxes.
-- Suggestions are editable starting points, not locked answers.
-- The user can personalize a suggestion and attach files to that edit.
+- Suggestions are editable starting points, not locked answers. Editing exposes
+  both the title and description.
+- Freeform answers and suggestions open the same full editor, retain saved
+  drafts when reopened, and accept dropped or selected files.
 - For multiple choice, freeform text becomes an additional note alongside the
   selected suggestions.
 - The user submits the entire bundle atomically. A blank question is skipped.
@@ -95,10 +97,13 @@ freeform answer or attach them while editing a suggestion.
 
 ## Completion and lifecycle
 
-The command remains active until the user submits the bundle or the question is
-superseded. Run it with the execution environment's asynchronous capability when
-other work should continue. The tool output includes question status, submitted
-answers, selected suggestion IDs, edited answers, and answer-attachment paths.
+The question remains visible after playback until the user submits it, hides it,
+or it is superseded. The command remains active until submission or
+supersession. Run it with the execution environment's asynchronous capability
+when other work should continue. The tool output includes question status,
+submitted answers, selected suggestion IDs, each selected suggestion's final
+`title` and `description` under `selected_suggestions`, and answer-attachment
+paths.
 
 `--ask` is incompatible with `--no-play`.
 

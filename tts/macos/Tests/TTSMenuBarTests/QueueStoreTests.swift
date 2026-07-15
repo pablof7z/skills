@@ -1035,6 +1035,33 @@ struct QueueStoreTests {
     }
 
     @Test
+    func pendingQuestionIsRetainedAfterPlaybackEndsInEitherPlayerMode() {
+        var question = item(id: "pending-question", createdAt: 10)
+        question.kind = .question
+        question.questionStatus = .pending
+        var answered = question
+        answered.questionStatus = .answered
+
+        #expect(PendingQuestionRetention.shouldRetain(
+            lastCurrentItem: question,
+            lingeringItem: nil
+        ))
+        #expect(PendingQuestionRetention.shouldRetain(
+            lastCurrentItem: nil,
+            lingeringItem: question
+        ))
+        #expect(!PendingQuestionRetention.shouldRetain(
+            lastCurrentItem: answered,
+            lingeringItem: nil
+        ))
+        #expect(PendingQuestionRetention.retainedItem(
+            currentItem: nil,
+            lingeringItem: question,
+            lastCurrentItem: nil
+        )?.id == question.id)
+    }
+
+    @Test
     func unchangedHUDLayoutDoesNotRequestAnotherAnimation() {
         let frame = CGRect(x: 20, y: 20, width: 540, height: 470)
 
@@ -1512,7 +1539,12 @@ struct QueueStoreTests {
                 TTSQuestionDraft(
                     questionID: "q-01",
                     answer: "Use the shared model after validation",
-                    suggestionID: "q-01-s-01"
+                    suggestionID: "q-01-s-01",
+                    selectedSuggestions: [TTSQuestionDraftSuggestion(
+                        id: "q-01-s-01",
+                        title: "Use the shared model after validation",
+                        description: "Keep ownership shared after the validation pass."
+                    )]
                 ),
                 TTSQuestionDraft(questionID: "q-02", answer: "No change"),
             ]
@@ -1524,6 +1556,80 @@ struct QueueStoreTests {
         #expect(response.suggestionIndex == 0)
         #expect(response.modified)
         #expect(response.answer == "Use the shared model after validation")
+        #expect(response.selectedSuggestions == [TTSSelectedSuggestion(
+            id: "q-01-s-01",
+            title: "Use the shared model after validation",
+            description: "Keep ownership shared after the validation pass.",
+            modified: true
+        )])
+    }
+
+    @Test
+    func descriptionOnlySuggestionEditIsReturnedAndMarkedModified() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        let bundle = bundleItem(id: "description-edit")
+        try store.save(bundle)
+
+        let submitted = try store.submitBundle(
+            id: bundle.id,
+            drafts: [
+                TTSQuestionDraft(
+                    questionID: "q-01",
+                    answer: "Use the shared model",
+                    suggestionID: "q-01-s-01",
+                    selectedSuggestions: [TTSQuestionDraftSuggestion(
+                        id: "q-01-s-01",
+                        title: "Use the shared model",
+                        description: "Keep one source of truth and document its owner."
+                    )]
+                ),
+                TTSQuestionDraft(questionID: "q-02", answer: ""),
+            ]
+        )
+
+        let response = try #require(submitted.questions?[0].response)
+        #expect(response.modified)
+        #expect(response.selectedSuggestions?.first?.title == "Use the shared model")
+        #expect(
+            response.selectedSuggestions?.first?.description
+                == "Keep one source of truth and document its owner."
+        )
+    }
+
+    @Test
+    func suggestionDetailOrderMismatchIsRejectedAtomically() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = QueueStore(stateDirectory: directory)
+        var bundle = bundleItem(id: "detail-mismatch")
+        bundle.questions?[0].type = .multipleChoice
+        bundle.questions?[0].suggestions?.append(
+            TTSSuggestion(title: "Split the model", id: "q-01-s-02")
+        )
+        try store.save(bundle)
+
+        #expect(throws: QueueOperationError.invalidBundleDrafts(
+            "selected suggestion details must match selected ID order for question q-01"
+        )) {
+            try store.submitBundle(
+                id: bundle.id,
+                drafts: [
+                    TTSQuestionDraft(
+                        questionID: "q-01",
+                        answer: "Use the shared model, Split the model",
+                        suggestionIDs: ["q-01-s-01", "q-01-s-02"],
+                        selectedSuggestions: [
+                            TTSQuestionDraftSuggestion(id: "q-01-s-02", title: "Split the model"),
+                            TTSQuestionDraftSuggestion(id: "q-01-s-01", title: "Use the shared model"),
+                        ]
+                    ),
+                    TTSQuestionDraft(questionID: "q-02", answer: ""),
+                ]
+            )
+        }
+        #expect(try store.item(id: bundle.id)?.questionStatus == .pending)
     }
 
     @Test
@@ -1548,7 +1654,19 @@ struct QueueStoreTests {
                 TTSQuestionDraft(
                     questionID: "q-01",
                     answer: "Split the model, Use the shared model",
-                    suggestionIDs: ["q-01-s-02", "q-01-s-01"]
+                    suggestionIDs: ["q-01-s-02", "q-01-s-01"],
+                    selectedSuggestions: [
+                        TTSQuestionDraftSuggestion(
+                            id: "q-01-s-02",
+                            title: "Split the model",
+                            description: "Use distinct ownership."
+                        ),
+                        TTSQuestionDraftSuggestion(
+                            id: "q-01-s-01",
+                            title: "Use the shared model",
+                            description: "Keep one source of truth."
+                        ),
+                    ]
                 ),
                 TTSQuestionDraft(questionID: "q-02", answer: ""),
             ]
@@ -1560,6 +1678,7 @@ struct QueueStoreTests {
         #expect(response.suggestionID == nil)
         #expect(response.suggestionIndex == nil)
         #expect(!response.modified)
+        #expect(response.selectedSuggestions?.map(\.id) == ["q-01-s-02", "q-01-s-01"])
     }
 
     @Test
@@ -1616,13 +1735,28 @@ struct QueueStoreTests {
             answeredAt: 50,
             interaction: "suggestion",
             suggestionID: nil,
-            suggestionIDs: ["first", "second"]
+            suggestionIDs: ["first", "second"],
+            selectedSuggestions: [
+                TTSSelectedSuggestion(
+                    id: "first",
+                    title: "First",
+                    description: "First detail",
+                    modified: false
+                ),
+                TTSSelectedSuggestion(
+                    id: "second",
+                    title: "Second revised",
+                    description: nil,
+                    modified: true
+                ),
+            ]
         )
 
         let data = try JSONEncoder().encode(original)
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["suggestion_ids"] as? [String] == ["first", "second"])
         #expect(object["suggestion_id"] == nil)
+        #expect((object["selected_suggestions"] as? [[String: Any]])?.count == 2)
         let decoded = try JSONDecoder().decode(TTSResponse.self, from: data)
         #expect(decoded == original)
     }
