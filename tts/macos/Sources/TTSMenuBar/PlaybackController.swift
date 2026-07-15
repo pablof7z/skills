@@ -17,6 +17,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     private let mediaController: MediaController
     private let playbackRateStore: VoicePlaybackRateStore
     private let outputIsMuted: () -> Bool
+    private let idleSeconds: () -> TimeInterval
     private var player: AVAudioPlayer?
     private var refreshTimer: Timer?
     private var playbackStartTask: Task<Void, Never>?
@@ -28,13 +29,19 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         store: QueueStore = QueueStore(),
         mediaController: MediaController = MediaController(),
         playbackRateStore: VoicePlaybackRateStore? = nil,
-        outputIsMuted: @escaping () -> Bool = { SystemOutputMuteReader().isMuted() }
+        outputIsMuted: @escaping () -> Bool = { SystemOutputMuteReader().isMuted() },
+        idleSeconds: @escaping () -> TimeInterval = {
+            [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .mouseMoved, .scrollWheel]
+                .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }
+                .min() ?? .infinity
+        }
     ) {
         self.store = store
         self.mediaController = mediaController
         self.playbackRateStore = playbackRateStore
             ?? VoicePlaybackRateStore(stateDirectory: store.stateDirectory)
         self.outputIsMuted = outputIsMuted
+        self.idleSeconds = idleSeconds
         super.init()
     }
 
@@ -125,6 +132,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         guard !isSystemOutputMuted else { return }
         guard var item = currentItem, let player else { return }
         automaticallyPausedItemID = nil
+        markDirectInteraction(on: &item)
         if player.isPlaying {
             player.pause()
             item.status = .paused
@@ -168,23 +176,27 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         }
         playbackStartTask?.cancel()
         playbackStartTask = nil
+        recordDirectInteraction()
         player?.stop()
-        finishCurrent(success: true, error: nil)
+        finishCurrent(success: true, error: nil, terminalStatus: .interrupted)
     }
 
     private func skip(by seconds: TimeInterval) {
         guard let player else { return }
+        recordDirectInteraction()
         player.currentTime = min(max(0, player.currentTime + seconds), player.duration)
         currentTime = player.currentTime
     }
 
     func seek(to time: TimeInterval) {
         guard let player else { return }
+        recordDirectInteraction()
         player.currentTime = min(max(0, time), player.duration)
         currentTime = player.currentTime
     }
 
     func cyclePlaybackRate(for item: TTSItem) {
+        if currentItem?.id == item.id { recordDirectInteraction() }
         let current = currentItem?.id == item.id
             ? playbackRate
             : playbackRateStore.rate(for: item.voice)
@@ -240,7 +252,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         do {
             try store.save(requested)
             replaceItem(requested)
-            play(requested)
+            play(requested, initiator: .direct)
         } catch {
             NSLog("Unable to play selected TTS item: %@", error.localizedDescription)
         }
@@ -299,14 +311,27 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     func setArchived(_ archived: Bool, for item: TTSItem) {
-        guard item.status.isRecent, !item.isAttachmentPlayback else { return }
-        var updated = item
-        updated.isArchived = archived
+        guard !item.isAttachmentPlayback else { return }
         do {
-            try store.save(updated)
+            let updated = try store.setArchived(archived, id: item.id, actor: "tts-menu")
             replaceItem(updated)
         } catch {
             NSLog("Unable to update TTS archive state: %@", error.localizedDescription)
+        }
+    }
+
+    func answer(_ item: TTSItem, text: String, suggestionIndex: Int? = nil) {
+        do {
+            let updated = try store.answer(
+                id: item.id,
+                answer: text,
+                suggestionIndex: suggestionIndex,
+                interaction: suggestionIndex == nil ? "freeform" : "suggestion"
+            )
+            replaceItem(updated)
+        } catch {
+            NSLog("Unable to answer TTS question: %@", error.localizedDescription)
+            refresh()
         }
     }
 
@@ -436,7 +461,10 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             ?? items.first { $0.status == .queued }
     }
 
-    private func play(_ queuedItem: TTSItem) {
+    private func play(
+        _ queuedItem: TTSItem,
+        initiator: TTSPlaybackInitiator = .automatic
+    ) {
         guard !isPlaybackBlocked else { return }
         guard FileManager.default.fileExists(atPath: queuedItem.outputFile) else {
             fail(queuedItem, message: "Audio file is no longer available.")
@@ -462,6 +490,16 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             item.duration = audioPlayer.duration
             item.error = nil
             item.playbackOffset = nil
+            item.playbackInitiator = initiator
+            item.engagement = initiator == .direct ? .directInteraction : .unknown
+            item.userActivity = TTSUserActivity(
+                idleSecondsAtStart: idleSeconds(),
+                idleSecondsAtEnd: nil,
+                activityObserved: false,
+                directInteraction: initiator == .direct,
+                lastInteractionAt: initiator == .direct ? item.startedAt : nil,
+                recordedAt: item.startedAt ?? Int64(Date().timeIntervalSince1970)
+            )
             try store.save(item)
 
             player = audioPlayer
@@ -554,7 +592,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         }
     }
 
-    private func finishCurrent(success: Bool, error: String?) {
+    private func finishCurrent(
+        success: Bool,
+        error: String?,
+        terminalStatus: PlaybackStatus? = nil
+    ) {
         guard var item = currentItem else { return }
         let parentReturn = success
             ? item.parentItemID.flatMap { parentID in
@@ -563,12 +605,15 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             : nil
         playbackStartTask?.cancel()
         playbackStartTask = nil
-        item.status = success ? .played : .failed
+        item.status = terminalStatus ?? (success ? .played : .failed)
         item.completedAt = Int64(Date().timeIntervalSince1970)
         item.duration = player?.duration ?? item.duration
         item.error = error
-        if success, !item.isAttachmentPlayback {
+        finalizeEngagement(on: &item)
+        if item.status == .played, !item.isAttachmentPlayback {
             item.isUnheard = false
+        } else if item.status == .interrupted, !item.isAttachmentPlayback {
+            item.isUnheard = true
         }
         try? store.save(item)
 
@@ -610,10 +655,15 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         playbackStartTask?.cancel()
         playbackStartTask = nil
         player?.stop()
-        item.status = .played
+        markDirectInteraction(on: &item)
+        item.status = .interrupted
+        if !item.isAttachmentPlayback {
+            item.isUnheard = true
+        }
         item.completedAt = Int64(Date().timeIntervalSince1970)
         item.duration = player?.duration ?? item.duration
         item.error = nil
+        finalizeEngagement(on: &item)
         try? store.save(item)
 
         player = nil
@@ -660,6 +710,60 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
                 }
                 return $0.createdAt < $1.createdAt
             }
+        }
+    }
+
+    private func recordDirectInteraction() {
+        guard var item = currentItem else { return }
+        markDirectInteraction(on: &item)
+        try? store.save(item)
+        replaceItem(item)
+    }
+
+    private func markDirectInteraction(on item: inout TTSItem) {
+        let now = Int64(Date().timeIntervalSince1970)
+        var activity = item.userActivity ?? TTSUserActivity(
+            idleSecondsAtStart: nil,
+            idleSecondsAtEnd: nil,
+            activityObserved: false,
+            directInteraction: false,
+            lastInteractionAt: nil,
+            recordedAt: now
+        )
+        activity.directInteraction = true
+        activity.activityObserved = true
+        activity.lastInteractionAt = now
+        activity.recordedAt = now
+        item.userActivity = activity
+        item.engagement = .directInteraction
+    }
+
+    private func finalizeEngagement(on item: inout TTSItem) {
+        let now = Int64(Date().timeIntervalSince1970)
+        let idleAtEnd = idleSeconds()
+        var activity = item.userActivity ?? TTSUserActivity(
+            idleSecondsAtStart: nil,
+            idleSecondsAtEnd: nil,
+            activityObserved: false,
+            directInteraction: false,
+            lastInteractionAt: nil,
+            recordedAt: now
+        )
+        activity.idleSecondsAtEnd = idleAtEnd
+        let playbackElapsed = item.startedAt.map { max(0, TimeInterval(now - $0)) } ?? 0
+        if idleAtEnd < playbackElapsed {
+            activity.activityObserved = true
+        }
+        activity.recordedAt = now
+        item.userActivity = activity
+        if activity.directInteraction || item.playbackInitiator == .direct {
+            item.engagement = .directInteraction
+        } else if activity.activityObserved {
+            item.engagement = .presentUnconfirmed
+        } else if item.playbackInitiator == .automatic {
+            item.engagement = .unattendedLikely
+        } else {
+            item.engagement = .unknown
         }
     }
 }

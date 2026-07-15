@@ -104,15 +104,71 @@ Rules:
 ## Playback behavior
 
 By default, `scripts/tts` generates the primary MP3 and any narrated attachments
-in the foreground, then queues playback in the background. Do not detach
-generation inside the script: command completion is the reliable boundary for
-observing endpoint, setup, and attachment-generation failures.
+in the foreground, then queues playback in the background. Command completion is
+the reliable boundary for observing endpoint, setup, and attachment-generation
+failures.
 
 If the execution environment can run a command asynchronously, start the whole
 `scripts/tts` command with that capability when waiting would block unrelated
 work. Keep its execution handle and wait for completion before claiming that the
-spoken update was generated. Do not add shell-level `nohup`, `&`, or `disown` in
-examples; those hide completion and failure from the agent.
+spoken update was generated. Use the execution environment's process controls;
+do not add shell-specific process-management examples to the skill.
+
+## Questions and answers
+
+Use `--ask` when the spoken message is a question that should remain available
+for an answer. The command waits until the user answers or an agent supersedes
+the question, and its JSON output includes the answer. Run the command
+with the execution environment's asynchronous process capability when other work
+should continue while the question is pending.
+
+Offer optional answer ideas with `--suggestions` as a JSON array of title and
+description pairs:
+
+```bash
+./scripts/tts --ask \
+  --suggestions '[["Use the existing model", "Keep the current ownership boundary."], ["Split the model", "Give questions an independent lifecycle."]]' \
+  --message "Which direction should I take?"
+```
+
+Suggestions are editable starting points. The player always includes a freeform
+input, so never add a `Something else`, `Other`, or equivalent suggestion.
+`--ask` is incompatible with `--no-play`.
+
+Every invocation prints a machine-readable result containing its stable `id`;
+diagnostics go to standard error. Use that ID to inspect delivery and engagement
+evidence. Treat engagement as evidence, not proof: automatic playback without
+activity can be unattended, general activity confirms presence only, and direct
+player interaction is the strongest listening signal short of an answer.
+
+Inspect the shared queue with bounded pages (20 items by default, 100 maximum):
+
+```bash
+./scripts/tts-menu queue list
+./scripts/tts-menu queue list --offset 20 --limit 20
+./scripts/tts-menu queue list --mine
+./scripts/tts-menu queue get <id>
+./scripts/tts-menu queue wait <id>
+```
+
+The list output includes `pagination.next_offset`; use it to navigate rather
+than requesting the entire queue. The default view includes active items from
+all agents. Use `--archived` for archived items or `--all` for both.
+
+Archive only to hide an item; it does not cancel a pending answer. Restore with
+`queue restore`. When a new question replaces pending questions, supersede them
+atomically with a reason and one or more replacement IDs:
+
+```bash
+./scripts/tts-menu queue archive <id> --reason "No longer relevant."
+./scripts/tts-menu queue restore <id>
+./scripts/tts-menu queue supersede <id1> <id2> \
+  --superseded-by <id3> \
+  --reason "The questions overlapped and the replacement includes the missing nuance."
+```
+
+Only pending questions may be superseded. An answer and a supersession race are
+resolved atomically; the first terminal operation wins.
 
 On macOS, the first audible request starts a resident menu-bar app. It owns the
 playback queue and shows queued/current/recent speech. Playback lives in the
@@ -190,7 +246,7 @@ arrived, the playback backend checks Music and Spotify. If it actually pauses
 one of them, it leaves a two-second handoff before speech begins, then resumes
 the paused apps a few seconds after playback ends.
 
-- Use `--no-play` to generate the MP3 without playback and print its path only after the file exists.
+- Use `--no-play` to generate the MP3 without playback. Its JSON result includes the path only after the file exists.
 - Use `--message text` for an explicit primary message; the original positional message remains supported.
 - Use repeatable `--attach "Label" path` pairs to add durable supporting material.
 - Use `--no-media-pause` or `TTS_MEDIA_CONTROL=0` to skip media pausing.
@@ -203,4 +259,4 @@ normally `~/.local/state/tts/`.
 
 `./scripts/tts --agent-name "<your-agent-id>" --subject "<stable session topic>" "<message>"` will speak the subject, then the body.
 
-`./scripts/tts --no-play "<message>"` will generate the MP3, print its output path, and skip playback.
+`./scripts/tts --no-play "<message>"` generates the MP3, returns its stable ID and output path as JSON, and skips playback.

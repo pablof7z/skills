@@ -175,8 +175,10 @@ usage() {
   echo "  --attach label path        Attach labeled Markdown, text, image, audio, or another file. Repeatable." >&2
   echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
   echo "  --subject text             Optional spoken/display subject, 5 to 10 words." >&2
+  echo "  --ask                      Mark the message as a question and wait for the user's answer." >&2
+  echo "  --suggestions json         Suggested answers as JSON [[title, description], ...]." >&2
   echo "  --voice-id voice           Explicit Kokoro voice id." >&2
-  echo "  --no-play                  Print target MP3 path and generate it without playback." >&2
+  echo "  --no-play                  Generate without playback; JSON output includes the MP3 path." >&2
   echo "  --no-media-pause           Do not pause/resume media apps." >&2
   echo "  --handoff-delay seconds    Gap after pausing active media before speech (default: 2)." >&2
   echo "  --resume-delay seconds     Delay before resuming paused media." >&2
@@ -184,6 +186,8 @@ usage() {
 }
 
 NO_PLAY=0
+ASK=0
+SUGGESTIONS_JSON="[]"
 MEDIA_CONTROL="${TTS_MEDIA_CONTROL:-1}"
 HANDOFF_DELAY="${TTS_MEDIA_HANDOFF_DELAY_SECONDS:-2}"
 RESUME_DELAY="${TTS_RESUME_DELAY_SECONDS:-3}"
@@ -419,10 +423,14 @@ write_macos_item_record() {
     "$status" \
     "$completed_at" \
     "$error_message" \
-    "$generation_duration" <<'PY'
+    "$generation_duration" \
+    "$ASK" \
+    "$SUGGESTIONS_JSON" <<'PY'
 import json
+import fcntl
 import os
 import sys
+import tempfile
 
 (
     destination,
@@ -446,6 +454,8 @@ import sys
     completed_at,
     error,
     generation_duration,
+    ask,
+    suggestions_json,
 ) = sys.argv[1:]
 
 def optional(value):
@@ -471,6 +481,21 @@ if attachment_manifest and os.path.isfile(attachment_manifest):
     except (OSError, ValueError):
         attachments = None
 
+state_directory = os.path.dirname(os.path.dirname(destination))
+os.makedirs(state_directory, exist_ok=True)
+lock_handle = open(os.path.join(state_directory, "operations.flock"), "a+")
+fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+
+existing = {}
+existing_path = os.path.join(os.path.dirname(destination), f"{item_id}.json")
+try:
+    with open(existing_path, encoding="utf-8") as handle:
+        loaded = json.load(handle)
+    if isinstance(loaded, dict):
+        existing = loaded
+except (OSError, ValueError):
+    pass
+
 item = {
     "id": item_id,
     "text": text,
@@ -495,16 +520,36 @@ item = {
     "retry_command": optional(retry_command),
     "generation_duration": float(generation_duration) if generation_duration else None,
     "is_unheard": True,
+    "kind": "question" if ask == "1" else "speech",
+    "question_status": existing.get("question_status", "pending") if ask == "1" else None,
+    "suggestions": json.loads(suggestions_json) if ask == "1" else [],
+    "response": existing.get("response"),
+    "is_archived": existing.get("is_archived", False),
+    "archived_at": existing.get("archived_at"),
+    "archive_reason": existing.get("archive_reason"),
+    "archived_by": existing.get("archived_by"),
+    "superseded_by": existing.get("superseded_by", []),
+    "playback_initiator": existing.get("playback_initiator", "automatic"),
+    "engagement": existing.get("engagement", "unknown"),
+    "user_activity": existing.get("user_activity"),
 }
 
-with open(destination, "w", encoding="utf-8") as handle:
-    json.dump(item, handle, indent=2, sort_keys=True)
-    handle.write("\n")
+descriptor, temporary = tempfile.mkstemp(prefix=f".{item_id}.", suffix=".tmp", dir=os.path.dirname(destination))
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(item, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(temporary, destination)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    lock_handle.close()
 PY
 }
 
 begin_macos_generation() {
-  local state_dir items_dir item_id item_file temporary_file
+  local state_dir items_dir item_id item_file
   local menu_command
 
   if ! command -v python3 >/dev/null 2>&1; then
@@ -522,13 +567,10 @@ begin_macos_generation() {
 
   item_id="$ITEM_ID"
   item_file="$items_dir/$item_id.json"
-  temporary_file="$items_dir/.$item_id.tmp"
-  if ! write_macos_item_record "$temporary_file" "generating"; then
-    rm -f "$temporary_file"
+  if ! write_macos_item_record "$item_file" "generating"; then
     return 1
   fi
 
-  mv "$temporary_file" "$item_file"
   if env \
     TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
     TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
@@ -539,39 +581,72 @@ begin_macos_generation() {
     return 0
   fi
 
-  rm -f "$item_file"
   return 1
 }
 
+begin_durable_generation() {
+  local state_dir items_dir item_file
+  command -v python3 >/dev/null 2>&1 || return 1
+  state_dir="$(tts_state_dir)"
+  items_dir="$state_dir/items"
+  mkdir -p "$items_dir" || return 1
+  item_file="$items_dir/$ITEM_ID.json"
+  if ! write_macos_item_record "$item_file" "generating"; then
+    return 1
+  fi
+  MACOS_GENERATION_ACTIVE=1
+  MACOS_ITEM_FILE="$item_file"
+}
+
+persist_durable_status() {
+  local status="$1"
+  local completed_at="${2:-}"
+  local state_dir items_dir item_file generation_duration
+  state_dir="$(tts_state_dir)"
+  items_dir="$state_dir/items"
+  mkdir -p "$items_dir" || return 1
+  item_file="$items_dir/$ITEM_ID.json"
+  generation_duration=$(( $(date +%s) - ITEM_CREATED_AT ))
+  write_macos_item_record "$item_file" "$status" "$completed_at" "" "$generation_duration"
+  MACOS_GENERATION_ACTIVE=0
+  MACOS_ITEM_FILE="$item_file"
+}
+
+emit_tts_result() {
+  local status="$1"
+  python3 - "$ITEM_ID" "$status" "$OUTPUT_FILE" <<'PY'
+import json
+import sys
+print(json.dumps({"id": sys.argv[1], "status": sys.argv[2], "output_file": sys.argv[3]}, sort_keys=True))
+PY
+}
+
+wait_for_question_answer() {
+  local menu_command="${TTS_MENU_COMMAND:-$SCRIPT_DIR/tts-menu}"
+  "$menu_command" queue wait "$ITEM_ID"
+}
+
 mark_macos_generation_failed() {
-  local completed_at temporary_file generation_duration
+  local completed_at generation_duration
   [ "$MACOS_GENERATION_ACTIVE" -eq 1 ] || return 0
   [ -n "$MACOS_ITEM_FILE" ] || return 0
   MACOS_GENERATION_ACTIVE=0
   completed_at="$(date +%s)"
   generation_duration=$(( completed_at - ITEM_CREATED_AT ))
-  temporary_file="${MACOS_ITEM_FILE%/*}/.${ITEM_ID}.failed.tmp"
   if write_macos_item_record \
-    "$temporary_file" \
+    "$MACOS_ITEM_FILE" \
     "failed" \
     "$completed_at" \
     "${GENERATION_FAILURE_MESSAGE:-Speech generation failed.}" \
-    "$generation_duration"; then
-    mv "$temporary_file" "$MACOS_ITEM_FILE"
-  else
-    rm -f "$temporary_file"
-  fi
+    "$generation_duration"; then :; fi
 }
 
 discard_macos_generation() {
-  if [ "$MACOS_GENERATION_ACTIVE" -eq 1 ] && [ -n "$MACOS_ITEM_FILE" ]; then
-    rm -f "$MACOS_ITEM_FILE"
-  fi
   MACOS_GENERATION_ACTIVE=0
 }
 
 queue_macos_playback() {
-  local state_dir items_dir item_id item_file temporary_file generation_duration
+  local state_dir items_dir item_id item_file generation_duration
   local menu_command
 
   if ! command -v python3 >/dev/null 2>&1; then
@@ -593,17 +668,14 @@ queue_macos_playback() {
 
   item_id="$ITEM_ID"
   item_file="$items_dir/$item_id.json"
-  temporary_file="$items_dir/.$item_id.tmp"
   generation_duration=$(( $(date +%s) - ITEM_CREATED_AT ))
 
-  if ! write_macos_item_record "$temporary_file" "queued" "" "" "$generation_duration"; then
-    rm -f "$temporary_file"
+  if ! write_macos_item_record "$item_file" "queued" "" "" "$generation_duration"; then
     discard_macos_generation
     return 1
   fi
 
   resume_paused_media 0
-  mv "$temporary_file" "$item_file"
   if env \
     TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
     TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
@@ -675,7 +747,6 @@ PY
     return 0
   fi
 
-  rm -f "$item_file"
   MACOS_GENERATION_ACTIVE=0
   echo "Warning: native TTS queue failed to start; using fallback playback." >&2
   return 1
@@ -707,6 +778,18 @@ while [ "$#" -gt 0 ]; do
     --no-play)
       NO_PLAY=1
       shift
+      ;;
+    --ask)
+      ASK=1
+      shift
+      ;;
+    --suggestions)
+      if [ -z "${2:-}" ]; then
+        echo "Error: --suggestions requires a JSON value." >&2
+        exit 1
+      fi
+      SUGGESTIONS_JSON="$2"
+      shift 2
       ;;
     --no-media-pause)
       MEDIA_CONTROL=0
@@ -784,6 +867,47 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "$ASK" -eq 1 ] && [ "$NO_PLAY" -eq 1 ]; then
+  echo "Error: --ask is not compatible with --no-play." >&2
+  exit 1
+fi
+
+if [ "$ASK" -ne 1 ] && [ "$SUGGESTIONS_JSON" != "[]" ]; then
+  echo "Error: --suggestions requires --ask." >&2
+  exit 1
+fi
+
+if ! SUGGESTIONS_JSON="$(python3 - "$SUGGESTIONS_JSON" <<'PY'
+import json
+import sys
+
+try:
+    value = json.loads(sys.argv[1])
+except json.JSONDecodeError as error:
+    print(f"Error: --suggestions must be valid JSON: {error.msg}", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(value, list):
+    print("Error: --suggestions must be a JSON array.", file=sys.stderr)
+    raise SystemExit(1)
+result = []
+for index, entry in enumerate(value):
+    if not isinstance(entry, list) or len(entry) != 2:
+        print(f"Error: suggestion {index + 1} must be [title, description].", file=sys.stderr)
+        raise SystemExit(1)
+    title, description = entry
+    if not isinstance(title, str) or not title.strip():
+        print(f"Error: suggestion {index + 1} title must be a non-empty string.", file=sys.stderr)
+        raise SystemExit(1)
+    if not isinstance(description, str):
+        print(f"Error: suggestion {index + 1} description must be a string.", file=sys.stderr)
+        raise SystemExit(1)
+    result.append({"title": title.strip(), "description": description.strip()})
+print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+PY
+)"; then
+  exit 1
+fi
+
 if [ -n "$PLAY_EXISTING_FILE" ] && { [ "${#POSITIONAL[@]}" -gt 0 ] || [ -n "$MESSAGE" ] || [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; }; then
   echo "Error: --play-existing does not accept message or attachment arguments." >&2
   usage
@@ -849,7 +973,7 @@ fi
 SESSION_STORAGE_ID="$(safe_path_component "$SESSION_STORAGE_SOURCE")"
 SESSIONS_ROOT="${TTS_SESSIONS_ROOT:-$HOME/.agents/skills/tts/sessions}"
 ITEM_CREATED_AT="$(date +%s)"
-ITEM_ID="$ITEM_CREATED_AT-$$-$RANDOM"
+ITEM_ID="${TTS_ITEM_ID:-$ITEM_CREATED_AT-$$-$RANDOM}"
 if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
   ITEM_DIRECTORY="$(dirname -- "${TTS_OUTPUT_FILE:?TTS_OUTPUT_FILE is required for attachment generation}")"
 else
@@ -966,6 +1090,52 @@ cleanup() {
 
 trap cleanup EXIT
 
+update_existing_playback_status() {
+  local status="$1"
+  local state_dir item_file
+  [ -n "${TTS_ITEM_ID:-}" ] || return 0
+  state_dir="$(tts_state_dir)"
+  item_file="$state_dir/items/$TTS_ITEM_ID.json"
+  python3 - "$item_file" "$status" <<'PY'
+import json
+import fcntl
+import os
+import sys
+import tempfile
+import time
+
+path, status = sys.argv[1:]
+state_directory = os.path.dirname(os.path.dirname(path))
+os.makedirs(state_directory, exist_ok=True)
+lock_handle = open(os.path.join(state_directory, "operations.flock"), "a+")
+fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+try:
+    with open(path, encoding="utf-8") as handle:
+        item = json.load(handle)
+except (OSError, ValueError):
+    raise SystemExit(0)
+now = int(time.time())
+item["status"] = status
+if status == "playing":
+    item["started_at"] = now
+elif status in ("played", "failed"):
+    item["completed_at"] = now
+    item["is_unheard"] = status != "played"
+directory = os.path.dirname(path)
+descriptor, temporary = tempfile.mkstemp(prefix=".tts-playback-", dir=directory)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(item, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    lock_handle.close()
+PY
+}
+
 if [ -n "$PLAY_EXISTING_FILE" ]; then
   OUTPUT_FILE="$PLAY_EXISTING_FILE"
   if [ ! -s "$OUTPUT_FILE" ]; then
@@ -979,13 +1149,15 @@ if [ -n "$PLAY_EXISTING_FILE" ]; then
     sleep "$HANDOFF_DELAY" 2>/dev/null || true
   fi
 
+  update_existing_playback_status "playing"
   if command -v afplay >/dev/null 2>&1; then
     afplay "$OUTPUT_FILE"
   elif command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$OUTPUT_FILE" >/dev/null 2>&1 || true
   else
-    echo "Tip: open the file manually: $OUTPUT_FILE"
+    echo "Tip: open the file manually: $OUTPUT_FILE" >&2
   fi
+  update_existing_playback_status "played"
 
   exit 0
 fi
@@ -1006,8 +1178,12 @@ if [[ "$API_URL" != */v1/audio/speech ]]; then
 fi
 CAPTIONED_API_URL="${KOKORO_CAPTIONED_API_ENDPOINT:-${API_URL%/v1/audio/speech}/dev/captioned_speech}"
 
-if [ "$NO_PLAY" -ne 1 ] && macos_menu_enabled; then
-  begin_macos_generation || true
+if ! truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
+  if [ "$NO_PLAY" -ne 1 ] && macos_menu_enabled; then
+    begin_macos_generation || begin_durable_generation || true
+  else
+    begin_durable_generation || true
+  fi
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -1147,12 +1323,20 @@ if [ ! -s "$OUTPUT_FILE" ]; then
 fi
 
 if [ "$NO_PLAY" -eq 1 ]; then
-  echo "$OUTPUT_FILE"
+  if ! truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
+    persist_durable_status "generated" "$(date +%s)" || true
+  fi
+  emit_tts_result "generated"
   exit 0
 fi
 
-echo "✓ Generated: $OUTPUT_FILE"
+echo "Generated TTS audio: $OUTPUT_FILE" >&2
 if macos_menu_enabled && queue_macos_playback; then
+  if [ "$ASK" -eq 1 ]; then
+    wait_for_question_answer
+  else
+    emit_tts_result "queued"
+  fi
   exit 0
 fi
 
@@ -1162,6 +1346,7 @@ if ! mkdir -p "$state_dir" 2>/dev/null; then
   mkdir -p "$state_dir" 2>/dev/null || state_dir="/tmp"
 fi
 log_file="$state_dir/tts-playback-$(date +%Y%m%d-%H%M%S)-$$.log"
+persist_durable_status "queued" || true
 playback_args=(--play-existing "$OUTPUT_FILE")
 if [ -n "$AGENT_NAME" ]; then
   playback_args+=(--agent-name "$AGENT_NAME")
@@ -1171,8 +1356,14 @@ nohup env \
   TTS_MEDIA_CONTROL="$MEDIA_CONTROL" \
   TTS_MEDIA_HANDOFF_DELAY_SECONDS="$HANDOFF_DELAY" \
   TTS_RESUME_DELAY_SECONDS="$RESUME_DELAY" \
+  TTS_ITEM_ID="$ITEM_ID" \
   "$0" "${playback_args[@]}" \
   </dev/null >>"$log_file" 2>&1 &
 pid=$!
 disown "$pid" 2>/dev/null || true
 printf 'Queued TTS playback in background: pid %s, log %s\n' "$pid" "$log_file" >&2
+if [ "$ASK" -eq 1 ]; then
+  wait_for_question_answer
+else
+  emit_tts_result "queued"
+fi
