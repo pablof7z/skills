@@ -41,7 +41,8 @@ text is not accepted for structured asks. The JSON requires a nonempty
 
 - An optional root `questions_preamble` that transitions from the update into
   the questions.
-- Per-question `title`, `description`, `type`, `attachments`, and `suggestions`.
+- Per-question `short_title`, `title`, `description`, `type`, `attachments`, and
+  `suggestions`.
 - Per-suggestion `title`, `description`, and `attachments`.
 
 Use `questions_preamble` only when a transition adds clarity. It is spoken
@@ -49,6 +50,11 @@ immediately after `--message`, so make it a short high-level explanation of
 what remains to decide without restating the update or listing the questions.
 For example: `There are two release details to settle before I finish.` Root
 `title`, `description`, and `attachments` are not supported.
+
+Every question requires both `short_title` and `title`. Keep `short_title` very
+short—usually two to four words—because it labels a narrow tab. Put the full,
+natural question in `title`; do not shorten the actual question to fit the tab.
+Individual question titles and descriptions are displayed but are not spoken.
 
 Question `type` defaults to `single_choice`. Use `multiple_choice` only when
 several suggestions may be selected.
@@ -61,12 +67,14 @@ several suggestions may be selected.
   --ask '{
     "questions_preamble": "There are two release details to settle before I finish.",
     "questions": [{
+      "short_title": "Rollout",
       "title": "Which rollout should I use?",
       "suggestions": [{
         "title": "Progressive",
         "description": "Start with a narrow cohort."
       }]
     }, {
+      "short_title": "Notifications",
       "title": "Which teams should I notify?",
       "type": "multiple_choice",
       "suggestions": [{"title": "Support"}, {"title": "Operations"}]

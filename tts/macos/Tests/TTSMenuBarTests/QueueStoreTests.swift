@@ -1932,6 +1932,7 @@ struct QueueStoreTests {
             TTSQuestion(
                 id: "q-01",
                 title: "Which model?",
+                shortTitle: "Model",
                 suggestions: [
                     TTSSuggestion(
                         title: "Use the shared model",
@@ -1943,6 +1944,7 @@ struct QueueStoreTests {
             TTSQuestion(
                 id: "q-02",
                 title: "Any caveats?",
+                shortTitle: "Caveats",
                 suggestions: [
                     TTSSuggestion(
                         title: "No change",

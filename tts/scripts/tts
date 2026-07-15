@@ -435,6 +435,7 @@ for question_index, raw_question in enumerate(bundle["questions"], 1):
         })
     questions.append({
         "id": question_id,
+        "short_title": raw_question["short_title"],
         "title": raw_question["title"],
         "type": raw_question.get("type", "single_choice"),
         "description": raw_question.get("description"),
@@ -1155,6 +1156,9 @@ try:
         title = optional_text(question, "title", context)
         if not title:
             raise ValueError(f"{context} title must be a non-empty string")
+        short_title = optional_text(question, "short_title", context)
+        if not short_title:
+            raise ValueError(f"{context} short_title must be a non-empty string")
         question_type = question.get("type", "single_choice")
         if question_type not in ("single_choice", "multiple_choice"):
             raise ValueError(f"{context} type must be single_choice or multiple_choice")
@@ -1175,6 +1179,7 @@ try:
                 "attachments": attachments(suggestion, suggestion_context),
             })
         questions.append({
+            "short_title": short_title,
             "title": title,
             "type": question_type,
             "description": optional_text(question, "description", context),
@@ -1235,8 +1240,6 @@ import sys
 message = sys.argv[1]
 value = json.loads(sys.argv[2])
 parts = [message, value.get("questions_preamble")]
-for question in value["questions"]:
-    parts.extend((question["title"], question.get("description")))
 print("\n\n".join(part for part in parts if part))
 PY
 )"
@@ -1313,6 +1316,7 @@ import sys
 print(json.dumps({
     "questions_preamble": None,
     "questions": [{
+        "short_title": sys.argv[1],
         "title": sys.argv[1],
         "type": "single_choice",
         "description": None,
