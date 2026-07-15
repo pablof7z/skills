@@ -19,7 +19,7 @@ Use bare `--ask` with `--message` for one question. Offer optional answer ideas
 with `--suggestions` as JSON title-and-description pairs:
 
 ```bash
-./scripts/tts \
+<skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "Choosing the implementation ownership boundary" \
   --ask \
@@ -60,7 +60,7 @@ Question `type` defaults to `single_choice`. Use `multiple_choice` only when
 several suggestions may be selected.
 
 ```bash
-./scripts/tts \
+<skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "Choosing the rollout and notification plan" \
   --message "The release candidate passed its automated checks. I narrowed the remaining decisions to rollout risk and who needs advance notice." \
@@ -131,12 +131,12 @@ paths.
 Inspect or manage pending questions only when needed:
 
 ```bash
-./scripts/tts-menu queue list --mine
-./scripts/tts-menu queue get <id>
-./scripts/tts-menu queue wait <id>
-./scripts/tts-menu queue archive <id> --reason "No longer relevant."
-./scripts/tts-menu queue restore <id>
-./scripts/tts-menu queue supersede <old-id> \
+<skill-dir>/scripts/tts-menu queue list --mine
+<skill-dir>/scripts/tts-menu queue get <id>
+<skill-dir>/scripts/tts-menu queue wait <id>
+<skill-dir>/scripts/tts-menu queue archive <id> --reason "No longer relevant."
+<skill-dir>/scripts/tts-menu queue restore <id>
+<skill-dir>/scripts/tts-menu queue supersede <old-id> \
   --superseded-by <replacement-id> \
   --reason "The replacement includes the missing nuance."
 ```

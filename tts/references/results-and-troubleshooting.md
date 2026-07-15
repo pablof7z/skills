@@ -8,7 +8,7 @@ queue inspection, or failure diagnosis.
 Use `--no-play` to generate an MP3 without queueing playback:
 
 ```bash
-./scripts/tts \
+<skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "Generating the requested standalone audio file" \
   --no-play \
@@ -21,11 +21,11 @@ stable item ID and output path. `--no-play` cannot be combined with `--ask`.
 ## Inspect status when needed
 
 ```bash
-./scripts/tts-menu status
-./scripts/tts-menu status --json
-./scripts/tts-menu queue list --mine
-./scripts/tts-menu queue get <id>
-./scripts/tts-menu queue wait <id>
+<skill-dir>/scripts/tts-menu status
+<skill-dir>/scripts/tts-menu status --json
+<skill-dir>/scripts/tts-menu queue list --mine
+<skill-dir>/scripts/tts-menu queue get <id>
+<skill-dir>/scripts/tts-menu queue wait <id>
 ```
 
 Treat engagement as evidence, not proof that the user heard an update.

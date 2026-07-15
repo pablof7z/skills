@@ -4,7 +4,7 @@ Set up your own hosted Kokoro FastAPI instance (for example, a CPU-friendly self
 
 ## Required
 
-Set this environment variable before running `./scripts/tts`:
+Set this environment variable before running `<skill-dir>/scripts/tts`:
 
 - `KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"`
 
