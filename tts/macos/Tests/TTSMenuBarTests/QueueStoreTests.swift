@@ -1037,7 +1037,7 @@ struct QueueStoreTests {
     }
 
     @Test
-    func pendingQuestionIsRetainedAfterPlaybackEndsInEitherPlayerMode() {
+    func pendingQuestionRetentionIdentifiesUnresolvedItems() {
         var question = item(id: "pending-question", createdAt: 10)
         question.kind = .question
         question.questionStatus = .pending
@@ -1061,6 +1061,26 @@ struct QueueStoreTests {
             lingeringItem: question,
             lastCurrentItem: nil
         )?.id == question.id)
+    }
+
+    @Test
+    func playerBackNavigationSuppressesOnlyTheCurrentItem() {
+        #expect(!PlayerNavigationPolicy.shouldDisplay(
+            itemID: "question",
+            hiddenItemID: "question"
+        ))
+        #expect(PlayerNavigationPolicy.shouldDisplay(
+            itemID: "next-update",
+            hiddenItemID: "question"
+        ))
+        #expect(PlayerNavigationPolicy.hiddenItemID(
+            afterAutomaticallySelecting: "question",
+            currentlyHidden: "question"
+        ) == "question")
+        #expect(PlayerNavigationPolicy.hiddenItemID(
+            afterAutomaticallySelecting: "next-update",
+            currentlyHidden: "question"
+        ) == nil)
     }
 
     @Test
