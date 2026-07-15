@@ -1629,7 +1629,12 @@ private struct PlayerHistoryView: View {
                         generationProgress: controller.generationProgress(for: item),
                         onArchive: { controller.setArchived(!item.archived, for: item) }
                     )
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowInsets(EdgeInsets(
+                            top: 8,
+                            leading: 16,
+                            bottom: item.status == .generating ? 0 : 8,
+                            trailing: 16
+                        ))
                 }
                 .listStyle(.plain)
             }
@@ -1696,19 +1701,6 @@ private struct PlayerHistoryRow: View {
                         .font(.system(size: 15, weight: item.unheard ? .semibold : .regular))
                         .foregroundStyle(summaryColor)
                         .lineLimit(1)
-                    if item.status == .generating {
-                        GeometryReader { geometry in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.primary.opacity(0.10))
-                                Capsule()
-                                    .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath).opacity(0.82))
-                                    .frame(width: max(3, geometry.size.width * generationProgress))
-                            }
-                        }
-                        .frame(height: 2)
-                        .padding(.top, 2)
-                        .accessibilityLabel("Generating audio")
-                    }
                 }
 
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1746,6 +1738,21 @@ private struct PlayerHistoryRow: View {
             }
         }
         .padding(.vertical, 5)
+        .overlay(alignment: .bottom) {
+            if item.status == .generating {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Rectangle().fill(Color.primary.opacity(0.10))
+                        Rectangle()
+                            .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath).opacity(0.82))
+                            .frame(width: max(3, geometry.size.width * generationProgress))
+                    }
+                }
+                .frame(height: 2)
+                .padding(.leading, 17)
+                .accessibilityLabel("Generating audio")
+            }
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if item.status != .generating {
                 Button(role: item.archived ? nil : .destructive, action: onArchive) {
