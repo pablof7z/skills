@@ -5,7 +5,11 @@ description: Generate spoken updates and answerable spoken questions through a K
 
 # TTS
 
-Use `scripts/tts` to generate spoken updates.
+## Script location
+
+Resolve `<skill-dir>` to the directory containing this `SKILL.md`. Run
+`<skill-dir>/scripts/tts`; do not assume the current working directory is the
+skill directory or that TTS is on `PATH`.
 
 ## Invoke
 
@@ -13,7 +17,7 @@ Every invocation requires a stable agent seed name and subject. For an ordinary
 spoken update, put the words to say in `--message`:
 
 ```bash
-./scripts/tts \
+<skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "<5-to-10-word subject>" \
   --message "<spoken update>"
@@ -27,7 +31,7 @@ findings, or decision context—attach it. Treat supporting material as a normal
 part of a substantive update, not an exception:
 
 ```bash
-./scripts/tts \
+<skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "<5-to-10-word subject>" \
   --message "<spoken update>" \
@@ -45,9 +49,10 @@ path, and `queued` status. With `--no-play`, it prints `generated` instead.
 ## Conditional guidance
 
 - **Questions**: Before using `--ask`, read
-  [asking-questions.md](references/asking-questions.md). The user's submitted
-  answers, selected-suggestion details, and answer-attachment paths return in
-  the tool output.
+  [asking-questions.md](references/asking-questions.md). Bare `--ask` uses
+  `--message`; a structured question bundle supplies its own spoken content.
+  Submitted answers, selected-suggestion details, and answer-attachment paths
+  return in the TTS tool output.
 - **Attachments or formatted code**: Read
   [rich-content.md](references/rich-content.md).
 - **No-play generation, status inspection, or failures**: Read

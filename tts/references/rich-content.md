@@ -9,7 +9,7 @@ Use repeatable `--attach "Label" path` pairs and pass the primary body with
 `--message`:
 
 ```bash
-./scripts/tts \
+<skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "Supporting artifacts for the implementation update" \
   --message "The implementation is ready. I attached the proposal and mockup." \
