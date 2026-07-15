@@ -173,13 +173,12 @@ usage() {
   echo "Options:" >&2
   echo "  --message text             Explicit primary message (positional text remains supported)." >&2
   echo "  --attach label path        Attach labeled Markdown, text, image, audio, or another file. Repeatable." >&2
-  echo "  --agent-name name          Stable agent identity when one exists beyond the harness name." >&2
-  echo "  --subject text             Optional spoken/display subject, 5 to 10 words." >&2
+  echo "  --agent-name seed          Required stable agent seed name." >&2
+  echo "  --subject text             Required subject; write 5 to 10 words." >&2
   echo "  --ask [json|@file]         Ask one legacy question or a structured question bundle." >&2
   echo "  --suggestions json         Suggested answers as JSON [[title, description], ...]." >&2
-  echo "  --voice-id voice           Explicit Kokoro voice id." >&2
   echo "  --no-play                  Generate without playback; JSON output includes the MP3 path." >&2
-  echo "Example: ./scripts/tts --message 'The fix is ready.' --attach 'Why this matters' ./why.md --attach 'Screenshot' ./screen.png" >&2
+  echo "Example: ./scripts/tts --agent-name agent-seed --subject 'Finishing the focused TTS implementation update' --message 'The fix is ready.'" >&2
 }
 
 NO_PLAY=0
@@ -190,7 +189,6 @@ RAW_BUNDLE_JSON=""
 QUESTION_BUNDLE_FILE=""
 SUBJECT=""
 AGENT_NAME=""
-VOICE_ID=""
 PLAY_EXISTING_FILE=""
 MESSAGE=""
 DETERMINISTIC_VOICES=(af_bella af_heart af_kore af_nova af_sarah am_michael am_puck)
@@ -1006,14 +1004,6 @@ while [ "$#" -gt 0 ]; do
       SUBJECT="$2"
       shift 2
       ;;
-    --voice-id)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --voice-id requires a value." >&2
-        exit 1
-      fi
-      VOICE_ID="$2"
-      shift 2
-      ;;
     --play-existing)
       if [ -z "${2:-}" ]; then
         echo "Error: --play-existing requires a file path." >&2
@@ -1218,7 +1208,7 @@ if [ -n "$MESSAGE" ] && [ "${#POSITIONAL[@]}" -gt 0 ]; then
   exit 1
 fi
 
-if [ "${#POSITIONAL[@]}" -gt 2 ]; then
+if [ "${#POSITIONAL[@]}" -gt 1 ]; then
   echo "Error: too many arguments." >&2
   usage
   exit 1
@@ -1231,12 +1221,6 @@ fi
 
 if [ -n "$ASK_PAYLOAD_SOURCE" ] && { [ -n "$MESSAGE" ] || [ "${#POSITIONAL[@]}" -gt 0 ]; }; then
   echo "Error: structured --ask JSON cannot be combined with message or positional arguments." >&2
-  exit 1
-fi
-
-if [ -n "$VOICE_ID" ] && [ -n "${POSITIONAL[1]:-}" ]; then
-  echo "Error: pass either --voice-id or a positional voice, not both." >&2
-  usage
   exit 1
 fi
 
@@ -1259,18 +1243,32 @@ TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
 TEXT=$(normalize_space "$TEXT")
 SUBJECT=$(normalize_space "$SUBJECT")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
+INTERNAL_CALL=0
+if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}" || truthy "${TTS_INTERNAL_RETRY:-0}"; then
+  INTERNAL_CALL=1
+fi
+if [ -z "$PLAY_EXISTING_FILE" ] && [ "$INTERNAL_CALL" -ne 1 ]; then
+  if [ -z "$AGENT_NAME" ]; then
+    echo "Error: --agent-name is required." >&2
+    exit 1
+  fi
+  if [ -z "$SUBJECT" ]; then
+    echo "Error: --subject is required." >&2
+    exit 1
+  fi
+fi
 VOICE_SEED="$(agent_identity)"
 if [ -n "$AGENT_NAME" ]; then
   VOICE_SEED="$AGENT_NAME"
 fi
-VOICE="${VOICE_ID:-${POSITIONAL[1]:-}}"
+VOICE="${TTS_INTERNAL_VOICE_ID:-}"
 if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   VOICE="$(select_voice_from_seed "$VOICE_SEED")"
 fi
 if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   SUBJECT_WORDS=$(word_count "$SUBJECT")
-  if [ "$SUBJECT_WORDS" -lt 5 ] || [ "$SUBJECT_WORDS" -gt 10 ]; then
-    echo "Error: --subject must be between 5 and 10 words." >&2
+  if [ "$SUBJECT_WORDS" -lt 5 ] || [ "$SUBJECT_WORDS" -gt 14 ]; then
+    echo "Error: --subject must be between 5 and 14 words." >&2
     exit 1
   fi
   TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")

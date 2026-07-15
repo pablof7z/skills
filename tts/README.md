@@ -25,7 +25,7 @@ The workflow owns more than text generation:
 - A brief can carry labeled attachments. The expanded player presents them in a compact accent-tinted rail: Markdown and text become optional narrated branches with readable previews, images open inline in the transcript surface, existing audio plays in context, and other files open in their default app. Supplemental narration returns to the main update at the saved position and never enters the ordinary queue until selected.
 - An ask can group optional questions into tabs with shared or question-specific context. Suggestions stack vertically as radio choices or checkboxes, remain editable in place through a focused sheet, and never remove the freeform answer. The user submits every tab together; blank tabs become skips, while dropped answer files are copied durably and returned to the asking agent with the response.
 - Agent name, voice, harness, workspace, and full session identifier make each update attributable.
-- An optional 5-to-10-word subject gives substantive updates a spoken, scannable title in the player and queue.
+- A required 5-to-10-word subject gives every update a spoken, scannable title in the player and queue.
 - Pause, timeline scrubbing, 15-second seek, and replay make it behave like a small podcast queue rather than a fire-and-forget alert.
 - A compact speed label on the floating player cycles through common playback rates and remembers the selected rate independently for each voice.
 - The menu-bar popup stays focused on queue operations—now playing, up next, and recent items—without duplicating the player or transcript.

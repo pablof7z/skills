@@ -173,7 +173,16 @@ class QueueCLITests(unittest.TestCase):
             )
             environment["TTS_SESSIONS_ROOT"] = str(self.state / "sessions")
             result = subprocess.run(
-                [str(self.tts), "--no-play", "--message", "Structured output test."],
+                [
+                    str(self.tts),
+                    "--agent-name",
+                    "structured-output-test",
+                    "--subject",
+                    "Testing stable structured output from TTS generation",
+                    "--no-play",
+                    "--message",
+                    "Structured output test.",
+                ],
                 env=environment,
                 text=True,
                 stdout=subprocess.PIPE,
@@ -207,7 +216,16 @@ class QueueCLITests(unittest.TestCase):
             )
             environment["TTS_SESSIONS_ROOT"] = str(self.state / "sessions")
             process = subprocess.Popen(
-                [str(self.tts), "--no-play", "--message", "Lock transition test."],
+                [
+                    str(self.tts),
+                    "--agent-name",
+                    "queue-transition-test",
+                    "--subject",
+                    "Testing locked queue transitions during TTS generation",
+                    "--no-play",
+                    "--message",
+                    "Lock transition test.",
+                ],
                 env=environment,
                 text=True,
                 stdout=subprocess.PIPE,

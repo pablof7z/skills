@@ -83,12 +83,13 @@ def prepare(item_path: Path, attachment: dict, voice: str, tts_command: Path) ->
         environment.update(
             {
                 "TTS_INTERNAL_ATTACHMENT_GENERATION": "1",
+                "TTS_INTERNAL_VOICE_ID": voice,
                 "TTS_OUTPUT_FILE": str(audio),
                 "TTS_TIMESTAMPS_FILE": str(timings),
             }
         )
         result = subprocess.run(
-            [str(tts_command), "--no-play", "--voice-id", voice, "--message", speech],
+            [str(tts_command), "--no-play", "--message", speech],
             env=environment,
             text=True,
             stdout=subprocess.DEVNULL,
