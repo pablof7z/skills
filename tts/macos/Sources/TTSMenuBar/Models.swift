@@ -285,8 +285,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var playbackInitiator: TTSPlaybackInitiator? = nil
     var engagement: TTSEngagement? = nil
     var userActivity: TTSUserActivity? = nil
-    var bundleTitle: String? = nil
-    var bundleDescription: String? = nil
+    var questionsPreamble: String? = nil
     var questions: [TTSQuestion]? = nil
     var primaryMessage: String? = nil
 
@@ -329,8 +328,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case playbackInitiator = "playback_initiator"
         case engagement
         case userActivity = "user_activity"
-        case bundleTitle = "bundle_title"
-        case bundleDescription = "bundle_description"
+        case questionsPreamble = "questions_preamble"
         case questions
         case primaryMessage = "primary_message"
     }
@@ -447,8 +445,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
             playbackInitiator: nil,
             engagement: nil,
             userActivity: nil,
-            bundleTitle: bundleTitle,
-            bundleDescription: bundleDescription,
+            questionsPreamble: questionsPreamble,
             questions: questions,
             primaryMessage: primaryMessage
         )

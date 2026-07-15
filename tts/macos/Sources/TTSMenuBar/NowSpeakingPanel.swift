@@ -1633,6 +1633,7 @@ private struct NowSpeakingHUDView: View {
     @State private var questionComposer = QuestionComposerModel()
     @StateObject private var answerEditorPresenter = AnswerEditorPresenter()
     @State private var isAnswerDropTarget = false
+    @State private var primaryMessageContentHeight: CGFloat = 150
 
     var body: some View {
         if let item = displayedItem {
@@ -1697,6 +1698,7 @@ private struct NowSpeakingHUDView: View {
             .animation(.easeInOut(duration: 0.2), value: presentation.isExpanded)
             .onChange(of: item.id) { _ in
                 answerEditorPresenter.cancel()
+                primaryMessageContentHeight = 150
                 questionComposer.reset()
                 prepareComposer(for: item)
             }
@@ -1742,7 +1744,7 @@ private struct NowSpeakingHUDView: View {
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(item.bundleTitle?.nonemptyValue ?? "Question from \(item.displayAgent)")
+                    Text(item.subjectLabel ?? "Questions from \(item.displayAgent)")
                         .font(.headline)
                     Text([item.displayAgent, item.workspaceDisplayLabel].compactMap(\.self).joined(separator: " · "))
                         .font(.caption.weight(.medium))
@@ -1778,33 +1780,47 @@ private struct NowSpeakingHUDView: View {
             }
 
             if let primaryMessage = item.primaryMessage?.nonemptyValue {
-                ReadAlongTranscriptView(
-                    text: primaryMessage,
-                    timings: item.wordTimings,
-                    currentTime: playbackTime,
-                    duration: playbackDuration,
-                    accent: accent,
-                    onSeek: { seek(item: item, to: $0) }
-                )
-                .frame(minHeight: 72, maxHeight: 150)
-                .accessibilityLabel("Primary message")
-            }
-
-            if let description = item.bundleDescription?.nonemptyValue {
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Update")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ReadAlongTranscriptView(
+                        text: primaryMessage,
+                        timings: item.wordTimings,
+                        currentTime: playbackTime,
+                        duration: playbackDuration,
+                        accent: accent,
+                        onSeek: { seek(item: item, to: $0) },
+                        onContentHeightChange: { height in
+                            guard abs(primaryMessageContentHeight - height) > 1 else { return }
+                            primaryMessageContentHeight = height
+                        }
+                    )
+                    .frame(height: min(max(primaryMessageContentHeight, 72), 420))
+                    .accessibilityLabel("Primary message")
+                }
             }
 
             if !item.briefAttachments.isEmpty {
                 contextAttachmentRow(
                     item.briefAttachments,
-                    label: "Shared context",
+                    label: "Update attachments",
                     item: item,
                     accent: accent
                 )
+            }
+
+            if let preamble = item.questionsPreamble?.nonemptyValue {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Questions")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(preamble)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineSpacing(2)
+                        .textSelection(.enabled)
+                }
             }
 
             if questions.count > 1 {

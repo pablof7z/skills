@@ -532,8 +532,7 @@ if args.command == "wait":
             emit({
                 "id": item["id"],
                 "status": "answered" if answered else "skipped",
-                "bundle_title": item.get("bundle_title"),
-                "bundle_description": item.get("bundle_description"),
+                "questions_preamble": item.get("questions_preamble"),
                 "questions": questions,
                 "attachments": item.get("attachments") or [],
                 "answer_attachment_paths": attachment_paths,
