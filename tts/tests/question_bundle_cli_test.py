@@ -112,7 +112,15 @@ class QuestionBundleCLITests(unittest.TestCase):
             ],
         }
         process = subprocess.Popen(
-            [str(self.tts), "--ask", json.dumps(bundle), "--voice-id", "af_nova"],
+            [
+                str(self.tts),
+                "--agent-name",
+                "question-bundle-test",
+                "--subject",
+                "Choosing the release rollout and notification plan",
+                "--ask",
+                json.dumps(bundle),
+            ],
             env=self.environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -160,7 +168,15 @@ class QuestionBundleCLITests(unittest.TestCase):
             }]
         }))
         process = subprocess.Popen(
-            [str(self.tts), "--ask", f"@{payload}", "--voice-id", "af_nova"],
+            [
+                str(self.tts),
+                "--agent-name",
+                "question-bundle-test",
+                "--subject",
+                "Choosing the release rollout and notification plan",
+                "--ask",
+                f"@{payload}",
+            ],
             env=self.environment,
             text=True,
             stdout=subprocess.PIPE,

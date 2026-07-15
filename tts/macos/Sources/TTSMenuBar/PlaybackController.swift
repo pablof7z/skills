@@ -279,7 +279,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: command)
-        var arguments = ["--message", item.text, "--voice-id", item.voice]
+        var arguments = ["--message", item.text]
         if let subject = item.subject, !subject.isEmpty {
             arguments += ["--subject", subject]
         }
@@ -290,6 +290,8 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
         var environment = ProcessInfo.processInfo.environment
         environment["TTS_STATE_DIR"] = store.stateDirectory.path
+        environment["TTS_INTERNAL_RETRY"] = "1"
+        environment["TTS_INTERNAL_VOICE_ID"] = item.voice
         if let workspace = item.workspace, !workspace.isEmpty {
             environment["TTS_WORKSPACE"] = workspace
         }

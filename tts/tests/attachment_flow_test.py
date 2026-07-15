@@ -17,6 +17,7 @@ import unittest
 
 class KokoroHandler(BaseHTTPRequestHandler):
     received_inputs: list[str] = []
+    received_voices: list[str] = []
     received_inputs_lock = threading.Lock()
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
@@ -24,6 +25,7 @@ class KokoroHandler(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(length))
         with self.received_inputs_lock:
             self.received_inputs.append(request["input"])
+            self.received_voices.append(request["voice"])
         payload = json.dumps(
             {
                 "audio": base64.b64encode(b"test-mp3-audio").decode("ascii"),
@@ -79,6 +81,7 @@ class AttachmentFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         with KokoroHandler.received_inputs_lock:
             KokoroHandler.received_inputs = []
+            KokoroHandler.received_voices = []
 
     def test_rejects_removed_introduction_option(self) -> None:
         repository = Path(__file__).resolve().parents[2]
@@ -98,6 +101,130 @@ class AttachmentFlowTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Error: unknown option: --introduction", result.stderr)
+
+    def test_requires_agent_seed_and_subject(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+
+        missing_agent = subprocess.run(
+            [
+                str(tts_command),
+                "--subject",
+                "Testing the required agent seed contract",
+                "--message",
+                "This should not run.",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(missing_agent.returncode, 0)
+        self.assertIn("Error: --agent-name is required.", missing_agent.stderr)
+
+        missing_subject = subprocess.run(
+            [
+                str(tts_command),
+                "--agent-name",
+                "required-fields-test",
+                "--message",
+                "This should not run.",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(missing_subject.returncode, 0)
+        self.assertIn("Error: --subject is required.", missing_subject.stderr)
+
+    def test_rejects_public_voice_selection(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+        common = [
+            str(tts_command),
+            "--agent-name",
+            "voice-contract-test",
+            "--subject",
+            "Testing public voice selection removal behavior",
+        ]
+
+        option = subprocess.run(
+            [*common, "--voice-id", "af_nova", "--message", "This should not run."],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(option.returncode, 0)
+        self.assertIn("Error: unknown option: --voice-id", option.stderr)
+
+        positional = subprocess.run(
+            [*common, "This should not run.", "af_nova"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(positional.returncode, 0)
+        self.assertIn("Error: too many arguments.", positional.stderr)
+
+    def test_runtime_accepts_subjects_up_to_fourteen_words(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+        with tempfile.TemporaryDirectory(prefix="tts-subject-tolerance-") as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            home.mkdir()
+            server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "KOKORO_API_ENDPOINT": f"http://127.0.0.1:{server.server_port}/v1/audio/speech",
+                        "TTS_SESSIONS_ROOT": str(root / "sessions"),
+                        "TTS_STATE_DIR": str(root / "state"),
+                    }
+                )
+                accepted = subprocess.run(
+                    [
+                        str(tts_command),
+                        "--agent-name",
+                        "subject-tolerance-test",
+                        "--subject",
+                        "This subject quietly accepts fourteen words while agents still receive shorter writing guidance today",
+                        "--no-play",
+                        "--message",
+                        "The subject is accepted.",
+                    ],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+                rejected = subprocess.run(
+                    [
+                        str(tts_command),
+                        "--agent-name",
+                        "subject-tolerance-test",
+                        "--subject",
+                        "This subject quietly accepts fourteen words while agents still receive shorter writing guidance today safely",
+                        "--no-play",
+                        "--message",
+                        "The subject is rejected.",
+                    ],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("between 5 and 14 words", rejected.stderr)
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
 
     def test_publishes_generating_item_before_audio_is_ready(self) -> None:
         repository = Path(__file__).resolve().parents[2]
@@ -147,8 +274,6 @@ class AttachmentFlowTests(unittest.TestCase):
                         "agent-foreground-test",
                         "--subject",
                         "Foreground TTS generation remains clearly observable",
-                        "--voice-id",
-                        "af_nova",
                     ],
                     env=environment,
                     text=True,
@@ -227,7 +352,15 @@ class AttachmentFlowTests(unittest.TestCase):
                     }
                 )
                 result = subprocess.run(
-                    [str(tts_command), "--voice-id", "af_nova", "This request will fail."],
+                    [
+                        str(tts_command),
+                        "--agent-name",
+                        "failure-test",
+                        "--subject",
+                        "Testing visible TTS generation failure handling",
+                        "--message",
+                        "This request will fail.",
+                    ],
                     env=environment,
                     text=True,
                     stdout=subprocess.PIPE,
@@ -295,8 +428,10 @@ class AttachmentFlowTests(unittest.TestCase):
                         str(tts_command),
                         "--message",
                         "The primary update is ready.",
-                        "--voice-id",
-                        "af_nova",
+                        "--agent-name",
+                        "attachment-wait-test",
+                        "--subject",
+                        "Waiting for narrated attachment generation completion",
                         "--attach",
                         "Details",
                         str(markdown),
@@ -321,6 +456,9 @@ class AttachmentFlowTests(unittest.TestCase):
                 ready = json.loads(item_path.read_text(encoding="utf-8"))
                 self.assertEqual(ready["attachments"][0]["status"], "ready")
                 self.assertIn("Prepared narrated TTS attachments.", stderr)
+                with KokoroHandler.received_inputs_lock:
+                    self.assertEqual(len(KokoroHandler.received_voices), 2)
+                    self.assertEqual(len(set(KokoroHandler.received_voices)), 1)
             finally:
                 BlockingAttachmentKokoroHandler.release_attachment_response.set()
                 if process is not None and process.poll() is None:
@@ -366,8 +504,10 @@ class AttachmentFlowTests(unittest.TestCase):
                         str(tts_command),
                         "--message",
                         r"First paragraph.\n\nSecond paragraph.",
-                        "--voice-id",
-                        "af_nova",
+                        "--agent-name",
+                        "newline-test",
+                        "--subject",
+                        "Normalizing literal newlines across visible spoken text",
                     ],
                     env=environment,
                     text=True,
@@ -430,8 +570,10 @@ class AttachmentFlowTests(unittest.TestCase):
                         str(tts_command),
                         "--message",
                         "The primary update is ready.",
-                        "--voice-id",
-                        "af_nova",
+                        "--agent-name",
+                        "durable-brief-test",
+                        "--subject",
+                        "Building durable supporting artifacts for spoken updates",
                         "--attach",
                         "Why this matters",
                         str(markdown),
@@ -516,8 +658,10 @@ After the sample."""
                     [
                         str(tts_command),
                         "--no-play",
-                        "--voice-id",
-                        "af_nova",
+                        "--agent-name",
+                        "formatted-code-test",
+                        "--subject",
+                        "Rendering code while describing it clearly aloud",
                         "--message",
                         message,
                     ],
