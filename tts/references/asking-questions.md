@@ -23,6 +23,7 @@ with `--suggestions` as JSON title-and-description pairs:
   --agent-name "<seed-name>" \
   --subject "Choosing the implementation ownership boundary" \
   --ask \
+  --wait 5m \
   --suggestions '[["Use the existing model", "Keep the current ownership boundary."], ["Split the model", "Give questions an independent lifecycle."]]' \
   --message "Which direction should I take?"
 ```
@@ -64,6 +65,7 @@ several suggestions may be selected.
   --agent-name "<seed-name>" \
   --subject "Choosing the rollout and notification plan" \
   --message "The release candidate passed its automated checks. I narrowed the remaining decisions to rollout risk and who needs advance notice." \
+  --wait 5m \
   --ask '{
     "questions_preamble": "There are two release details to settle before I finish.",
     "questions": [{
@@ -120,11 +122,21 @@ freeform answer or attach them while editing a suggestion.
 
 The question remains visible after playback until the user submits it, hides it,
 or it is superseded. The command remains active until submission or
-supersession. Run it with the execution environment's asynchronous capability
-when other work should continue. The tool output includes question status,
-submitted answers, selected suggestion IDs, each selected suggestion's final
-`title` and `description` under `selected_suggestions`, and answer-attachment
-paths.
+supersession or until its bounded wait expires.
+
+Every `--ask` requires `--wait <duration>`, such as `--wait 30s`, `--wait 5m`,
+or `--wait 1h`. Choose the interval based on whether the answer blocks useful
+work. The command blocks during that interval. If the user answers, its final
+output contains the submitted answers, selected suggestion IDs, each selected
+suggestion's final `title` and `description` under `selected_suggestions`, and
+answer-attachment paths.
+
+If the interval expires first, the command returns a `pending` result instead
+of hanging indefinitely. That result tells you how long it waited and includes
+an exact `wait_command`. Decide whether the answer is important at that point:
+continue other work without waiting, or run the supplied command to block for
+another explicitly bounded interval. Queue waits always require `--timeout`;
+there is no indefinite wait form.
 
 `--ask` is incompatible with `--no-play`.
 
@@ -133,7 +145,7 @@ Inspect or manage pending questions only when needed:
 ```bash
 <skill-dir>/scripts/tts-menu queue list --mine
 <skill-dir>/scripts/tts-menu queue get <id>
-<skill-dir>/scripts/tts-menu queue wait <id>
+<skill-dir>/scripts/tts-menu queue wait <id> --timeout 5m
 <skill-dir>/scripts/tts-menu queue archive <id> --reason "No longer relevant."
 <skill-dir>/scripts/tts-menu queue restore <id>
 <skill-dir>/scripts/tts-menu queue supersede <old-id> \

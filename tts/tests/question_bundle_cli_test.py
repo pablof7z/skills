@@ -121,6 +121,8 @@ class QuestionBundleCLITests(unittest.TestCase):
                 "Choosing the release rollout and notification plan",
                 "--message",
                 "The release is ready, but we still need to choose the rollout and notification plan.",
+                "--wait",
+                "5s",
                 "--ask",
                 json.dumps(bundle),
             ],
@@ -166,6 +168,10 @@ class QuestionBundleCLITests(unittest.TestCase):
             self.answer_bundle(item_path, answer_attachment)
             stdout, stderr = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0, stderr)
+            self.assertIn(
+                "Blocking for up to 5s",
+                stderr,
+            )
             output = json.loads(stdout)
             self.assertEqual(output["status"], "answered")
             self.assertEqual(output["questions"][0]["response"]["suggestion_id"], "q-01-s-01")
@@ -198,6 +204,8 @@ class QuestionBundleCLITests(unittest.TestCase):
                 "Choosing the release rollout and notification plan",
                 "--message",
                 "I reviewed the available direction and need your decision.",
+                "--wait",
+                "5s",
                 "--ask",
                 f"@{payload}",
             ],
@@ -227,7 +235,7 @@ class QuestionBundleCLITests(unittest.TestCase):
                 process.communicate(timeout=2)
 
         invalid = subprocess.run(
-            [str(self.tts), "--ask", '{"questions": []}'],
+            [str(self.tts), "--wait", "1s", "--ask", '{"questions": []}'],
             env=self.environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -237,7 +245,7 @@ class QuestionBundleCLITests(unittest.TestCase):
         self.assertIn("non-empty array", invalid.stderr)
 
         invalid_type = subprocess.run(
-            [str(self.tts), "--ask", '{"questions": [{"short_title": "Choice", "title": "Pick", "type": "ranked"}]}'],
+            [str(self.tts), "--wait", "1s", "--ask", '{"questions": [{"short_title": "Choice", "title": "Pick", "type": "ranked"}]}'],
             env=self.environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -247,7 +255,7 @@ class QuestionBundleCLITests(unittest.TestCase):
         self.assertIn("single_choice or multiple_choice", invalid_type.stderr)
 
         missing_message = subprocess.run(
-            [str(self.tts), "--ask", '{"questions": [{"short_title": "Choice", "title": "Pick one"}]}'],
+            [str(self.tts), "--wait", "1s", "--ask", '{"questions": [{"short_title": "Choice", "title": "Pick one"}]}'],
             env=self.environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -261,6 +269,8 @@ class QuestionBundleCLITests(unittest.TestCase):
                 str(self.tts),
                 "--message",
                 "The implementation is ready.",
+                "--wait",
+                "1s",
                 "--ask",
                 '{"questions": [{"title": "Pick one"}]}',
             ],
@@ -277,6 +287,8 @@ class QuestionBundleCLITests(unittest.TestCase):
                 str(self.tts),
                 "--message",
                 "The implementation is ready.",
+                "--wait",
+                "1s",
                 "--ask",
                 '{"title": "Old hierarchy", "questions": [{"title": "Pick one"}]}',
             ],

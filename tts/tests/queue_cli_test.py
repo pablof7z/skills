@@ -91,7 +91,7 @@ class QueueCLITests(unittest.TestCase):
             "interaction": "suggestion_edited",
         }
         path.write_text(json.dumps(item))
-        result = json.loads(self.run_menu("wait", "answered").stdout)
+        result = json.loads(self.run_menu("wait", "answered", "--timeout", "1s").stdout)
         self.assertEqual(result["status"], "answered")
         self.assertEqual(result["answer"], item["response"]["answer"])
         self.assertTrue(result["modified"])
@@ -107,6 +107,20 @@ class QueueCLITests(unittest.TestCase):
         (self.state / "items" / "generated.json").write_text(json.dumps(value))
         result = json.loads(self.run_menu("wait", "generated", "--timeout", "0.1").stdout)
         self.assertEqual(result, {"id": "generated", "status": "generated"})
+
+    def test_wait_requires_a_bound_and_returns_follow_up_guidance(self) -> None:
+        self.write_question("pending", 1)
+        missing = self.run_menu("wait", "pending", check=False)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("--timeout", missing.stderr)
+
+        result = json.loads(
+            self.run_menu("wait", "pending", "--timeout", "0.01s").stdout
+        )
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["waited_seconds"], 0.01)
+        self.assertIn("user hasn't replied after 0.01 seconds", result["guidance"])
+        self.assertIn("--timeout 0.01s", result["wait_command"])
 
     def test_supersede_rejects_transitive_cycles(self) -> None:
         for index in range(3):
@@ -153,7 +167,7 @@ class QueueCLITests(unittest.TestCase):
         self.assertNotEqual(conflict.returncode, 0)
         self.assertIn("not compatible", conflict.stderr)
         invalid = subprocess.run(
-            [str(self.tts), "--ask", "--suggestions", '["bad"]', "Question?"],
+            [str(self.tts), "--ask", "--wait", "1s", "--suggestions", '["bad"]', "Question?"],
             env=self.environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -161,6 +175,16 @@ class QueueCLITests(unittest.TestCase):
         )
         self.assertNotEqual(invalid.returncode, 0)
         self.assertIn("must be [title, description]", invalid.stderr)
+
+        missing_wait = subprocess.run(
+            [str(self.tts), "--ask", "Question?"],
+            env=self.environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(missing_wait.returncode, 0)
+        self.assertIn("requires --wait", missing_wait.stderr)
 
     def test_no_play_emits_stable_structured_id_and_persists_it(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
