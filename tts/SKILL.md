@@ -137,8 +137,9 @@ player or transcript. Its Pause All toggle keeps current and newly generated
 speech waiting until resumed, and the menu-bar badge shows the queued count.
 The windowed player's idle history keeps replayed items at their original
 generation time, shows relative times during the first 24 hours and absolute
-timestamps afterward, and supports search plus one-click archive and archive
-view controls.
+timestamps afterward, and keeps search beside the project filter in the native
+titlebar toolbar. That filter menu selects recent or archived history, while
+each update has a one-click archive control.
 The player can be dragged from any non-interactive background and its expanded
 view has forgiving resize zones on every edge and corner, with the original `540×470` layout
 as its minimum unless the display itself is smaller. A remembered header control
