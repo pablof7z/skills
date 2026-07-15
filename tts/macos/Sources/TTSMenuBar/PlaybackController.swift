@@ -46,15 +46,24 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     var recentItems: [TTSItem] {
-        items.filter { $0.status.isRecent && !$0.isAttachmentPlayback }
+        items.filter { $0.status.isRecent && !$0.isAttachmentPlayback && !$0.archived }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
     var playerListItems: [TTSItem] {
         items.filter {
-            ($0.status == .generating || $0.status.isRecent) && !$0.isAttachmentPlayback
+            ($0.status == .generating || $0.status.isRecent)
+                && !$0.isAttachmentPlayback
         }
         .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    var activeHistoryItems: [TTSItem] {
+        playerListItems.filter { !$0.archived }
+    }
+
+    var archivedHistoryItems: [TTSItem] {
+        playerListItems.filter(\.archived)
     }
 
     var isGenerating: Bool {
@@ -196,7 +205,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         guard FileManager.default.fileExists(atPath: item.outputFile) else { return }
         do {
             let offset = time.map { max(0, $0) }
-            try store.save(item.replayCopy(startingAt: offset))
+            try store.save(item.requeuedForReplay(startingAt: offset))
             refresh()
         } catch {
             NSLog("Unable to queue replay: %@", error.localizedDescription)
@@ -221,12 +230,10 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             finishCurrentForReplacement()
         }
 
-        let requested = item.status == .queued ? item : item.replayCopy()
+        let requested = item.status == .queued ? item : item.requeuedForReplay()
         do {
-            if requested.id != item.id {
-                try store.save(requested)
-                replaceItem(requested)
-            }
+            try store.save(requested)
+            replaceItem(requested)
             play(requested)
         } catch {
             NSLog("Unable to play selected TTS item: %@", error.localizedDescription)
@@ -235,6 +242,18 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     func reveal(_ item: TTSItem) {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.outputFile)])
+    }
+
+    func setArchived(_ archived: Bool, for item: TTSItem) {
+        guard item.status.isRecent, !item.isAttachmentPlayback else { return }
+        var updated = item
+        updated.isArchived = archived
+        do {
+            try store.save(updated)
+            replaceItem(updated)
+        } catch {
+            NSLog("Unable to update TTS archive state: %@", error.localizedDescription)
+        }
     }
 
     func playAttachment(_ attachment: TTSAttachment, from displayedItem: TTSItem) {
@@ -299,7 +318,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         if currentItem?.id == displayedItem.id {
             finishCurrentForReplacement()
         }
-        let resumed = parent.replayCopy(startingAt: offset)
+        let resumed = parent.requeuedForReplay(startingAt: offset)
         do {
             try store.save(resumed)
             replaceItem(resumed)
@@ -502,7 +521,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
         if let (parentID, offset) = parentReturn,
            let parent = (try? store.loadItems())?.first(where: { $0.id == parentID }) {
-            let resumed = parent.replayCopy(startingAt: offset)
+            let resumed = parent.requeuedForReplay(startingAt: offset)
             do {
                 try store.save(resumed)
                 replaceItem(resumed)

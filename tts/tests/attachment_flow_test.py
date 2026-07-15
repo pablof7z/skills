@@ -200,6 +200,65 @@ class AttachmentFlowTests(unittest.TestCase):
                 thread.join(timeout=2)
                 server.server_close()
 
+    def test_normalizes_literal_newlines_before_display_and_speech(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        tts_command = repository / "tts" / "scripts" / "tts"
+        with tempfile.TemporaryDirectory(prefix="tts-literal-newlines-") as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            home.mkdir()
+            state = root / "state"
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_uname = fake_bin / "uname"
+            fake_uname.write_text("#!/bin/sh\nprintf 'Darwin\\n'\n", encoding="utf-8")
+            fake_uname.chmod(0o755)
+            fake_menu = root / "tts-menu"
+            fake_menu.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_menu.chmod(0o755)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                environment = os.environ.copy()
+                environment.update(
+                    {
+                        "HOME": str(home),
+                        "KOKORO_API_ENDPOINT": f"http://127.0.0.1:{server.server_port}/v1/audio/speech",
+                        "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
+                        "TTS_MACOS_MENU": "1",
+                        "TTS_MENU_COMMAND": str(fake_menu),
+                        "TTS_STATE_DIR": str(state),
+                    }
+                )
+                result = subprocess.run(
+                    [
+                        str(tts_command),
+                        "--message",
+                        r"First paragraph.\n\nSecond paragraph.",
+                        "--voice-id",
+                        "af_nova",
+                    ],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                )
+
+                item_path = next((state / "items").glob("*.json"))
+                item = json.loads(item_path.read_text(encoding="utf-8"))
+                self.assertEqual(item["text"], "First paragraph.\n\nSecond paragraph.")
+                with KokoroHandler.received_inputs_lock:
+                    spoken = KokoroHandler.received_inputs[-1]
+                self.assertNotIn(r"\n", spoken)
+                self.assertIn("First paragraph.", spoken)
+                self.assertIn("Second paragraph.", spoken)
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+                server.server_close()
+
     def test_builds_durable_brief_and_prepares_narration(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         tts_command = repository / "tts" / "scripts" / "tts"

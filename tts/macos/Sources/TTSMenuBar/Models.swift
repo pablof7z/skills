@@ -102,6 +102,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var parentItemID: String? = nil
     var attachmentID: String? = nil
     var returnToPlaybackOffset: Double? = nil
+    var isArchived: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -128,6 +129,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case parentItemID = "parent_item_id"
         case attachmentID = "attachment_id"
         case returnToPlaybackOffset = "return_to_playback_offset"
+        case isArchived = "is_archived"
     }
 
     var displayAgent: String {
@@ -181,12 +183,18 @@ struct TTSItem: Codable, Identifiable, Equatable {
         parentItemID != nil && attachmentID != nil
     }
 
-    func replayCopy(
-        now: Int64 = Int64(Date().timeIntervalSince1970),
+    var archived: Bool {
+        isArchived == true
+    }
+
+    /// Replaying a durable brief is playback of the same update, not a new
+    /// generation. Keep its identity and creation time so history remains a
+    /// reliable record of when the agent actually produced it.
+    func requeuedForReplay(
         startingAt playbackOffset: TimeInterval? = nil
     ) -> TTSItem {
         TTSItem(
-            id: "replay-\(UUID().uuidString.lowercased())",
+            id: id,
             text: text,
             subject: subject,
             agentName: agentName,
@@ -197,7 +205,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
             voice: voice,
             outputFile: outputFile,
             status: .queued,
-            createdAt: now,
+            createdAt: createdAt,
             startedAt: nil,
             completedAt: nil,
             duration: duration,
@@ -206,8 +214,20 @@ struct TTSItem: Codable, Identifiable, Equatable {
             wordTimings: wordTimings,
             mediaHandoffDelay: mediaHandoffDelay,
             attachments: attachments,
-            assetDirectory: assetDirectory
+            assetDirectory: assetDirectory,
+            parentItemID: parentItemID,
+            attachmentID: attachmentID,
+            returnToPlaybackOffset: returnToPlaybackOffset,
+            isArchived: isArchived
         )
+    }
+
+    func timestampLabel(now: Date = Date()) -> String {
+        let elapsed = max(0, now.timeIntervalSince(createdDate))
+        if elapsed < 60 { return "just now" }
+        if elapsed < 3_600 { return "\(Int(elapsed / 60))m ago" }
+        if elapsed < 86_400 { return "\(Int(elapsed / 3_600))h ago" }
+        return createdDate.formatted(date: .abbreviated, time: .shortened)
     }
 
     func attachmentPlaybackItem(
@@ -240,7 +260,8 @@ struct TTSItem: Codable, Identifiable, Equatable {
             assetDirectory: assetDirectory,
             parentItemID: id,
             attachmentID: attachment.id,
-            returnToPlaybackOffset: playbackOffset
+            returnToPlaybackOffset: playbackOffset,
+            isArchived: isArchived
         )
     }
 }
