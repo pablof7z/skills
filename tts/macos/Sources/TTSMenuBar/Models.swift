@@ -99,6 +99,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var mediaHandoffDelay: Double? = nil
     var attachments: [TTSAttachment]? = nil
     var assetDirectory: String? = nil
+    var retryCommand: String? = nil
     var parentItemID: String? = nil
     var attachmentID: String? = nil
     var returnToPlaybackOffset: Double? = nil
@@ -126,6 +127,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case mediaHandoffDelay = "media_handoff_delay"
         case attachments
         case assetDirectory = "asset_directory"
+        case retryCommand = "retry_command"
         case parentItemID = "parent_item_id"
         case attachmentID = "attachment_id"
         case returnToPlaybackOffset = "return_to_playback_offset"
