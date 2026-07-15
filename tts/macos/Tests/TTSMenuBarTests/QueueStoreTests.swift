@@ -1064,6 +1064,25 @@ struct QueueStoreTests {
     }
 
     @Test
+    func completedPendingQuestionAudioRemainsReplayableFromItsAnswerView() {
+        var question = item(id: "pending-question", createdAt: 10)
+        question.kind = .question
+        question.questionStatus = .pending
+        question.status = .played
+
+        #expect(QuestionAudioReview.canReplay(question, fileExists: { _ in true }))
+        #expect(!QuestionAudioReview.canReplay(question, fileExists: { _ in false }))
+
+        question.status = .generating
+        #expect(!QuestionAudioReview.canReplay(question, fileExists: { _ in true }))
+
+        question.status = .played
+        question.kind = .speech
+        question.questionStatus = nil
+        #expect(!QuestionAudioReview.canReplay(question, fileExists: { _ in true }))
+    }
+
+    @Test
     func unchangedHUDLayoutDoesNotRequestAnotherAnimation() {
         let frame = CGRect(x: 20, y: 20, width: 540, height: 470)
 
