@@ -97,6 +97,7 @@ struct TTSQuestionDraftSuggestion: Equatable {
 struct TTSQuestion: Codable, Identifiable, Equatable {
     var id: String
     var title: String
+    var shortTitle: String? = nil
     var type: TTSQuestionType = .singleChoice
     var description: String? = nil
     var attachments: [TTSAttachment]? = nil
@@ -119,6 +120,7 @@ extension TTSQuestion {
     private enum CodingKeys: String, CodingKey {
         case id
         case title
+        case shortTitle = "short_title"
         case type
         case description
         case attachments
@@ -131,6 +133,7 @@ extension TTSQuestion {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
+        shortTitle = try container.decodeIfPresent(String.self, forKey: .shortTitle)
         type = try container.decodeIfPresent(TTSQuestionType.self, forKey: .type) ?? .singleChoice
         description = try container.decodeIfPresent(String.self, forKey: .description)
         attachments = try container.decodeIfPresent([TTSAttachment].self, forKey: .attachments)
@@ -143,6 +146,7 @@ extension TTSQuestion {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(shortTitle, forKey: .shortTitle)
         try container.encode(type, forKey: .type)
         try container.encodeIfPresent(description, forKey: .description)
         try container.encodeIfPresent(attachments, forKey: .attachments)

@@ -1464,34 +1464,6 @@ private struct AnswerEditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: "pencil.and.outline")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 30, height: 30)
-                    .background(Color.accentColor.opacity(0.12), in: Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.isSuggestion ? "Edit suggestion" : "Write your answer")
-                        .font(.headline)
-                    Text(context.isSuggestion ? "Edit the title and supporting detail." : "Changes apply only when you choose Done.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button(action: onCancel) {
-                    Image(systemName: "xmark")
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Cancel editing")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-
-            Divider()
-
             ZStack(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 0) {
                     if context.isSuggestion {
@@ -1810,19 +1782,6 @@ private struct NowSpeakingHUDView: View {
                 )
             }
 
-            if let preamble = item.questionsPreamble?.nonemptyValue {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Questions")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(preamble)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineSpacing(2)
-                        .textSelection(.enabled)
-                }
-            }
-
             if questions.count > 1 {
                 questionTabs(questions, accent: accent)
             }
@@ -2024,7 +1983,7 @@ private struct NowSpeakingHUDView: View {
                                 .font(.caption2.monospacedDigit().weight(.bold))
                                 .frame(width: 18, height: 18)
                                 .background(selected ? Color.black.opacity(0.16) : accent.opacity(0.13), in: Circle())
-                            Text(question.title)
+                            Text(question.shortTitle?.nonemptyValue ?? question.title)
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(1)
                             if answered {
