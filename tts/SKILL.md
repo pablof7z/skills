@@ -22,10 +22,25 @@ spoken update, put the words to say in `--message`:
 Keep the seed name and subject stable across the same work session. Write the
 subject in 5 to 10 words. Do not repeat the agent identity in the message.
 
-Generation runs in the foreground. If the execution environment can run a
-command asynchronously, start the whole command with that capability, retain
-its handle, and wait for completion before claiming the update was generated.
-Do not detach it with shell process-management syntax.
+When an update has useful supporting material—a proposal, visual, detailed
+findings, or decision context—attach it. Treat supporting material as a normal
+part of a substantive update, not an exception:
+
+```bash
+./scripts/tts \
+  --agent-name "<seed-name>" \
+  --subject "<5-to-10-word subject>" \
+  --message "<spoken update>" \
+  --attach "Supporting context" <path>
+```
+
+Generation runs in the foreground. If the execution environment supports it,
+you can run the whole command in the background; do not detach it with shell
+process-management syntax.
+
+After generating the primary audio, the script prepares narrated text
+attachments, queues normal playback, and prints JSON with the TTS `id`, output
+path, and `queued` status. With `--no-play`, it prints `generated` instead.
 
 ## Conditional guidance
 
