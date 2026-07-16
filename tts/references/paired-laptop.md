@@ -12,6 +12,13 @@ On the attended laptop:
 <skill-dir>/scripts/tts pair offer --relay <relay-url>
 ```
 
+On macOS, the same flow is available from the TTS menu-bar icon under
+**Pair New Computer…**. The pairing window creates the code and starts the
+remote listener. The icon remains available after the player window closes;
+it shows listener status, paired computers, and an unread-queue badge. Hide
+the icon with **Settings… → Show TTS in the menu bar** if you prefer to use
+only the Dock app.
+
 Send the JSON `pair_code` to the agent host. On the agent host:
 
 ```bash

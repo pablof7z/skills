@@ -29,23 +29,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var preferencesWindowController = PlayerPreferencesWindowController(
         preferencesStore: playerPreferencesStore
     )
+    private lazy var endpointMonitor = RemoteEndpointMonitor(
+        reader: RemoteEndpointStateReader(stateDirectory: store.stateDirectory)
+    )
+    private lazy var pairingWindowController = RemotePairingWindowController(
+        service: RemotePairingService(
+            stateDirectory: store.stateDirectory,
+            commandRunner: ShellTTSRemoteCommandRunner()
+        ),
+        didCreateOffer: { [weak endpointMonitor] in endpointMonitor?.refresh() }
+    )
+    private lazy var menuBarController = MenuBarController(
+        playbackController: controller,
+        preferencesStore: playerPreferencesStore,
+        endpointMonitor: endpointMonitor,
+        showPlayer: { [weak playerWindowController] in playerWindowController?.showPlayer() },
+        showPairing: { [weak pairingWindowController] in pairingWindowController?.show() },
+        showPreferences: { [weak preferencesWindowController] in preferencesWindowController?.show() }
+    )
     private var ownsLock = false
 
     func applicationDidFinishLaunching(_: Notification) {
+        ProcessInfo.processInfo.disableAutomaticTermination("TTS stays available in the background")
         NSApp.setActivationPolicy(.regular)
         guard acquireInstanceLock() else {
             NSApp.terminate(nil)
             return
         }
         configureMainMenu()
+        menuBarController.start()
         playerWindowController.refresh()
         controller.start()
     }
 
     func applicationWillTerminate(_: Notification) {
+        menuBarController.stop()
         playerWindowController.shutdown()
         controller.shutdown()
         releaseInstanceLock()
+        ProcessInfo.processInfo.enableAutomaticTermination("TTS stays available in the background")
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
+        false
     }
 
     func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows: Bool) -> Bool {

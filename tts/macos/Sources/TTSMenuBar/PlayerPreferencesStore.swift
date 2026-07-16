@@ -7,15 +7,37 @@ struct PlayerPreferences: Codable, Equatable {
     var pausesMedia: Bool
     var mediaHandoffDelay: Double
     var mediaResumeDelay: Double
+    var showsMenuBarItem: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case pausesMedia
+        case mediaHandoffDelay
+        case mediaResumeDelay
+        case showsMenuBarItem
+    }
 
     init(
         pausesMedia: Bool = true,
         mediaHandoffDelay: Double = 2,
-        mediaResumeDelay: Double = 3
+        mediaResumeDelay: Double = 3,
+        showsMenuBarItem: Bool = true
     ) {
         self.pausesMedia = pausesMedia
         self.mediaHandoffDelay = mediaHandoffDelay
         self.mediaResumeDelay = mediaResumeDelay
+        self.showsMenuBarItem = showsMenuBarItem
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        pausesMedia = try values.decodeIfPresent(Bool.self, forKey: .pausesMedia) ?? true
+        mediaHandoffDelay = Self.clamp(
+            try values.decodeIfPresent(Double.self, forKey: .mediaHandoffDelay) ?? 2
+        )
+        mediaResumeDelay = Self.clamp(
+            try values.decodeIfPresent(Double.self, forKey: .mediaResumeDelay) ?? 3
+        )
+        showsMenuBarItem = try values.decodeIfPresent(Bool.self, forKey: .showsMenuBarItem) ?? true
     }
 
     static func clamp(_ delay: Double) -> Double {
@@ -44,6 +66,10 @@ final class PlayerPreferencesStore: ObservableObject {
 
     func setMediaResumeDelay(_ delay: Double) {
         update { $0.mediaResumeDelay = PlayerPreferences.clamp(delay) }
+    }
+
+    func setShowsMenuBarItem(_ visible: Bool) {
+        update { $0.showsMenuBarItem = visible }
     }
 
     private func update(_ mutation: (inout PlayerPreferences) -> Void) {
@@ -135,6 +161,13 @@ private struct PlayerPreferencesView: View {
         )
     }
 
+    private var showsMenuBarItem: Binding<Bool> {
+        Binding(
+            get: { preferencesStore.preferences.showsMenuBarItem },
+            set: { preferencesStore.setShowsMenuBarItem($0) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             GroupBox("Media") {
@@ -157,10 +190,12 @@ private struct PlayerPreferencesView: View {
                 .padding(.vertical, 4)
             }
 
+            Toggle("Show TTS in the menu bar", isOn: showsMenuBarItem)
+
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 460, height: 220, alignment: .topLeading)
+        .frame(width: 460, height: 260, alignment: .topLeading)
     }
 
     private func delayStepper(title: String, value: Binding<Double>) -> some View {
