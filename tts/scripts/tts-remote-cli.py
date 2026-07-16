@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
+from tts_remote_state import error
 from tts_remote_commands import (
     daemon_run,
     daemon_start,
@@ -70,7 +72,11 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if getattr(args, "attach_flat", False):
         args.attach = [part for pair in args.attach for part in pair]
-    return args.func(args)
+    try:
+        return args.func(args)
+    except RuntimeError as exc:
+        print(json.dumps(error("remote_transport_error", str(exc)), sort_keys=True), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

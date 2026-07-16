@@ -7,14 +7,15 @@ import json
 import os
 from pathlib import Path
 import secrets
-import socket
 import subprocess
 import sys
 import time
 import uuid
 
-from tts_remote_state import active_peer, ensure_backend, error, peers, remote_dir, save_peers, tts_state_dir, upsert_peer, write_json, read_json
-from tts_remote_transport import signed_event, transport
+from tts_remote_daemon import process_events
+from tts_remote_signing import public_key, signed_event
+from tts_remote_state import active_peer, ensure_backend, ensure_laptop_identity, error, peers, remote_dir, save_peers, upsert_peer, write_json, read_json
+from tts_remote_transport import transport
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -30,24 +31,15 @@ def fail(code: str, message: str, guidance: str | None = None, exit_code: int = 
     return exit_code
 
 
-def tags_include(tags: object, name: str, value: str | None = None) -> bool:
-    if not isinstance(tags, list):
-        return False
-    for tag in tags:
-        if isinstance(tag, list) and tag and tag[0] == name and (value is None or tag[1:2] == [value]):
-            return True
-    return False
-
-
 def pair_offer(args) -> int:
-    backend = ensure_backend()
+    laptop = ensure_laptop_identity(args.laptop_pubkey)
     pairing_id = secrets.token_hex(16)
     expires_at = int(time.time()) + args.ttl
     code = {
         "version": 1,
         "product": "tts",
         "relay": args.relay,
-        "laptop_pubkey": args.laptop_pubkey or backend["pubkey"],
+        "laptop_pubkey": laptop["pubkey"],
         "pairing_id": pairing_id,
         "expires_at": expires_at,
         "secret": secrets.token_urlsafe(32),
@@ -91,7 +83,7 @@ def pair_connect(args) -> int:
     event = signed_event(
         kind=24,
         content=str(code["secret"]),
-        tags=[["p", str(code["laptop_pubkey"])], ["pairing", str(code["pairing_id"])], ["product", "tts"]],
+        tags=[["p", str(code["laptop_pubkey"])], ["pairing", str(code["pairing_id"])], ["product", "tts"], ["version", "1"], ["expires", str(code["expires_at"])]],
         nsec=str(backend["nsec"]),
         relay=str(code["relay"]),
     )
@@ -142,9 +134,10 @@ def remote_speak(args) -> int:
         return fail("not_paired", "no approved TTS laptop pairing found", "Run tts pair offer on the laptop, then tts pair connect on this host.")
     signer_nsec = os.environ.get("AGENT_NSEC") or str(backend["nsec"])
     signer_source = "AGENT_NSEC" if os.environ.get("AGENT_NSEC") else "backend"
+    signer_pubkey = public_key(signer_nsec)
     attachments = [{"label": label, "path": path} for label, path in zip(args.attach[0::2], args.attach[1::2])]
     request_id = str(uuid.uuid4())
-    content = {
+    inner_content = {
         "version": 1,
         "product": "tts",
         "request_id": request_id,
@@ -153,13 +146,24 @@ def remote_speak(args) -> int:
         "agent_name": args.agent_name,
         "attachments": attachments,
         "backend": {"pubkey": backend["pubkey"]},
-        "signer": {"source": signer_source, "nsec": signer_nsec},
+    }
+    inner_event = signed_event(
+        kind=9,
+        content=json.dumps(inner_content, ensure_ascii=False, sort_keys=True),
+        tags=[["p", str(peer["pubkey"])], ["h", "tts"], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
+        nsec=signer_nsec,
+        relay=str(peer.get("relay") or ""),
+    )
+    outer_content = {
+        **inner_content,
+        "inner_event": inner_event,
+        "signer": {"source": signer_source, "pubkey": signer_pubkey},
     }
     event = signed_event(
         kind=9,
-        content=json.dumps(content, ensure_ascii=False, sort_keys=True),
+        content=json.dumps(outer_content, ensure_ascii=False, sort_keys=True),
         tags=[["p", str(peer["pubkey"])], ["h", "tts"], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
-        nsec=signer_nsec,
+        nsec=str(backend["nsec"]),
         relay=str(peer.get("relay") or ""),
     )
     transport(str(peer.get("relay") or "")).publish(event)
@@ -168,7 +172,10 @@ def remote_speak(args) -> int:
 
 def daemon_status(_args) -> int:
     state = read_json(remote_dir() / "daemon.json", {})
-    running = bool(isinstance(state, dict) and state.get("running"))
+    running = bool(isinstance(state, dict) and state.get("running") and pid_alive(state.get("pid")))
+    if isinstance(state, dict) and state.get("running") and not running:
+        state = {**state, "running": False, "stopped_at": int(time.time())}
+        write_json(remote_dir() / "daemon.json", state)
     return emit({"running": running, "state": state if isinstance(state, dict) else {}})
 
 
@@ -179,7 +186,7 @@ def daemon_start(args) -> int:
         return emit({"status": "started", "dry_run": True})
     log = remote_dir() / "daemon.log"
     with log.open("a", encoding="utf-8") as handle:
-        process = subprocess.Popen([str(SCRIPT_DIR / "tts"), "daemon", "run"], stdout=handle, stderr=handle)
+        process = subprocess.Popen([str(SCRIPT_DIR / "tts"), "daemon", "run", "--wait-seconds", "31536000"], stdout=handle, stderr=handle)
     state["pid"] = process.pid
     write_json(remote_dir() / "daemon.json", state)
     return emit({"status": "started", "pid": process.pid, "log": str(log)})
@@ -193,107 +200,40 @@ def daemon_stop(_args) -> int:
             os.kill(pid, 15)
         except OSError:
             pass
+        wait_for_exit(pid)
     write_json(remote_dir() / "daemon.json", {"running": False, "stopped_at": int(time.time())})
     return emit({"status": "stopped"})
 
 
+def pid_alive(pid: object) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def wait_for_exit(pid: int, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return
+        time.sleep(0.05)
+
+
 def daemon_run(args) -> int:
-    backend = ensure_backend()
+    backend = ensure_laptop_identity()
     write_json(remote_dir() / "daemon.json", {"running": True, "pid": os.getpid(), "started_at": int(time.time())})
     processed = 0
     deadline = time.monotonic() + args.wait_seconds
-    while True:
-        processed += process_events(args, backend)
-        if args.once or processed >= args.max_events:
-            break
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.25)
-    return emit({"status": "idle", "processed": min(processed, args.max_events)})
-
-
-def process_events(args, backend: dict[str, object]) -> int:
-    tx = transport()
-    seen_path = remote_dir() / "daemon-seen.json"
-    seen = read_json(seen_path, [])
-    seen_ids = set(seen if isinstance(seen, list) else [])
-    count = 0
-    for event in tx.events():
-        event_id = str(event.get("id") or "")
-        if not event_id or event_id in seen_ids or event.get("kind") != 9:
-            continue
-        if not tags_include(event.get("tags"), "p", str(backend["pubkey"])) and not tags_include(event.get("tags"), "p", socket.gethostname()) and not tags_include(event.get("tags"), "p", "laptop-daemon"):
-            continue
-        seen_ids.add(event_id)
-        handle_request_event(event, backend)
-        count += 1
-        if count >= args.max_events:
-            break
-    write_json(seen_path, sorted(seen_ids))
-    return count
-
-
-def handle_request_event(event: dict[str, object], backend: dict[str, object]) -> None:
     try:
-        content = json.loads(str(event.get("content") or "{}"))
-    except ValueError:
-        return publish_reply(event, backend, {"status": "rejected", "error": {"code": "invalid_request", "message": "request content is not JSON"}})
-    attachments = content.get("attachments") if isinstance(content, dict) else []
-    missing = [item for item in attachments or [] if not Path(str(item.get("path", ""))).is_file()]
-    if missing:
-        return publish_reply(event, backend, {
-            "status": "rejected",
-            "request_id": content.get("request_id"),
-            "error": {
-                "code": "remote_attachment_unavailable",
-                "message": "one or more attachment paths are not available on this laptop",
-                "guidance": "Send text only, or place the file on the paired laptop and retry with that local path.",
-            },
-        })
-    try:
-        result = materialize_request(content, event)
-    except (subprocess.CalledProcessError, ValueError) as exc:
-        return publish_reply(event, backend, {
-            "status": "rejected",
-            "request_id": content.get("request_id"),
-            "error": {
-                "code": "materialization_failed",
-                "message": str(exc),
-                "guidance": "Check the laptop TTS endpoint and retry after local TTS works on that laptop.",
-            },
-        })
-    publish_reply(event, backend, {"status": "accepted", "request_id": content.get("request_id"), "item": result})
-
-
-def materialize_request(content: dict[str, object], event: dict[str, object]) -> dict[str, object]:
-    item_id = str(content.get("request_id") or uuid.uuid4())
-    command = [
-        str(SCRIPT_DIR / "tts"),
-        "--agent-name", str(content.get("agent_name") or "remote"),
-        "--subject", str(content.get("subject") or "Remote TTS request from paired host"),
-        "--message", str(content.get("message") or ""),
-    ]
-    if os.environ.get("TTS_REMOTE_DAEMON_NO_PLAY"):
-        command.append("--no-play")
-    environment = os.environ.copy()
-    environment["TTS_ITEM_ID"] = item_id
-    completed = subprocess.run(command, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    output = json.loads(completed.stdout)
-    item_path = tts_state_dir() / "items" / f"{item_id}.json"
-    item = read_json(item_path, {})
-    if isinstance(item, dict):
-        item["remote_request"] = {"transport": "kind:9", "event_id": event.get("id"), "request_id": item_id}
-        write_json(item_path, item)
-    return output
-
-
-def publish_reply(event: dict[str, object], backend: dict[str, object], content: dict[str, object]) -> None:
-    relay = str(event.get("relay") or "")
-    reply = signed_event(
-        kind=9,
-        content=json.dumps(content, ensure_ascii=False, sort_keys=True),
-        tags=[["e", str(event.get("id"))], ["p", str(event.get("pubkey"))], ["h", "tts"], ["product", "tts"]],
-        nsec=str(backend["nsec"]),
-        relay=relay,
-    )
-    transport(relay).publish(reply)
+        while True:
+            processed += process_events(args, backend)
+            if args.once or processed >= args.max_events or time.monotonic() >= deadline:
+                break
+            time.sleep(0.25)
+        return emit({"status": "idle", "processed": min(processed, args.max_events)})
+    finally:
+        write_json(remote_dir() / "daemon.json", {"running": False, "pid": os.getpid(), "stopped_at": int(time.time())})

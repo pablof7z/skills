@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import secrets
 import socket
+import subprocess
 import tempfile
 import time
 
@@ -26,6 +27,7 @@ def tts_state_dir() -> Path:
 def remote_dir() -> Path:
     path = tts_state_dir() / "remote"
     path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o700)
     return path
 
 
@@ -39,12 +41,15 @@ def read_json(path: Path, default: object) -> object:
 
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".tmp", dir=path.parent)
     try:
+        os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
         os.replace(temporary, path)
+        path.chmod(0o600)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -54,15 +59,46 @@ def pubkey_for_nsec(nsec: str) -> str:
     return hashlib.sha256(nsec.encode("utf-8")).hexdigest()
 
 
+def generated_secret() -> str:
+    if os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1":
+        return "nsec" + secrets.token_urlsafe(32)
+    process = subprocess.run(
+        [os.environ.get("TTS_NAK_BIN", "nak"), "key", "generate"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise RuntimeError(process.stderr.strip() or "nak key generate failed")
+    return process.stdout.strip()
+
+
+def public_key_for_secret(nsec: str) -> str:
+    if os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1":
+        return pubkey_for_nsec(nsec)
+    process = subprocess.run(
+        [os.environ.get("TTS_NAK_BIN", "nak"), "key", "public"],
+        env={**os.environ, "NOSTR_SECRET_KEY": nsec},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise RuntimeError(process.stderr.strip() or "nak key public failed")
+    return process.stdout.strip()
+
+
 def ensure_backend() -> dict[str, object]:
     path = remote_dir() / "backend.json"
     existing = read_json(path, {})
     if isinstance(existing, dict) and existing.get("nsec") and existing.get("pubkey"):
         return existing
-    nsec = "nsec" + secrets.token_urlsafe(32)
+    nsec = generated_secret()
     backend = {
         "nsec": nsec,
-        "pubkey": pubkey_for_nsec(nsec),
+        "pubkey": public_key_for_secret(nsec),
         "product": "tts",
         "approved": True,
         "hostname": socket.gethostname(),
@@ -70,6 +106,22 @@ def ensure_backend() -> dict[str, object]:
     }
     write_json(path, backend)
     return backend
+
+
+def ensure_laptop_identity(pubkey: str | None = None) -> dict[str, object]:
+    path = remote_dir() / "laptop.json"
+    existing = read_json(path, {})
+    if isinstance(existing, dict) and existing.get("pubkey"):
+        return existing
+    nsec = generated_secret() if not pubkey else None
+    identity = {
+        "nsec": nsec,
+        "pubkey": pubkey or pubkey_for_nsec(str(nsec)),
+        "product": "tts",
+        "created_at": int(time.time()),
+    }
+    write_json(path, identity)
+    return identity
 
 
 def peers() -> list[dict[str, object]]:

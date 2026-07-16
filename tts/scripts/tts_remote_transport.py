@@ -3,41 +3,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
-import time
-
-from tts_remote_state import pubkey_for_nsec
-
-
-def _event_id(event: dict[str, object], secret: str) -> str:
-    payload = json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256((payload + secret).encode("utf-8")).hexdigest()
-
-
-def signed_event(
-    *,
-    kind: int,
-    content: str,
-    tags: list[list[str]],
-    nsec: str,
-    relay: str | None = None,
-) -> dict[str, object]:
-    event: dict[str, object] = {
-        "kind": kind,
-        "pubkey": pubkey_for_nsec(nsec),
-        "created_at": int(time.time()),
-        "tags": tags,
-        "content": content,
-    }
-    event["id"] = _event_id(event, nsec)
-    event["sig"] = hashlib.sha256((str(event["id"]) + nsec).encode("utf-8")).hexdigest()
-    if relay:
-        event["relay"] = relay
-    return event
 
 
 class Transport:
@@ -84,7 +53,7 @@ class NakTransport(Transport):
         if not relay:
             raise RuntimeError("nak transport requires a relay")
         process = subprocess.run(
-            ["nak", "event", relay],
+            [nak_bin(), "event", relay],
             input=json.dumps(event),
             text=True,
             stdout=subprocess.PIPE,
@@ -96,7 +65,27 @@ class NakTransport(Transport):
         return {"transport": "nak", "relay": relay, "stdout": process.stdout.strip()}
 
     def events(self) -> list[dict[str, object]]:
-        raise RuntimeError("daemon event polling is not implemented for nak; use file transport for tests")
+        if not self.relay:
+            raise RuntimeError("nak transport requires a relay")
+        process = subprocess.run(
+            [nak_bin(), "req", self.relay],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")),
+        )
+        if process.returncode != 0:
+            raise RuntimeError(process.stderr.strip() or "nak fetch failed")
+        events = []
+        for line in process.stdout.splitlines():
+            try:
+                loaded = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(loaded, dict):
+                events.append(loaded)
+        return events
 
 
 def transport(relay: str | None = None) -> Transport:
@@ -106,3 +95,7 @@ def transport(relay: str | None = None) -> Transport:
     if selected == "nak":
         return NakTransport(relay)
     raise RuntimeError(f"unsupported TTS remote transport: {selected}")
+
+
+def nak_bin() -> str:
+    return os.environ.get("TTS_NAK_BIN", "nak")

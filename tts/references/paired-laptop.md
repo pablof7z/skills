@@ -58,10 +58,10 @@ From the agent host:
   --message "<spoken update>"
 ```
 
-If `AGENT_NSEC` is set, that signer is used exactly for the request. Otherwise
-the installed persistent TTS backend signer is used. The backend identity remains
-the stable reply endpoint either way, and request metadata is retained on queued
-items for attribution.
+If `AGENT_NSEC` is set, that signer signs the inner request for attribution.
+The persistent TTS backend signs the outer transport event and remains the
+stable reply endpoint. Without `AGENT_NSEC`, the backend signs both layers.
+Private signer material is never included in the event payload.
 
 ## Failure Modes
 
@@ -72,5 +72,6 @@ JSON guidance; retry with text only or with a path that exists on the paired
 laptop.
 
 All waits are bounded. Command failures emit structured JSON errors on stderr
-where practical. Tests use deterministic file transport; real relay transport can
-use the optional `nak` adapter when available.
+where practical. Tests use deterministic file transport or a fake `nak`
+executable; real relay transport uses `nak` for key generation, signing,
+publishing, verification, and bounded fetches.
