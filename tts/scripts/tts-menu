@@ -10,12 +10,6 @@ APP_INFO="$APP_BUNDLE/Contents/Info.plist"
 APP_RESOURCES="$APP_BUNDLE/Contents/Resources"
 APP_ICON_SOURCE="$PACKAGE_DIR/Resources/TTSMenuBar.icns"
 APP_ICON="$APP_RESOURCES/TTSMenuBar.icns"
-MEDIA_REMOTE_LIBRARY="$PACKAGE_DIR/.build/release/libTTSMediaRemoteAdapter.dylib"
-MEDIA_REMOTE_LIBRARY_DEST="$APP_RESOURCES/libTTSMediaRemoteAdapter.dylib"
-MEDIA_REMOTE_SCRIPT_SOURCE="$PACKAGE_DIR/Resources/tts-media-remote.pl"
-MEDIA_REMOTE_SCRIPT="$APP_RESOURCES/tts-media-remote.pl"
-MEDIA_REMOTE_LICENSE_SOURCE="$PACKAGE_DIR/ThirdParty/MediaRemoteAdapter-LICENSE.txt"
-MEDIA_REMOTE_LICENSE="$APP_RESOURCES/MediaRemoteAdapter-LICENSE.txt"
 
 tts_state_dir() {
   if [ -n "${TTS_STATE_DIR:-}" ]; then
@@ -58,21 +52,16 @@ active_pid() {
 
 stage_app_bundle() {
   mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_RESOURCES"
+  rm -f \
+    "$APP_RESOURCES/libTTSMediaRemoteAdapter.dylib" \
+    "$APP_RESOURCES/tts-media-remote.pl" \
+    "$APP_RESOURCES/MediaRemoteAdapter-LICENSE.txt"
   if [ ! -x "$APP_EXECUTABLE" ] || [ "$BINARY" -nt "$APP_EXECUTABLE" ]; then
     cp "$BINARY" "$APP_EXECUTABLE"
     chmod +x "$APP_EXECUTABLE"
   fi
   if [ ! -f "$APP_ICON" ] || [ "$APP_ICON_SOURCE" -nt "$APP_ICON" ]; then
     cp "$APP_ICON_SOURCE" "$APP_ICON"
-  fi
-  if [ ! -f "$MEDIA_REMOTE_LIBRARY_DEST" ] || [ "$MEDIA_REMOTE_LIBRARY" -nt "$MEDIA_REMOTE_LIBRARY_DEST" ]; then
-    cp "$MEDIA_REMOTE_LIBRARY" "$MEDIA_REMOTE_LIBRARY_DEST"
-  fi
-  if [ ! -f "$MEDIA_REMOTE_SCRIPT" ] || [ "$MEDIA_REMOTE_SCRIPT_SOURCE" -nt "$MEDIA_REMOTE_SCRIPT" ]; then
-    cp "$MEDIA_REMOTE_SCRIPT_SOURCE" "$MEDIA_REMOTE_SCRIPT"
-  fi
-  if [ ! -f "$MEDIA_REMOTE_LICENSE" ] || [ "$MEDIA_REMOTE_LICENSE_SOURCE" -nt "$MEDIA_REMOTE_LICENSE" ]; then
-    cp "$MEDIA_REMOTE_LICENSE_SOURCE" "$MEDIA_REMOTE_LICENSE"
   fi
   cat > "$APP_INFO" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -113,7 +102,7 @@ build_if_needed() {
     newer="$(find "$PACKAGE_DIR/Package.swift" "$PACKAGE_DIR/Sources" "$PACKAGE_DIR/Resources" -type f -newer "$BINARY" -print -quit 2>/dev/null || true)"
   fi
 
-  if [ ! -x "$BINARY" ] || [ ! -f "$MEDIA_REMOTE_LIBRARY" ] || [ -n "$newer" ]; then
+  if [ ! -x "$BINARY" ] || [ -n "$newer" ]; then
     if ! command -v swift >/dev/null 2>&1; then
       echo "Error: Swift is required to build the TTS macOS app." >&2
       return 1
@@ -125,11 +114,6 @@ build_if_needed() {
       tail -n 30 "$LOG_FILE" >&2 || true
       return 1
     fi
-  fi
-
-  if [ ! -f "$MEDIA_REMOTE_LIBRARY" ]; then
-    echo "Error: MediaRemote adapter was not produced by the Swift build." >&2
-    return 1
   fi
 
   stage_app_bundle

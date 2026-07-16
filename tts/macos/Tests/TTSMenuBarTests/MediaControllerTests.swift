@@ -113,10 +113,24 @@ struct MediaControllerTests {
         #expect(backend.pauseCalls == 1)
     }
 
+    @Test
+    func shutdownRestoresTheOwnedSession() async {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        let controller = makeController(backend: backend)
+        #expect(await controller.prepareForSpeech())
+
+        controller.shutdown()
+
+        #expect(backend.shutdownRestoreCalls == 1)
+        #expect(backend.session?.isPlaying == true)
+        #expect(!controller.hasActiveLease)
+    }
+
     private func makeController(backend: TestMediaControlBackend) -> MediaController {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("media-controller-tests-\(UUID().uuidString)")
         let preferences = PlayerPreferencesStore(stateDirectory: directory)
+        preferences.setPausesMedia(true)
         return MediaController(
             preferencesStore: preferences,
             backends: [backend],
@@ -161,6 +175,7 @@ private final class TestMediaControlBackend: MediaControlBackend {
     var onPlay: (() -> Void)?
     var playDelay: TimeInterval = 0
     var playStarted = false
+    var shutdownRestoreCalls = 0
 
     init(session: MediaSessionSnapshot?) {
         self.session = session
@@ -188,6 +203,13 @@ private final class TestMediaControlBackend: MediaControlBackend {
         if let session {
             self.session = replacingPlaybackState(of: session, with: true)
         }
+        return true
+    }
+
+    func restoreOnShutdown(_: MediaSessionSnapshot) -> Bool {
+        shutdownRestoreCalls += 1
+        guard let session, !session.isPlaying else { return false }
+        self.session = replacingPlaybackState(of: session, with: true)
         return true
     }
 
