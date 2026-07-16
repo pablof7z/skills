@@ -95,6 +95,18 @@ class AutomaticTransportCLITests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no TTS playback destination is available", result.stderr)
 
+    def test_laptop_daemon_recreates_lost_group_and_peer_permissions(self) -> None:
+        self.pair()
+        self.transport_file.write_text("", encoding="utf-8")
+
+        self.run_tts("daemon", "run", "--once", state=self.laptop_state)
+
+        events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
+        self.assertEqual([event["kind"] for event in events], [9007, 9000, 9000])
+        backend = json.loads((self.server_state / "remote" / "backend.json").read_text())
+        self.assertIn(["p", backend["pubkey"]], events[1]["tags"])
+        self.assertIn(["p", backend["pubkey"], "admin"], events[2]["tags"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -118,8 +118,8 @@ class NakTransport(Transport):
             )
         except subprocess.TimeoutExpired as error:
             raise RuntimeError("nak publish timed out") from error
-        if process.returncode != 0:
-            raise RuntimeError("nak publish failed")
+        if process.returncode != 0 or "failed:" in process.stderr.lower():
+            raise RuntimeError(process.stderr.strip() or "nak publish failed")
         return {"transport": "nak", "relay": relay, "stdout": process.stdout.strip()}
 
     def events(
