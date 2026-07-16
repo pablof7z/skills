@@ -76,6 +76,25 @@ From the agent host:
   --message "<spoken update>"
 ```
 
+To ask from the remote host and block until the laptop user answers, add the
+same structured question bundle and bounded wait used by local TTS:
+
+```bash
+<skill-dir>/scripts/tts remote speak \
+  --agent-name "<seed-name>" \
+  --subject "<5-to-10-word subject>" \
+  --message "<spoken question preamble>" \
+  --ask '<question-bundle-json>' \
+  --wait 5m
+```
+
+The laptop presents the ordinary question UI. The remote process stays in the
+foreground until the user answers, skips every question, or the bounded wait
+expires. Its final JSON contains safe answer text and suggestion IDs. Answer
+attachments and laptop-local paths are never returned over the relay. Remote
+ask bundles cannot contain attachments; provide their context in the question
+text instead.
+
 If `AGENT_NSEC` is set, the paired backend first ensures that pubkey is a member
 of the configured TTS channel, then the agent key signs and publishes the
 kind-9 request directly. The backend remains the stable reply endpoint and a

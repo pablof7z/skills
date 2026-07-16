@@ -18,8 +18,8 @@ from tts_remote_commands import (
     pair_offer,
     pair_revoke,
     pair_status,
-    remote_speak,
 )
+from tts_remote_speech import remote_speak
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +49,8 @@ def build_parser() -> argparse.ArgumentParser:
     speak.add_argument("--subject", required=True)
     speak.add_argument("--message", required=True)
     speak.add_argument("--attach", nargs=2, action="append", default=[])
+    speak.add_argument("--ask")
+    speak.add_argument("--wait")
     speak.set_defaults(func=remote_speak, attach_flat=True)
 
     daemon = commands.add_parser("daemon")

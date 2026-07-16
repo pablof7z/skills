@@ -10,6 +10,7 @@ import subprocess
 import time
 
 from tts_remote_state import fake_nostr_enabled, pubkey_for_nsec, public_key_for_secret
+from tts_remote_transport import NOSTR_EVENT_FIELDS
 
 
 def canonical(event: dict[str, object]) -> str:
@@ -46,6 +47,7 @@ def nak_signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: st
         process = subprocess.run(
             command,
             env={**os.environ, "NOSTR_SECRET_KEY": nsec},
+            stdin=subprocess.DEVNULL,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -79,7 +81,7 @@ def verify_event(event: dict[str, object]) -> bool:
     try:
         process = subprocess.run(
             [nak_bin(), "verify"],
-            input=json.dumps(event),
+            input=json.dumps({key: value for key, value in event.items() if key in NOSTR_EVENT_FIELDS}),
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
