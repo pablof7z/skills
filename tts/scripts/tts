@@ -18,6 +18,8 @@ source "$SCRIPT_DIR/tts-native-queue.sh"
 # shellcheck source=tts-synthesis.sh
 source "$SCRIPT_DIR/tts-synthesis.sh"
 
+[[ "${1:-}" =~ ^(pair|remote|daemon)$ ]] && exec python3 "$SCRIPT_DIR/tts-remote-cli.py" "$@"
+
 NO_PLAY=0
 ASK=0
 ASK_WAIT=""
