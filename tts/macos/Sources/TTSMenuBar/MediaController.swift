@@ -28,12 +28,7 @@ final class MediaController {
         if let backends {
             self.backends = backends
         } else {
-            var defaultBackends: [any MediaControlBackend] = []
-            if let mediaRemote = MediaRemoteControlBackend.bundled() {
-                defaultBackends.append(mediaRemote)
-            }
-            defaultBackends.append(AppleScriptMediaControlBackend())
-            self.backends = defaultBackends
+            self.backends = [AppleScriptMediaControlBackend()]
         }
     }
 
@@ -112,6 +107,9 @@ final class MediaController {
         resumeTask?.cancel()
         resumeTask = nil
         generation &+= 1
+        if let lease = activeLease, !lease.backend.restoreOnShutdown(lease.session) {
+            NSLog("%@ could not restore media during shutdown", lease.backend.name)
+        }
         activeLease = nil
     }
 

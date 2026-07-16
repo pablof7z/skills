@@ -4,20 +4,24 @@ import Foundation
 import SwiftUI
 
 struct PlayerPreferences: Codable, Equatable {
+    private static let mediaControlSafetyVersion = 1
+
     var pausesMedia: Bool
     var mediaHandoffDelay: Double
     var mediaResumeDelay: Double
     var showsMenuBarItem: Bool
+    private var mediaControlVersion: Int
 
     enum CodingKeys: String, CodingKey {
         case pausesMedia
         case mediaHandoffDelay
         case mediaResumeDelay
         case showsMenuBarItem
+        case mediaControlVersion
     }
 
     init(
-        pausesMedia: Bool = true,
+        pausesMedia: Bool = false,
         mediaHandoffDelay: Double = 2,
         mediaResumeDelay: Double = 3,
         showsMenuBarItem: Bool = true
@@ -26,11 +30,15 @@ struct PlayerPreferences: Codable, Equatable {
         self.mediaHandoffDelay = mediaHandoffDelay
         self.mediaResumeDelay = mediaResumeDelay
         self.showsMenuBarItem = showsMenuBarItem
+        mediaControlVersion = Self.mediaControlSafetyVersion
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        pausesMedia = try values.decodeIfPresent(Bool.self, forKey: .pausesMedia) ?? true
+        let version = try values.decodeIfPresent(Int.self, forKey: .mediaControlVersion)
+        pausesMedia = version == Self.mediaControlSafetyVersion
+            ? try values.decodeIfPresent(Bool.self, forKey: .pausesMedia) ?? false
+            : false
         mediaHandoffDelay = Self.clamp(
             try values.decodeIfPresent(Double.self, forKey: .mediaHandoffDelay) ?? 2
         )
@@ -38,6 +46,7 @@ struct PlayerPreferences: Codable, Equatable {
             try values.decodeIfPresent(Double.self, forKey: .mediaResumeDelay) ?? 3
         )
         showsMenuBarItem = try values.decodeIfPresent(Bool.self, forKey: .showsMenuBarItem) ?? true
+        mediaControlVersion = Self.mediaControlSafetyVersion
     }
 
     static func clamp(_ delay: Double) -> Double {

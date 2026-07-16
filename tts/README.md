@@ -31,7 +31,7 @@ The workflow owns more than text generation:
 - History keeps an update at its original generation time even when replayed. Fresh updates use compact relative times for their first day, then an absolute timestamp. The native titlebar toolbar keeps search beside the history filter; the filter menu switches between recent and archived updates. Swipe left on an update to archive it, or restore it from the archived view.
 - Preferences contain the local media-handoff settings, and `Command`+`,` opens them whenever the TTS app is active.
 - Muted macOS system output automatically pauses TTS without losing its position. Playback resumes after unmute only when mute caused the pause, and the generator tells the agent that the queued speech was not audible.
-- Media keeps playing during generation. After the MP3 arrives, the player pauses the active macOS Now Playing session, verifies the transition, and resumes only the same session after the queue is idle. Music and Spotify AppleScript adapters remain as a fallback when system Now Playing control is unavailable.
+- Media keeps playing during generation. Users can explicitly opt in to app-specific Music and Spotify handoff. TTS verifies the exact track before resuming it, restores an owned interruption during normal shutdown, and never changes volume, mute, or audio output routing.
 
 The result is ambient awareness with provenance: you can hear that something changed, know which agent changed it, and revisit the exact words later.
 
@@ -55,6 +55,6 @@ Use `./scripts/tts-menu status` to inspect current playback and queue counts. Us
 
 ## What it touches
 
-`tts` sends the supplied message and narratable text attachments to the endpoint you configure. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state under `~/.local/state/tts`. On macOS, the player can pause and resume the active system Now Playing session according to its local Preferences, using application-specific automation only as a fallback. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
+`tts` sends the supplied message and narratable text attachments to the endpoint you configure. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state under `~/.local/state/tts`. On macOS, the player can pause and resume Music or Spotify according to an explicit local opt-in. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
 
 See [setup](references/setup.md) for endpoint configuration and [SKILL.md](SKILL.md) for the exact agent-facing writing and invocation rules.

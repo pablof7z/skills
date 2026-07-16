@@ -35,6 +35,7 @@ protocol MediaControlBackend: AnyObject {
     func sessions() async throws -> [MediaSessionSnapshot]
     func pause(_ session: MediaSessionSnapshot) async throws -> Bool
     func play(_ session: MediaSessionSnapshot) async throws -> Bool
+    func restoreOnShutdown(_ session: MediaSessionSnapshot) -> Bool
 }
 
 enum MediaControlBackendError: LocalizedError {

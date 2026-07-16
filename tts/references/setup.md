@@ -33,10 +33,9 @@ is unavailable or returns an invalid response, it warns and falls back to the
 standard audio endpoint so speech generation still succeeds; legacy items then
 show phrase progress without claiming exact word timing.
 
-The macOS app bundles a small BSD-licensed adapter for Apple's private
-MediaRemote framework so it can verify and control the active system Now
-Playing session. Because MediaRemote is not a public API, the app falls back to
-bundle-identified Music and Spotify AppleScript adapters when it is unavailable.
+Media handoff is disabled by default. Users can opt in from Preferences to let
+TTS pause Music and Spotify through their app-specific automation interfaces.
+TTS never changes system volume, mute, or audio output routing.
 
 See this guide for a self-hosted Kokoro setup reference:
 https://ariya.io/2026/03/local-cpu-friendly-high-quality-tts-text-to-speech-with-kokoro/

@@ -10,6 +10,7 @@ struct RemoteMenuBarTests {
         let preferences = try JSONDecoder().decode(PlayerPreferences.self, from: data)
 
         #expect(preferences.showsMenuBarItem)
+        #expect(!preferences.pausesMedia)
     }
 
     @Test @MainActor

@@ -97,14 +97,29 @@ extension QueueStoreTests {
         let store = PlayerPreferencesStore(stateDirectory: directory)
 
         #expect(store.preferences == PlayerPreferences())
-        store.setPausesMedia(false)
+        store.setPausesMedia(true)
         store.setMediaHandoffDelay(1.5)
         store.setMediaResumeDelay(4.5)
 
         let reloaded = PlayerPreferencesStore(stateDirectory: directory)
-        #expect(!reloaded.preferences.pausesMedia)
+        #expect(reloaded.preferences.pausesMedia)
         #expect(reloaded.preferences.mediaHandoffDelay == 1.5)
         #expect(reloaded.preferences.mediaResumeDelay == 4.5)
+    }
+
+    @Test @MainActor
+    func legacyMediaControlPreferenceRequiresFreshConsent() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let legacy = Data(
+            #"{"pausesMedia":true,"mediaHandoffDelay":1,"mediaResumeDelay":4}"#.utf8
+        )
+        try legacy.write(to: directory.appendingPathComponent("player-preferences.json"))
+
+        let migrated = PlayerPreferencesStore(stateDirectory: directory)
+
+        #expect(!migrated.preferences.pausesMedia)
     }
 
     @Test
