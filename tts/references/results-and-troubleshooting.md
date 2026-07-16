@@ -38,8 +38,9 @@ state accurately rather than claiming the update was heard.
 
 ## Diagnose failures
 
-- Endpoint or authentication failure: read [setup.md](setup.md) and verify the
-  configured Kokoro endpoint.
+- Endpoint or authentication failure: if no approved paired laptop is
+  available, read [setup.md](setup.md) and verify the configured Kokoro
+  endpoint.
 - Generation failure: use the command's standard-error diagnostics.
 - Queue or playback failure: inspect `tts-menu status` and the item by ID.
 - State inspection: queue records and logs normally live under

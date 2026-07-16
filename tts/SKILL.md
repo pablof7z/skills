@@ -1,6 +1,6 @@
 ---
 name: tts
-description: Generate spoken updates and answerable spoken questions through a Kokoro-compatible TTS endpoint. Use when the user requests narration, voice updates, spoken progress, audio playback, or TTS questions with suggestions or attachments.
+description: Generate spoken updates and answerable spoken questions through available local synthesis or paired-laptop playback. Use when the user requests narration, voice updates, spoken progress, audio playback, or TTS questions with suggestions or attachments.
 ---
 
 # TTS
@@ -46,17 +46,19 @@ asynchronous commands, it can keep the command running while you do other work.
 Use the environment's execution handle and completion-wait mechanism; do not
 detach the command with shell process-management syntax.
 
-After generating the primary audio, the script prepares narrated text
-attachments, queues normal playback, and prints JSON with the TTS `id`, output
-path, and `queued` status. With `--no-play`, it prints `generated` instead.
+The ordinary command selects local synthesis or an approved paired laptop
+automatically; agents do not choose a playback transport. Local synthesis
+returns the TTS `id`, output path, and `queued` status after generation and
+attachment preparation; `--no-play` returns `generated`. Paired delivery
+returns its request identifier and delivery status without exposing files on
+the laptop.
 
 ## Conditional guidance
 
-- **Paired laptop playback**: If local playback is unavailable or the user wants
-  audio on an attended laptop, read
-  [paired-laptop.md](references/paired-laptop.md). Use `tts pair ...`,
-  `tts remote speak ...`, and `tts daemon ...`; scripts handle transport
-  mechanics.
+- **Pairing administration or diagnostics**: Read
+  [paired-laptop.md](references/paired-laptop.md) only when the user asks to
+  pair, inspect, target, or manage a remote computer. Ordinary speech routes
+  automatically.
 - **Questions**: Before using `--ask`, read
   [asking-questions.md](references/asking-questions.md). Both bare and structured
   asks require `--message` for the main spoken update and `--wait` for an

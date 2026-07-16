@@ -67,6 +67,11 @@ available after the player window closes.
 
 ## Send Speech
 
+Ordinary `<skill-dir>/scripts/tts` invocations automatically use an approved
+paired laptop when local synthesis is unavailable. Agents should not select the
+transport for routine speech. Use the explicit command below only to target a
+specific peer or diagnose remote delivery.
+
 From the agent host:
 
 ```bash
