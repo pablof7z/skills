@@ -22,6 +22,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     var moveObservation: AnyCancellable?
     var resizeObservation: AnyCancellable?
     var closeObservation: AnyCancellable?
+    var visibilityObservation: AnyCancellable?
     var geometrySaveTask: Task<Void, Never>?
     var hoverAdvanceTask: Task<Void, Never>?
     var activeItemID: String?
@@ -118,10 +119,19 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
                 self?.setPlayerVisible(false)
             }
         }
+        visibilityObservation = Publishers.Merge(
+            NotificationCenter.default.publisher(for: NSWindow.didMiniaturizeNotification, object: panel),
+            NotificationCenter.default.publisher(for: NSWindow.didDeminiaturizeNotification, object: panel)
+        ).sink { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
     }
 
     func refresh() {
-        defer { updateHistoryNavigation() }
+        defer {
+            updateHistoryNavigation()
+            synchronizeVisibleAskQueueHold()
+        }
         updateHistoryFilterMenu()
         synchronizePendingPreview()
         synchronizeLingeringQuestion()
@@ -226,9 +236,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         screenObservation?.cancel()
         moveObservation?.cancel()
         resizeObservation?.cancel()
+        visibilityObservation?.cancel()
         geometrySaveTask?.cancel()
         hoverAdvanceTask?.cancel()
-        playbackController.setAutomaticQueueAdvanceDeferred(false)
+        playbackController.setVisibleAskQueueHold(nil)
         if panel.isVisible {
             preferencesStore.setOrigin(panel.frame.origin)
             preferencesStore.setExpandedSize(panel.frame.size)
@@ -258,8 +269,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         presentation.showHistory(hiding: hiddenItemID)
         hoverAdvanceTask?.cancel()
         hoverAdvanceTask = nil
-        playbackController.setAutomaticQueueAdvanceDeferred(false)
-        playbackController.releasePendingQuestionQueueHold(for: hiddenItemID)
+        playbackController.clearVisibleAskQueueHold(for: hiddenItemID)
         presentation.clearPendingPreview()
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0
@@ -268,6 +278,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         activeItemID = playbackController.currentItem?.id
         showIdleIfNeeded()
         updateHistoryNavigation()
+        synchronizeVisibleAskQueueHold()
     }
 
     func configurePanel() {

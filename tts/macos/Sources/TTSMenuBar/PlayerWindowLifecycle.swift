@@ -22,13 +22,13 @@ extension NowSpeakingPanelController {
     func presentationDidChange() {
         updateQuestionInputAvailability()
         updateHistoryNavigation()
+        synchronizeVisibleAskQueueHold()
         let isHovered = presentation.isHovered
         guard isHovered != observedHover else { return }
         observedHover = isHovered
         if isHovered {
             hoverAdvanceTask?.cancel()
             hoverAdvanceTask = nil
-            playbackController.setAutomaticQueueAdvanceDeferred(true)
         } else {
             scheduleWindowedHoverContinuation()
         }
@@ -40,11 +40,15 @@ extension NowSpeakingPanelController {
             try? await Task.sleep(for: .seconds(Layout.hoverExitContinuationSeconds))
             guard !Task.isCancelled, let self else { return }
             hoverAdvanceTask = nil
+            guard presentation.lingeringItem?.isPendingQuestion != true else {
+                synchronizeVisibleAskQueueHold()
+                return
+            }
             presentation.lingeringItem = nil
             presentation.lingeringTime = 0
             presentation.lingeringDuration = 0
             lastCurrentItem = nil
-            playbackController.setAutomaticQueueAdvanceDeferred(false)
+            synchronizeVisibleAskQueueHold()
             if playbackController.currentItem == nil {
                 activeItemID = nil
                 sessionOpener.clear()
@@ -57,8 +61,7 @@ extension NowSpeakingPanelController {
         guard activeItemID != nil || panel.isVisible else { return }
         hoverAdvanceTask?.cancel()
         hoverAdvanceTask = nil
-        playbackController.setAutomaticQueueAdvanceDeferred(false)
-        playbackController.releasePendingQuestionQueueHold()
+        playbackController.setVisibleAskQueueHold(nil)
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0
@@ -70,6 +73,18 @@ extension NowSpeakingPanelController {
         presentation.lingeringTime = 0
         presentation.lingeringDuration = 0
         updateActivationPolicy()
+    }
+
+    func synchronizeVisibleAskQueueHold() {
+        let itemID = VisibleAskQueueHoldPolicy.heldItemID(
+            isPlayerVisible: isPlayerVisible,
+            isWindowVisible: panel.isVisible && !panel.isMiniaturized,
+            currentItem: playbackController.currentItem,
+            pendingPreviewItem: presentation.pendingPreviewItem,
+            lingeringItem: presentation.lingeringItem,
+            hiddenItemID: presentation.hiddenItemID
+        )
+        playbackController.setVisibleAskQueueHold(itemID)
     }
 
     func updateActivationPolicy() {

@@ -26,8 +26,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     var playbackStartTask: Task<Void, Never>?
     var automaticallyPausedItemID: String?
     var retryingItemIDs = Set<String>()
-    var isAutomaticQueueAdvanceDeferred = false
-    var pendingQuestionQueueHoldID: String?
+    var visibleAskQueueHoldID: String?
     var started = false
     var lastItemsChangeToken: Date?
 
@@ -98,19 +97,16 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         GenerationProgress.value(for: item, samples: items, now: generationProgressNow)
     }
 
-    func setAutomaticQueueAdvanceDeferred(_ deferred: Bool) {
-        guard deferred != isAutomaticQueueAdvanceDeferred else { return }
-        isAutomaticQueueAdvanceDeferred = deferred
-        if !deferred {
-            refresh()
-        }
+    func setVisibleAskQueueHold(_ itemID: String?) {
+        guard visibleAskQueueHoldID != itemID else { return }
+        visibleAskQueueHoldID = itemID
+        refresh()
     }
 
-    func releasePendingQuestionQueueHold(for itemID: String? = nil) {
-        guard let heldID = pendingQuestionQueueHoldID,
+    func clearVisibleAskQueueHold(for itemID: String? = nil) {
+        guard let heldID = visibleAskQueueHoldID,
               itemID == nil || itemID == heldID else { return }
-        pendingQuestionQueueHoldID = nil
-        refresh()
+        setVisibleAskQueueHold(nil)
     }
 
     func start() {
