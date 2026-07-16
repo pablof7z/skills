@@ -9,6 +9,9 @@ from pathlib import Path
 import subprocess
 
 
+NOSTR_EVENT_FIELDS = frozenset({"id", "pubkey", "created_at", "kind", "tags", "content", "sig"})
+
+
 class Transport:
     def publish(self, event: dict[str, object]) -> dict[str, object]:
         raise NotImplementedError
@@ -94,10 +97,11 @@ class NakTransport(Transport):
         relay = self.relay or str(event.get("relay") or "")
         if not relay:
             raise RuntimeError("nak transport requires a relay")
+        wire_event = {key: value for key, value in event.items() if key in NOSTR_EVENT_FIELDS}
         try:
             process = subprocess.run(
                 [nak_bin(), "event", relay],
-                input=json.dumps(event),
+                input=json.dumps(wire_event),
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

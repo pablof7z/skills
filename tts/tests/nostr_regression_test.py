@@ -171,6 +171,37 @@ class TTSNostrRegressionTests(unittest.TestCase):
         self.assertNotIn("--paginate", captured)
         self.assertNotIn("--since", captured)
 
+    def test_nak_publish_strips_internal_metadata_from_wire_event(self) -> None:
+        nak = self.root / "strict-nak"
+        nak.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            "allowed = {'id', 'pubkey', 'created_at', 'kind', 'tags', 'content', 'sig'}\n"
+            "event = json.load(sys.stdin)\n"
+            "if set(event) != allowed:\n"
+            "    print('invalid event fields', file=sys.stderr)\n"
+            "    sys.exit(123)\n"
+            "print('published')\n",
+            encoding="utf-8",
+        )
+        nak.chmod(0o700)
+        os.environ["TTS_NAK_BIN"] = str(nak)
+        event = {
+            "id": "event-id",
+            "pubkey": "author",
+            "created_at": 123,
+            "kind": 24133,
+            "tags": [["p", "laptop"]],
+            "content": "one-use-secret",
+            "sig": "signature",
+            "relay": "ws://relay",
+        }
+
+        result = NakTransport("ws://relay").publish(event)
+
+        self.assertEqual(result["stdout"], "published")
+        self.assertEqual(event["relay"], "ws://relay")
+
     def test_signer_command_failure_never_echoes_nsec(self) -> None:
         nak = self.root / "leaky-nak"
         nak.write_text(
