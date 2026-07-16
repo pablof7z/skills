@@ -13,6 +13,7 @@ import uuid
 from tts_pair_token import PAIRING_KIND, pairing_key
 from tts_remote_channel import channel_parts
 from tts_remote_groups import request_group_admin, request_group_membership
+from tts_remote_ask import safe_response
 from tts_remote_polling import events_for_laptop
 from tts_remote_protocol import reply_tags, request_payload, tag_value
 from tts_remote_signing import signed_event, verify_event
@@ -134,7 +135,7 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
         )
         return True
     try:
-        materialize_request(content, event)
+        result = materialize_request(content, event)
     except (subprocess.CalledProcessError, ValueError):
         publish_reply(
             event,
@@ -144,7 +145,11 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
             guidance="Check the laptop TTS endpoint and retry after local TTS works.",
         )
         return True
-    publish_reply(event, backend, "accepted")
+    if content.get("ask"):
+        status = str(result.get("status") or "rejected")
+        publish_reply(event, backend, status, response=safe_response(result))
+    else:
+        publish_reply(event, backend, "accepted")
     return True
 
 
@@ -177,6 +182,8 @@ def materialize_request(content: dict[str, object], event: dict[str, object]) ->
         path = Path(str(attachment.get("path") or "")).resolve()
         label = str(attachment.get("label") or path.name)
         command.extend(["--attach", label, str(path)])
+    if content.get("ask"):
+        command.extend(["--wait", str(content["wait"]), "--ask", str(content["ask"])])
     if os.environ.get("TTS_REMOTE_DAEMON_NO_PLAY"):
         command.append("--no-play")
     environment = os.environ.copy()
@@ -198,12 +205,13 @@ def publish_reply(
     *,
     error_code: str | None = None,
     guidance: str | None = None,
+    response: dict[str, object] | None = None,
 ) -> None:
     relay = str(event.get("relay") or "")
     reply = signed_event(
         kind=9,
         content=str(event.get("content") or ""),
-        tags=reply_tags(event, status, error_code=error_code, guidance=guidance),
+        tags=reply_tags(event, status, error_code=error_code, guidance=guidance, response=response),
         nsec=str(backend["nsec"]),
         relay=relay,
     )

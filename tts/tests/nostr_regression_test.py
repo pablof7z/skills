@@ -75,6 +75,19 @@ class TTSNostrRegressionTests(unittest.TestCase):
 
         self.assertFalse(verify_event(event))
 
+    def test_verify_strips_local_relay_metadata_before_nak(self) -> None:
+        captured: dict[str, object] = {}
+
+        def run(_args: list[str], **kwargs: object) -> object:
+            captured.update(json.loads(str(kwargs["input"])))
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        event = fake_signed_event(kind=9, content="message", tags=[], nsec="laptop", relay="ws://relay")
+        with mock.patch("tts_remote_signing.subprocess.run", run):
+            self.assertTrue(verify_event(event))
+
+        self.assertNotIn("relay", captured)
+
     def test_nak_events_uses_bounded_filtered_request_and_returns_partial_timeout_output(self) -> None:
         os.environ["TTS_NAK_TIMEOUT_SECONDS"] = "0.1"
         event = {

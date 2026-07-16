@@ -11,7 +11,6 @@ import secrets
 import subprocess
 import sys
 import time
-import uuid
 
 from tts_remote_daemon import process_events
 from tts_pair_token import (
@@ -23,11 +22,9 @@ from tts_pair_token import (
 )
 from tts_remote_channel import channel_parts
 from tts_remote_config import remote_config, save_remote_config
-from tts_remote_groups import ensure_group_member, request_group_creation, wait_for_group_admin
-from tts_remote_protocol import request_tags
-from tts_remote_signing import public_key, signed_event
+from tts_remote_groups import request_group_creation, wait_for_group_admin
+from tts_remote_signing import signed_event
 from tts_remote_state import (
-    active_peer,
     ensure_backend,
     ensure_laptop_identity,
     error,
@@ -153,40 +150,6 @@ def pair_revoke(args) -> int:
     if not changed:
         return fail("peer_not_found", f"paired peer not found: {args.peer}", exit_code=2)
     return emit({"status": "revoked", "peer": args.peer})
-
-
-def remote_speak(args) -> int:
-    backend = ensure_backend()
-    peer = active_peer(args.peer)
-    if not peer:
-        return fail("not_paired", "no approved TTS laptop pairing found", "Run tts pair offer on the laptop, then tts pair connect on this host.")
-    signer_nsec = os.environ.get("AGENT_NSEC") or str(backend["nsec"])
-    signer_source = "AGENT_NSEC" if os.environ.get("AGENT_NSEC") else "backend"
-    signer_pubkey = public_key(signer_nsec)
-    pairing_relay = str(peer.get("relay") or "")
-    channel = str(peer.get("channel") or peer.get("group_id") or "")
-    relay, group_id = channel_parts(channel, pairing_relay)
-    if signer_source == "AGENT_NSEC":
-        ensure_group_member(relay, group_id, str(backend["nsec"]), signer_pubkey)
-    attachments = [{"label": label, "path": path} for label, path in zip(args.attach[0::2], args.attach[1::2])]
-    request_id = str(uuid.uuid4())
-    event = signed_event(
-        kind=9,
-        content=args.message,
-        tags=request_tags(
-            peer_pubkey=str(peer["pubkey"]),
-            group_id=group_id,
-            backend_pubkey=str(backend["pubkey"]),
-            request_id=request_id,
-            subject=args.subject,
-            agent_name=args.agent_name,
-            attachments=attachments,
-        ),
-        nsec=signer_nsec,
-        relay=relay,
-    )
-    transport(relay).publish(event)
-    return emit({"status": "sent", "request_id": request_id, "event_id": event["id"], "author_pubkey": signer_pubkey, "peer": peer["pubkey"]})
 
 
 def daemon_status(_args) -> int:

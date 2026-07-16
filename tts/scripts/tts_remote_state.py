@@ -90,6 +90,7 @@ def public_key_for_secret(nsec: str) -> str:
         process = subprocess.run(
             [os.environ.get("TTS_NAK_BIN", "nak"), "event", "--kind", "1", "--content", ""],
             env={**os.environ, "NOSTR_SECRET_KEY": nsec},
+            stdin=subprocess.DEVNULL,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
