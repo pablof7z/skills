@@ -124,6 +124,7 @@ class TTSNostrRegressionTests(unittest.TestCase):
         with mock.patch("tts_remote_transport.subprocess.run", run):
             NakTransport("ws://relay").events(
                 target_pubkey="laptop-pubkey",
+                author_pubkeys=["backend-pubkey"],
                 group_ids=["tts-pair-a", "tts-pair-b"],
                 since=123,
             )
@@ -136,6 +137,8 @@ class TTSNostrRegressionTests(unittest.TestCase):
         self.assertIn("24133", captured)
         self.assertIn("-p", captured)
         self.assertIn("laptop-pubkey", captured)
+        self.assertIn("-a", captured)
+        self.assertIn("backend-pubkey", captured)
         self.assertEqual(captured.count("-h"), 2)
         self.assertIn("tts-pair-a", captured)
         self.assertIn("tts-pair-b", captured)

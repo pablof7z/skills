@@ -101,6 +101,12 @@ kind-9 request directly. The backend remains the stable reply endpoint and a
 channel admin. Without `AGENT_NSEC`, the backend signs the request itself.
 Private signer material is never included in the event payload.
 
+The backend also publishes a signed replaceable kind-0 profile containing its
+hostname on the pairing relay. The laptop periodically verifies that profile
+and stores the hostname with the paired peer, so the menu shows a recognizable
+endpoint name. Missing, invalid, or unavailable metadata never blocks pairing
+or speech; the menu safely falls back to a shortened pubkey.
+
 The kind-9 event content is exactly the text to speak. Routing, request ID,
 subject, agent name, and optional attachment descriptors are ordinary Nostr
 tags rather than a JSON envelope. Delivery replies echo only that message and

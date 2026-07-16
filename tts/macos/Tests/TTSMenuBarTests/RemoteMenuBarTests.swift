@@ -67,6 +67,16 @@ struct RemoteMenuBarTests {
     }
 
     @Test
+    func prefersVerifiedPublishedHostnameFromPeerState() throws {
+        let data = Data(
+            #"{"id":"backend","pubkey":"abcdef0123456789","name":"kind2","approved":true}"#.utf8
+        )
+        let backend = try JSONDecoder().decode(PairedRemoteBackend.self, from: data)
+
+        #expect(backend.displayName == "kind2")
+    }
+
+    @Test
     func pairingOfferStartsListenerWhenNeeded() throws {
         let runner = RecordingRemoteCommandRunner(responses: [
             ["pair", "offer", "--relay", "wss://relay.example", "--channel", "wss://nip29.example/tts"]: Data(

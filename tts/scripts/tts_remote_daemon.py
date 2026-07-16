@@ -15,6 +15,7 @@ from tts_remote_channel import channel_parts
 from tts_remote_groups import request_group_admin, request_group_membership
 from tts_remote_ask import safe_response
 from tts_remote_polling import events_for_laptop
+from tts_remote_profile import profile_name
 from tts_remote_protocol import reply_tags, request_payload, tag_value
 from tts_remote_signing import signed_event, verify_event
 from tts_remote_state import active_peer, read_json, remote_dir, tts_state_dir, upsert_peer, write_json
@@ -76,6 +77,12 @@ def handle_pairing_event(event: dict[str, object]) -> bool:
         "approved": True,
         "created_at": int(time.time()),
     }
+    try:
+        name = profile_name(str(peer["pubkey"]), str(peer["relay"]))
+    except (OSError, RuntimeError):
+        name = None
+    if name:
+        peer["name"] = name
     nsec = ensure_laptop_nsec()
     channel_relay, group_id = channel_parts(str(peer["channel"]), str(peer["relay"]))
     peer["nip29_membership"] = request_group_membership(
