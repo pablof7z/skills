@@ -87,12 +87,15 @@ def optional_text(value: object) -> str | None:
 def wait_for_answer(
     *,
     request_event: dict[str, object],
-    recipient_pubkey: str,
-    laptop_pubkey: str,
     relay: str,
-    group_id: str,
     wait: str,
 ) -> dict[str, object]:
+    request_id = str(request_event.get("id") or "")
+    recipient_pubkey = str(request_event.get("pubkey") or "")
+    laptop_pubkey = tag_value(request_event, "p") or ""
+    group_id = tag_value(request_event, "h") or ""
+    if not all((request_id, recipient_pubkey, laptop_pubkey, group_id)):
+        raise RuntimeError("remote ask request is missing signed routing fields")
     grace = float(os.environ.get("TTS_REMOTE_ASK_DELIVERY_SECONDS", "120"))
     deadline = time.monotonic() + duration_seconds(wait) + max(1.0, grace)
     since = max(0, int(request_event.get("created_at") or 0) - 1)
@@ -102,9 +105,10 @@ def wait_for_answer(
             group_ids=[group_id],
             since=since,
             kinds=[9],
+            referenced_event_id=request_id,
         )
         for event in events:
-            if valid_answer(event, request_event, recipient_pubkey, laptop_pubkey, group_id):
+            if valid_answer(event, request_event):
                 return answer_result(event, request_event)
         time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
     return {
@@ -117,10 +121,10 @@ def wait_for_answer(
 def valid_answer(
     event: dict[str, object],
     request_event: dict[str, object],
-    recipient_pubkey: str,
-    laptop_pubkey: str,
-    group_id: str,
 ) -> bool:
+    recipient_pubkey = str(request_event.get("pubkey") or "")
+    laptop_pubkey = tag_value(request_event, "p") or ""
+    group_id = tag_value(request_event, "h") or ""
     answers = answer_values(event)
     question_ids = {row[1] for row in tag_rows(request_event, "question") if len(row) == 4}
     return (

@@ -22,6 +22,7 @@ from tts_remote_protocol import (
     request_tags,
 )
 from tts_remote_signing import fake_signed_event
+from tts_remote_state import pubkey_for_nsec
 from tts_remote_transport import transport
 
 
@@ -67,7 +68,7 @@ class RemoteAskProtocolTests(unittest.TestCase):
         title = "Choose the deployment regions"
         message = "The release is ready for a deployment decision."
         tags = request_tags(
-            peer_pubkey="laptop-pub",
+            peer_pubkey=pubkey_for_nsec("laptop-secret"),
             group_id="tts",
             title=title,
             agent_name="remote-agent",
@@ -142,15 +143,11 @@ class RemoteAskProtocolTests(unittest.TestCase):
             nsec="laptop-secret",
             relay="file://relay",
         )
-        laptop_pubkey = str(reply["pubkey"])
         transport("file://relay").publish(reply)
 
         result = wait_for_answer(
             request_event=request,
-            recipient_pubkey=str(request["pubkey"]),
-            laptop_pubkey=laptop_pubkey,
             relay="file://relay",
-            group_id="tts",
             wait="1s",
         )
 

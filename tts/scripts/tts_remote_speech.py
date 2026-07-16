@@ -68,10 +68,7 @@ def remote_speak(args) -> int:
         return emit(sent)
     answer = wait_for_answer(
         request_event=event,
-        recipient_pubkey=signer_pubkey,
-        laptop_pubkey=str(peer["pubkey"]),
         relay=relay,
-        group_id=group_id,
         wait=str(args.wait),
     )
     return emit({**sent, **answer})

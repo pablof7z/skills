@@ -30,6 +30,7 @@ class Transport:
         group_ids: list[str] | None = None,
         since: int | None = None,
         kinds: list[int] | None = None,
+        referenced_event_id: str | None = None,
     ) -> list[dict[str, object]]:
         raise NotImplementedError
 
@@ -61,6 +62,7 @@ class FileTransport(Transport):
         group_ids: list[str] | None = None,
         since: int | None = None,
         kinds: list[int] | None = None,
+        referenced_event_id: str | None = None,
     ) -> list[dict[str, object]]:
         if not self.path.is_file():
             return []
@@ -70,7 +72,15 @@ class FileTransport(Transport):
                 loaded = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(loaded, dict) and matches(loaded, target_pubkey, author_pubkeys, group_ids, since, kinds):
+            if isinstance(loaded, dict) and matches(
+                loaded,
+                target_pubkey,
+                author_pubkeys,
+                group_ids,
+                since,
+                kinds,
+                referenced_event_id,
+            ):
                 result.append(loaded)
         return result
 
@@ -130,6 +140,7 @@ class NakTransport(Transport):
         group_ids: list[str] | None = None,
         since: int | None = None,
         kinds: list[int] | None = None,
+        referenced_event_id: str | None = None,
     ) -> list[dict[str, object]]:
         if not self.relay:
             raise RuntimeError("nak transport requires a relay")
@@ -144,6 +155,8 @@ class NakTransport(Transport):
             command.extend(["-a", author])
         for group_id in sorted(set(group_ids or [])):
             command.extend(["-h", group_id])
+        if referenced_event_id:
+            command.extend(["-e", referenced_event_id])
         if since is not None and not live:
             command.extend(["--since", str(max(0, since))])
         command.append(self.relay)
@@ -158,11 +171,35 @@ class NakTransport(Transport):
             )
         except subprocess.TimeoutExpired as error:
             events = with_source_relay(parse_events(normalize_timeout_output(error.stdout)), self.relay)
-            return [event for event in events if matches(event, target_pubkey, author_pubkeys, group_ids, since, kinds)]
+            return [
+                event
+                for event in events
+                if matches(
+                    event,
+                    target_pubkey,
+                    author_pubkeys,
+                    group_ids,
+                    since,
+                    kinds,
+                    referenced_event_id,
+                )
+            ]
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or "nak fetch failed")
         events = with_source_relay(parse_events(process.stdout), self.relay)
-        return [event for event in events if matches(event, target_pubkey, author_pubkeys, group_ids, since, kinds)]
+        return [
+            event
+            for event in events
+            if matches(
+                event,
+                target_pubkey,
+                author_pubkeys,
+                group_ids,
+                since,
+                kinds,
+                referenced_event_id,
+            )
+        ]
 
     def group_members(self, channel: str) -> set[str]:
         return self._group_state(channel, [39001, 39002])
