@@ -19,6 +19,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var playerPreferencesStore = PlayerPreferencesStore(stateDirectory: store.stateDirectory)
     private lazy var mediaController = MediaController(preferencesStore: playerPreferencesStore)
     private lazy var controller = PlaybackController(store: store, mediaController: mediaController)
+    private lazy var askNotificationCenter = AskNotificationCenter()
+    private lazy var askAttentionController = AskAttentionController(
+        playbackController: controller,
+        preferencesStore: playerPreferencesStore,
+        authorizeNotifications: { [weak askNotificationCenter] in
+            askNotificationCenter?.requestAuthorization()
+        },
+        deliverNotification: { [weak askNotificationCenter] item in
+            askNotificationCenter?.deliver(for: item)
+        }
+    )
     private lazy var windowPreferencesStore = PlayerWindowPreferencesStore(stateDirectory: store.stateDirectory)
     private lazy var instanceLock = MenuInstanceLock(store: store)
     private lazy var playerWindowController = NowSpeakingPanelController(
@@ -60,10 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController.start()
         playerWindowController.refresh()
         controller.start()
+        askAttentionController.start()
     }
 
     func applicationWillTerminate(_: Notification) {
         menuBarController.stop()
+        askAttentionController.stop()
         playerWindowController.shutdown()
         controller.shutdown()
         releaseInstanceLock()

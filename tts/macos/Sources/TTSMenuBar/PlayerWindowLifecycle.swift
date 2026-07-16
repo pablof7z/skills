@@ -7,12 +7,16 @@ extension NowSpeakingPanelController {
         lastCurrentItem = nil
         activeItemID = nil
         guard !panel.isVisible else { return }
-        showPlayer()
+        showPlayer(activating: false)
     }
 
-    func showPlayer() {
+    func showPlayer(activating: Bool = true) {
         setPlayerVisible(true)
-        panel.makeKeyAndOrderFront(nil)
+        if activating {
+            panel.makeKeyAndOrderFront(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
     }
 
     func presentationDidChange() {
@@ -54,6 +58,7 @@ extension NowSpeakingPanelController {
         hoverAdvanceTask?.cancel()
         hoverAdvanceTask = nil
         playbackController.setAutomaticQueueAdvanceDeferred(false)
+        playbackController.releasePendingQuestionQueueHold()
         activeItemID = nil
         lastCurrentItem = nil
         lastDuration = 0

@@ -27,6 +27,10 @@ extension PlaybackController {
             let itemsChangeToken = try store.itemsChangeToken()
             let shouldReloadItems = itemsChangeToken != lastItemsChangeToken
             let loaded = shouldReloadItems ? try store.loadItems() : items
+            if let heldID = pendingQuestionQueueHoldID,
+               loaded.first(where: { $0.id == heldID })?.isPendingQuestion != true {
+                pendingQuestionQueueHoldID = nil
+            }
             lastItemsChangeToken = itemsChangeToken
             let historyChanged = shouldReloadItems && loaded != items
             if historyChanged {
@@ -46,10 +50,14 @@ extension PlaybackController {
                 if abs(duration - nextDuration) > 0.001 {
                     duration = nextDuration
                 }
-            } else if !isPlaybackBlocked,
-                      !isAutomaticQueueAdvanceDeferred,
-                      let next = Self.nextQueuedItem(in: loaded) {
-                play(next)
+            } else if !isPlaybackBlocked, !isAutomaticQueueAdvanceDeferred {
+                if let heldID = pendingQuestionQueueHoldID,
+                   let replay = loaded.first(where: { $0.id == heldID && $0.status == .queued }) {
+                    play(replay)
+                } else if pendingQuestionQueueHoldID == nil,
+                          let next = Self.nextQueuedItem(in: loaded) {
+                    play(next)
+                }
             }
         } catch {
             NSLog("Unable to refresh TTS queue: %@", error.localizedDescription)
