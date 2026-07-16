@@ -16,6 +16,15 @@ allowed mutation targets, and non-Git directories are ignored.
 ```bash
 <plugin-root>/bin/wtg status --repo <repo>
 <plugin-root>/bin/wtg request-base-access --repo <repo> --reason "<reason>"
+<plugin-root>/bin/wtg pair offer --relay <relay-url>
+<plugin-root>/bin/wtg pair connect '<pair-code>'
+<plugin-root>/bin/wtg pair status
+<plugin-root>/bin/wtg daemon laptop start --timeout 300
+<plugin-root>/bin/wtg daemon laptop status
+<plugin-root>/bin/wtg daemon laptop stop
+<plugin-root>/bin/wtg daemon server start --timeout 300
+<plugin-root>/bin/wtg daemon server status
+<plugin-root>/bin/wtg daemon server stop
 <plugin-root>/bin/wtg actions --tail 50
 <plugin-root>/bin/wtg actions -f --color always
 <plugin-root>/bin/wtg denials --tail 50
@@ -37,6 +46,19 @@ appended to `~/worktreeguard-denied-actions.jsonl`.
 Agent write tools are path-based: known targets outside protected main
 worktrees are allowed even when the session cwd is protected, while known
 targets inside a protected main worktree are denied.
+
+When the local approval dialog is unavailable, WorktreeGuard can ask a paired
+attended laptop instead. On the laptop, run `wtg pair offer --relay <relay>`
+and share the printed `wtg pair connect ...` command with the server. On the
+server, run that connect command once. Use `wtg daemon <role> start`,
+`status`, and `stop` for durable background processing, or
+`wtg daemon <role> foreground --timeout <seconds>` when you want the process
+attached to the current terminal. Agents should use the high-level `pair`,
+`daemon`, and `request-base-access` commands; relay internals are intentionally
+hidden from normal workflow docs. Each pairing uses its own relay group; NIP-29
+group creation and membership are enabled when the chosen relay supports them,
+with ordinary public relays remaining compatible. See
+`references/remote-approval.md` for failure modes and protocol details.
 
 ## Architecture
 

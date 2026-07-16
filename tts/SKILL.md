@@ -52,6 +52,11 @@ path, and `queued` status. With `--no-play`, it prints `generated` instead.
 
 ## Conditional guidance
 
+- **Paired laptop playback**: If local playback is unavailable or the user wants
+  audio on an attended laptop, read
+  [paired-laptop.md](references/paired-laptop.md). Use `tts pair ...`,
+  `tts remote speak ...`, and `tts daemon ...`; scripts handle transport
+  mechanics.
 - **Questions**: Before using `--ask`, read
   [asking-questions.md](references/asking-questions.md). Both bare and structured
   asks require `--message` for the main spoken update and `--wait` for an

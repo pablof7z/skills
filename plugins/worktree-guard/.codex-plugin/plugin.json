@@ -1,6 +1,6 @@
 {
   "name": "worktree-guard",
-  "version": "0.2.1",
+  "version": "0.2.1+codex.20260716080559",
   "description": "Codex hooks and a bundled local command for WorktreeGuard-protected Git worktrees.",
   "author": {
     "name": "Pablo Fernandez",
