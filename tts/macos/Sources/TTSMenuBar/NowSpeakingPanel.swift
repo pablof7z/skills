@@ -134,16 +134,25 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             return
         }
         guard let item = playbackController.currentItem else {
-            if PlayerHoverContinuation.shouldRetainCurrentContent(
+            if let pendingQuestion = PendingQuestionRetention.retainedItem(
+                currentItem: nil,
+                lingeringItem: presentation.lingeringItem,
+                lastCurrentItem: lastCurrentItem
+            ) {
+                lastCurrentItem = pendingQuestion
+                sessionOpener.refresh(rawIdentifier: pendingQuestion.iTermSessionID)
+                beginLingerIfNeeded()
+                if !panel.isVisible { showPlayer(activating: false) }
+            } else if PlayerHoverContinuation.shouldRetainCurrentContent(
                 isHovered: presentation.isHovered,
                 isGracePeriodActive: hoverAdvanceTask != nil,
                 hasCurrentContent: lastCurrentItem != nil
             ) {
                 sessionOpener.refresh(rawIdentifier: lastCurrentItem?.iTermSessionID)
                 beginLingerIfNeeded()
-                if !panel.isVisible { showPlayer() }
+                if !panel.isVisible { showPlayer(activating: false) }
             } else if presentation.pendingPreviewItem != nil {
-                if !panel.isVisible { showPlayer() }
+                if !panel.isVisible { showPlayer(activating: false) }
             } else {
                 presentation.lingeringItem = nil
                 presentation.lingeringTime = 0
@@ -173,9 +182,9 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
 
         if activeItemID != item.id {
             activeItemID = item.id
-            showPlayer()
+            showPlayer(activating: false)
         } else if !panel.isVisible {
-            showPlayer()
+            showPlayer(activating: false)
         }
     }
 
@@ -250,6 +259,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         hoverAdvanceTask?.cancel()
         hoverAdvanceTask = nil
         playbackController.setAutomaticQueueAdvanceDeferred(false)
+        playbackController.releasePendingQuestionQueueHold(for: hiddenItemID)
         presentation.clearPendingPreview()
         presentation.lingeringItem = nil
         presentation.lingeringTime = 0

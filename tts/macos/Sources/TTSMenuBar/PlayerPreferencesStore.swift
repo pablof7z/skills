@@ -10,6 +10,9 @@ struct PlayerPreferences: Codable, Equatable {
     var mediaHandoffDelay: Double
     var mediaResumeDelay: Double
     var showsMenuBarItem: Bool
+    var askDockAttentionMode: AskDockAttentionMode
+    var askDockAttentionIntervalMinutes: Int
+    var sendsAskNotifications: Bool
     private var mediaControlVersion: Int
 
     enum CodingKeys: String, CodingKey {
@@ -17,6 +20,9 @@ struct PlayerPreferences: Codable, Equatable {
         case mediaHandoffDelay
         case mediaResumeDelay
         case showsMenuBarItem
+        case askDockAttentionMode
+        case askDockAttentionIntervalMinutes
+        case sendsAskNotifications
         case mediaControlVersion
     }
 
@@ -24,12 +30,20 @@ struct PlayerPreferences: Codable, Equatable {
         pausesMedia: Bool = false,
         mediaHandoffDelay: Double = 2,
         mediaResumeDelay: Double = 3,
-        showsMenuBarItem: Bool = true
+        showsMenuBarItem: Bool = true,
+        askDockAttentionMode: AskDockAttentionMode = .once,
+        askDockAttentionIntervalMinutes: Int = 5,
+        sendsAskNotifications: Bool = false
     ) {
         self.pausesMedia = pausesMedia
         self.mediaHandoffDelay = mediaHandoffDelay
         self.mediaResumeDelay = mediaResumeDelay
         self.showsMenuBarItem = showsMenuBarItem
+        self.askDockAttentionMode = askDockAttentionMode
+        self.askDockAttentionIntervalMinutes = Self.clampAttentionInterval(
+            askDockAttentionIntervalMinutes
+        )
+        self.sendsAskNotifications = sendsAskNotifications
         mediaControlVersion = Self.mediaControlSafetyVersion
     }
 
@@ -46,11 +60,26 @@ struct PlayerPreferences: Codable, Equatable {
             try values.decodeIfPresent(Double.self, forKey: .mediaResumeDelay) ?? 3
         )
         showsMenuBarItem = try values.decodeIfPresent(Bool.self, forKey: .showsMenuBarItem) ?? true
+        askDockAttentionMode = try values.decodeIfPresent(
+            AskDockAttentionMode.self,
+            forKey: .askDockAttentionMode
+        ) ?? .once
+        askDockAttentionIntervalMinutes = Self.clampAttentionInterval(
+            try values.decodeIfPresent(Int.self, forKey: .askDockAttentionIntervalMinutes) ?? 5
+        )
+        sendsAskNotifications = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .sendsAskNotifications
+        ) ?? false
         mediaControlVersion = Self.mediaControlSafetyVersion
     }
 
     static func clamp(_ delay: Double) -> Double {
         min(max(delay, 0), 10)
+    }
+
+    static func clampAttentionInterval(_ minutes: Int) -> Int {
+        min(max(minutes, 1), 120)
     }
 
 }
@@ -79,6 +108,18 @@ final class PlayerPreferencesStore: ObservableObject {
 
     func setShowsMenuBarItem(_ visible: Bool) {
         update { $0.showsMenuBarItem = visible }
+    }
+
+    func setAskDockAttentionMode(_ mode: AskDockAttentionMode) {
+        update { $0.askDockAttentionMode = mode }
+    }
+
+    func setAskDockAttentionIntervalMinutes(_ minutes: Int) {
+        update { $0.askDockAttentionIntervalMinutes = PlayerPreferences.clampAttentionInterval(minutes) }
+    }
+
+    func setSendsAskNotifications(_ enabled: Bool) {
+        update { $0.sendsAskNotifications = enabled }
     }
 
     private func update(_ mutation: (inout PlayerPreferences) -> Void) {
@@ -143,78 +184,5 @@ final class PlayerPreferencesWindowController: NSWindowController, NSWindowDeleg
         }
         window.center()
         showWindow(nil)
-    }
-}
-
-private struct PlayerPreferencesView: View {
-    @ObservedObject var preferencesStore: PlayerPreferencesStore
-
-    private var pausesMedia: Binding<Bool> {
-        Binding(
-            get: { preferencesStore.preferences.pausesMedia },
-            set: { preferencesStore.setPausesMedia($0) }
-        )
-    }
-
-    private var mediaHandoffDelay: Binding<Double> {
-        Binding(
-            get: { preferencesStore.preferences.mediaHandoffDelay },
-            set: { preferencesStore.setMediaHandoffDelay($0) }
-        )
-    }
-
-    private var mediaResumeDelay: Binding<Double> {
-        Binding(
-            get: { preferencesStore.preferences.mediaResumeDelay },
-            set: { preferencesStore.setMediaResumeDelay($0) }
-        )
-    }
-
-    private var showsMenuBarItem: Binding<Bool> {
-        Binding(
-            get: { preferencesStore.preferences.showsMenuBarItem },
-            set: { preferencesStore.setShowsMenuBarItem($0) }
-        )
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            GroupBox("Media") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Pause Music and Spotify while TTS plays", isOn: pausesMedia)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        delayStepper(
-                            title: "Start speech after media pauses",
-                            value: mediaHandoffDelay
-                        )
-                        delayStepper(
-                            title: "Resume media after speech ends",
-                            value: mediaResumeDelay
-                        )
-                    }
-                    .disabled(!preferencesStore.preferences.pausesMedia)
-                    .opacity(preferencesStore.preferences.pausesMedia ? 1 : 0.45)
-                }
-                .padding(.vertical, 4)
-            }
-
-            Toggle("Show TTS in the menu bar", isOn: showsMenuBarItem)
-
-            Spacer(minLength: 0)
-        }
-        .padding(22)
-        .frame(width: 460, height: 260, alignment: .topLeading)
-    }
-
-    private func delayStepper(title: String, value: Binding<Double>) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Stepper(value: value, in: 0...10, step: 0.5) {
-                Text(String(format: "%.1f seconds", value.wrappedValue))
-                    .monospacedDigit()
-            }
-        }
     }
 }

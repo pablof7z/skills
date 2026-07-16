@@ -35,6 +35,14 @@ extension PlaybackController {
         duration = 0
         replaceItem(item)
 
+        if item.isPendingQuestion {
+            pendingQuestionQueueHoldID = item.id
+            mediaController.scheduleResume(after: mediaController.mediaResumeDelay) { [weak self] in
+                self?.mediaResumeAllowed() ?? false
+            }
+            return
+        }
+
         if let (parentID, offset) = parentReturn,
            let parent = (try? store.loadItems())?.first(where: { $0.id == parentID }) {
             let resumed = parent.requeuedForReplay(startingAt: offset)
@@ -66,7 +74,8 @@ extension PlaybackController {
         guard player == nil else { return false }
         guard let persisted = try? store.loadItems() else { return false }
         return !persisted.contains { item in
-            item.status == .queued || item.status == .playing
+            item.status == .playing
+                || (item.status == .queued && pendingQuestionQueueHoldID == nil)
         }
     }
 

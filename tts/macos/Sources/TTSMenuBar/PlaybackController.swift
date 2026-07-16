@@ -27,6 +27,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     var automaticallyPausedItemID: String?
     var retryingItemIDs = Set<String>()
     var isAutomaticQueueAdvanceDeferred = false
+    var pendingQuestionQueueHoldID: String?
     var started = false
     var lastItemsChangeToken: Date?
 
@@ -104,6 +105,13 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         if !deferred {
             refresh()
         }
+    }
+
+    func releasePendingQuestionQueueHold(for itemID: String? = nil) {
+        guard let heldID = pendingQuestionQueueHoldID,
+              itemID == nil || itemID == heldID else { return }
+        pendingQuestionQueueHoldID = nil
+        refresh()
     }
 
     func start() {
