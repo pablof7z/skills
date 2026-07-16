@@ -14,6 +14,7 @@ from tts_pair_token import PAIRING_KIND, pairing_key
 from tts_remote_channel import channel_parts
 from tts_remote_groups import request_group_admin, request_group_membership
 from tts_remote_polling import events_for_laptop
+from tts_remote_protocol import reply_tags, request_payload, tag_value
 from tts_remote_signing import signed_event, verify_event
 from tts_remote_state import active_peer, read_json, remote_dir, tts_state_dir, upsert_peer, write_json
 from tts_remote_transport import transport
@@ -22,17 +23,8 @@ from tts_remote_transport import transport
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
-def tag_value(tags: object, name: str) -> str | None:
-    if not isinstance(tags, list):
-        return None
-    for tag in tags:
-        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name:
-            return str(tag[1])
-    return None
-
-
 def tags_include(tags: object, name: str, value: str | None = None) -> bool:
-    found = tag_value(tags, name)
+    found = tag_value({"tags": tags}, name)
     return found is not None and (value is None or found == value)
 
 
@@ -116,7 +108,7 @@ def valid_pairing_event(event: dict[str, object], code: dict[str, object]) -> bo
 def handle_request_event(event: dict[str, object], backend: dict[str, object]) -> bool:
     if event.get("kind") != 9 or not verify_event(event):
         return False
-    peer = active_peer(str(tag_value(event.get("tags"), "reply") or ""))
+    peer = active_peer(str(tag_value(event, "reply") or ""))
     if not peer or not valid_request_tags(event, backend, peer):
         return False
     channel = str(peer.get("channel") or peer.get("group_id") or "")
@@ -127,26 +119,32 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
         return False
     if str(event.get("pubkey") or "") not in members:
         return False
-    content = request_content(event)
-    if not content:
-        publish_reply(event, backend, {"status": "rejected", "error": {"code": "invalid_request", "message": "request content is not JSON"}})
+    content = request_payload(event)
+    if content is None:
+        publish_reply(event, backend, "rejected", error_code="invalid_request")
         return True
-    if not valid_direct_request(content, event, peer):
-        return False
-    attachments = normalized_attachments(content.get("attachments"))
-    if attachments is None:
-        publish_reply(event, backend, rejection(content, "invalid_remote_attachment"))
-        return True
+    attachments = content["attachments"]
     if any(not Path(str(item["path"])).is_file() for item in attachments):
-        publish_reply(event, backend, rejection(content, "remote_attachment_unavailable"))
+        publish_reply(
+            event,
+            backend,
+            "rejected",
+            error_code="remote_attachment_unavailable",
+            guidance="Send text only, or place the file on the paired laptop and retry.",
+        )
         return True
-    content["attachments"] = attachments
     try:
-        result = materialize_request(content, event)
-    except (subprocess.CalledProcessError, ValueError) as exc:
-        publish_reply(event, backend, materialization_error(content, exc))
+        materialize_request(content, event)
+    except (subprocess.CalledProcessError, ValueError):
+        publish_reply(
+            event,
+            backend,
+            "rejected",
+            error_code="materialization_failed",
+            guidance="Check the laptop TTS endpoint and retry after local TTS works.",
+        )
         return True
-    publish_reply(event, backend, {"status": "accepted", "request_id": content.get("request_id"), "item": result})
+    publish_reply(event, backend, "accepted")
     return True
 
 
@@ -155,8 +153,7 @@ def valid_request_tags(
     backend: dict[str, object],
     peer: dict[str, object],
 ) -> bool:
-    content = request_content(event)
-    request_id = content.get("request_id") if isinstance(content, dict) else None
+    request_id = tag_value(event, "request")
     return (
         tags_include(event.get("tags"), "p", str(backend["pubkey"]))
         and tags_include(
@@ -170,73 +167,7 @@ def valid_request_tags(
         and tags_include(event.get("tags"), "product", "tts")
         and tags_include(event.get("tags"), "reply", str(peer.get("pubkey")))
         and bool(request_id)
-        and tags_include(event.get("tags"), "request", str(request_id))
     )
-
-
-def request_content(event: dict[str, object]) -> dict[str, object]:
-    try:
-        content = json.loads(str(event.get("content") or "{}"))
-    except ValueError:
-        return {}
-    return content if isinstance(content, dict) else {}
-
-
-def valid_direct_request(
-    content: dict[str, object],
-    event: dict[str, object],
-    peer: dict[str, object],
-) -> bool:
-    backend = content.get("backend")
-    request_id = content.get("request_id")
-    if not isinstance(backend, dict) or not request_id:
-        return False
-    return (
-        content.get("product") == "tts"
-        and backend.get("pubkey") == peer.get("pubkey")
-        and tags_include(event.get("tags"), "request", str(request_id))
-    )
-
-
-def rejection(content: dict[str, object], code: str) -> dict[str, object]:
-    return {
-        "status": "rejected",
-        "request_id": content.get("request_id"),
-        "error": {
-            "code": code,
-            "message": "one or more attachment paths are not available on this laptop",
-            "guidance": "Send text only, or place the file on the paired laptop and retry with that local path.",
-        },
-    }
-
-
-def normalized_attachments(value: object) -> list[dict[str, str]] | None:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        return None
-    result = []
-    for item in value:
-        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
-            return None
-        path = item["path"].strip()
-        label = item.get("label")
-        if not path or (label is not None and not isinstance(label, str)):
-            return None
-        result.append({"path": path, "label": str(label or Path(path).name)})
-    return result
-
-
-def materialization_error(content: dict[str, object], exc: Exception) -> dict[str, object]:
-    return {
-        "status": "rejected",
-        "request_id": content.get("request_id"),
-        "error": {
-            "code": "materialization_failed",
-            "message": str(exc),
-            "guidance": "Check the laptop TTS endpoint and retry after local TTS works on that laptop.",
-        },
-    }
 
 
 def materialize_request(content: dict[str, object], event: dict[str, object]) -> dict[str, object]:
@@ -260,13 +191,19 @@ def materialize_request(content: dict[str, object], event: dict[str, object]) ->
     return output
 
 
-def publish_reply(event: dict[str, object], backend: dict[str, object], content: dict[str, object]) -> None:
+def publish_reply(
+    event: dict[str, object],
+    backend: dict[str, object],
+    status: str,
+    *,
+    error_code: str | None = None,
+    guidance: str | None = None,
+) -> None:
     relay = str(event.get("relay") or "")
-    reply_target = str(tag_value(event.get("tags"), "reply") or event.get("pubkey") or "")
     reply = signed_event(
         kind=9,
-        content=json.dumps(content, ensure_ascii=False, sort_keys=True),
-        tags=[["e", str(event.get("id"))], ["p", reply_target], ["h", str(tag_value(event.get("tags"), "h"))], ["product", "tts"]],
+        content=str(event.get("content") or ""),
+        tags=reply_tags(event, status, error_code=error_code, guidance=guidance),
         nsec=str(backend["nsec"]),
         relay=relay,
     )

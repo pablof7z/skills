@@ -24,6 +24,7 @@ from tts_pair_token import (
 from tts_remote_channel import channel_parts
 from tts_remote_config import remote_config, save_remote_config
 from tts_remote_groups import ensure_group_member, request_group_creation, wait_for_group_admin
+from tts_remote_protocol import request_tags
 from tts_remote_signing import public_key, signed_event
 from tts_remote_state import (
     active_peer,
@@ -169,20 +170,18 @@ def remote_speak(args) -> int:
         ensure_group_member(relay, group_id, str(backend["nsec"]), signer_pubkey)
     attachments = [{"label": label, "path": path} for label, path in zip(args.attach[0::2], args.attach[1::2])]
     request_id = str(uuid.uuid4())
-    content = {
-        "version": 1,
-        "product": "tts",
-        "request_id": request_id,
-        "message": args.message,
-        "subject": args.subject,
-        "agent_name": args.agent_name,
-        "attachments": attachments,
-        "backend": {"pubkey": backend["pubkey"]},
-    }
     event = signed_event(
         kind=9,
-        content=json.dumps(content, ensure_ascii=False, sort_keys=True),
-        tags=[["p", str(peer["pubkey"])], ["h", group_id], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
+        content=args.message,
+        tags=request_tags(
+            peer_pubkey=str(peer["pubkey"]),
+            group_id=group_id,
+            backend_pubkey=str(backend["pubkey"]),
+            request_id=request_id,
+            subject=args.subject,
+            agent_name=args.agent_name,
+            attachments=attachments,
+        ),
         nsec=signer_nsec,
         relay=relay,
     )

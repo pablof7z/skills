@@ -111,13 +111,13 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertEqual(request["kind"], 9)
         self.assertIn(["p", peer_pubkey], request["tags"])
         self.assertIn(["h", "tts"], request["tags"])
-        content = json.loads(request["content"])
         self.assertEqual(request["pubkey"], output["author_pubkey"])
         self.assertNotEqual(request["pubkey"], backend_pubkey)
-        self.assertEqual(content["backend"]["pubkey"], backend_pubkey)
-        self.assertEqual(content["request_id"], output["request_id"])
-        self.assertNotIn("inner_event", content)
-        self.assertNotIn("signer", content)
+        self.assertEqual(request["content"], "Text speech request.")
+        self.assertIn(["request", output["request_id"]], request["tags"])
+        self.assertIn(["reply", backend_pubkey], request["tags"])
+        self.assertIn(["subject", "Remote signer selection test case"], request["tags"])
+        self.assertIn(["agent", "agent one"], request["tags"])
         self.assertEqual(membership["kind"], 9000)
         self.assertIn(["p", request["pubkey"]], membership["tags"])
         self.assertEqual(membership["pubkey"], backend_pubkey)
@@ -157,7 +157,9 @@ class RemoteDaemonCLITests(unittest.TestCase):
             self.assertIn(["e", item["remote_request"]["event_id"]], reply["tags"])
             self.assertIn(["h", "tts"], reply["tags"])
             self.assertIn(["p", connected["backend_pubkey"]], reply["tags"])
-            self.assertEqual(json.loads(reply["content"])["status"], "accepted")
+            self.assertIn(["status", "accepted"], reply["tags"])
+            self.assertEqual(reply["content"], "Remote text works.")
+            self.assertNotIn(str(item["output_file"]), json.dumps(reply))
         finally:
             server.shutdown()
             thread.join(timeout=2)
@@ -179,10 +181,12 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertFalse((self.laptop_state / "items").exists())
 
         events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
-        reply = json.loads(events[-1]["content"])
-        self.assertEqual(reply["status"], "rejected")
-        self.assertEqual(reply["error"]["code"], "remote_attachment_unavailable")
-        self.assertIn("send text only", reply["error"]["guidance"].lower())
+        reply = events[-1]
+        self.assertEqual(reply["content"], "Attachment should fail safely.")
+        self.assertIn(["status", "rejected"], reply["tags"])
+        self.assertIn(["error", "remote_attachment_unavailable"], reply["tags"])
+        guidance = next(tag[1] for tag in reply["tags"] if tag[0] == "guidance")
+        self.assertIn("send text only", guidance.lower())
 
     def test_daemon_passes_laptop_accessible_attachments_to_local_queue(self) -> None:
         connected = self.pair()
@@ -212,6 +216,12 @@ class RemoteDaemonCLITests(unittest.TestCase):
             item = json.loads(next((self.laptop_state / "items").glob("*.json")).read_text())
             self.assertEqual(item["attachments"][0]["label"], "Remote notes")
             self.assertTrue(Path(item["attachments"][0]["source_file"]).is_file())
+            request = [
+                event for event in map(json.loads, self.transport_file.read_text().splitlines())
+                if event["pubkey"] == connected["backend_pubkey"] and ["agent", "remote agent"] in event["tags"]
+            ][0]
+            self.assertIn(["attachment", str(attachment), "Remote notes"], request["tags"])
+            self.assertEqual(request["content"], "The attachment should appear locally.")
         finally:
             server.shutdown()
             thread.join(timeout=2)

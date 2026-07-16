@@ -82,6 +82,12 @@ kind-9 request directly. The backend remains the stable reply endpoint and a
 channel admin. Without `AGENT_NSEC`, the backend signs the request itself.
 Private signer material is never included in the event payload.
 
+The kind-9 event content is exactly the text to speak. Routing, request ID,
+subject, agent name, and optional attachment descriptors are ordinary Nostr
+tags rather than a JSON envelope. Delivery replies echo only that message and
+report acceptance or a safe error code in tags; they never publish generated
+item records or laptop filesystem paths.
+
 Pairings created by versions that used expiring JSON codes must be recreated
 before direct agent signing can be used. Generate a fresh compact code on the
 laptop and pair again so the backend receives channel-admin permission.
@@ -91,7 +97,7 @@ laptop and pair again so the backend receives channel-admin permission.
 Remote text speech should work once paired and the laptop daemon is running.
 Remote attachments are passed into the ordinary local TTS attachment flow only
 when the laptop can read the referenced paths. If a path is unavailable, the
-daemon rejects the request with structured JSON guidance; retry with text only
+daemon rejects the request with error and guidance tags; retry with text only
 or with a path that exists on the paired laptop.
 
 All waits are bounded. Relay reads are scoped to the laptop and its paired
