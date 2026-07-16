@@ -1,6 +1,0 @@
-{
-  "id": "019f5-e4cce",
-  "ts": "2026-07-13T07:49:43Z",
-  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
-  "text": "Assistant: The local service check changes the implementation recommendation materially: our own Kokoro endpoint already exposes `/dev/captioned_speech` with real per-word start/end times. A live probe returned actual boundaries (including punctuation), so we do not need forced alignment or a new provider. The current proportional index can be replaced at the source, then the UI can use those timestamps inside a calmer phrase-level focus treatment. [...] Crucially, our Kokoro service already has `/dev/captioned_speech`. I live-tested it and received real `start_time`/`end_time` values for every word and punctuation token. So we can implement this properly without adding forced alignment or changing providers."
-}

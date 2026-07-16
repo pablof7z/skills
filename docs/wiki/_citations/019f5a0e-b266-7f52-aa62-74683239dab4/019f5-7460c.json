@@ -1,6 +1,0 @@
-{
-  "id": "019f5-7460c",
-  "ts": "2026-07-13T06:08:09Z",
-  "session": "019f5a0e-b266-7f52-aa62-74683239dab4",
-  "text": "I want to create a new feedback skill (or maybe plugin, I don't know which one is right)\n\nthe idea:\n\nit will tell agents that they can provide feedback to skills they are using when a skill can be improved; i.e. when they've noticed that the skill is confusing in some way [...] ~/.agents/skills/<skill-slug>/meta-feedback/"
-}

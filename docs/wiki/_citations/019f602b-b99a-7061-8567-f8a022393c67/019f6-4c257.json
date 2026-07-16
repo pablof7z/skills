@@ -1,6 +1,0 @@
-{
-  "id": "019f6-4c257",
-  "ts": "2026-07-14T10:32:25Z",
-  "session": "019f602b-b99a-7061-8567-f8a022393c67",
-  "text": "Assistant: The current policy explicitly says `git -C <linked-worktree> …` must be allowed, and its regression suite has that exact case. I’m now reading the actual deny record; that will tell us whether the hook parsed the command incorrectly or the agent’s first command was shaped differently than its narration suggests.\n\nAssistant: Yes—the deny is a real false positive, but the agent’s explanation is only partly right. Its tool call did specify `workdir=/private/tmp/29er-next-sable-diagnose`; the hook record dropped that field (`operation_workdir=\"\"`) and fell back to the protected session cwd. The explicit `git -C …` retry was then allowed, proving the linked worktree itself was recognized correctly. [...] - `git -C /private/tmp/29er-next-sable-diagnose …` was correctly allowed, proving worktree detection works."
-}

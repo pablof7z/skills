@@ -1,6 +1,0 @@
-{
-  "id": "019f6-c5cbd",
-  "ts": "2026-07-14T10:45:01Z",
-  "session": "019f602b-b99a-7061-8567-f8a022393c67",
-  "text": "    If base access is truly required, ask for a human approval:\n\n      /Users/pablofernandez/Work/skills/plugins/worktree-guard/bin/wtg request-base-access --repo /Users/pablofernandez/Work/29er-next \\\n        --reason \"<why this cannot be done in a worktree>\" \\\n        --scope session"
-}

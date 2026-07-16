@@ -1,6 +1,0 @@
-{
-  "id": "019f6-2750f",
-  "ts": "2026-07-14T11:31:35Z",
-  "session": "019f605a-3fbe-7601-ac55-e5016574213a",
-  "text": "Assistant: Local installation currently resolves through versioned caches, while the stable hook shims still point at the dirty base checkout. I’m refreshing both Codex and Claude caches from the merged worktree, restoring their marketplace registrations afterward, and then repointing the stable shims to the installed 0.2.1 artifacts so new sessions actually receive the merged behavior. [...] Assistant: Both plugin managers now report WorktreeGuard 0.2.1, and their marketplace paths are restored to the normal skills checkout. I’ve repointed the stable system shims to the 0.2.1 caches; the final check is an end-to-end synthetic denial through those installed shims, confirming the channel instruction is actually emitted at runtime. [...] - WorktreeGuard 0.2.1 is installed and enabled in both Codex and Claude.\n- Stable system shims target the deployed 0.2.1 caches; an end-to-end synthetic denial confirmed the new guidance."
-}

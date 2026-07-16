@@ -1,6 +1,0 @@
-{
-  "id": "019f5-6ea86",
-  "ts": "2026-07-13T07:49:37Z",
-  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
-  "text": "Assistant: It’s not impossible—in this session I can see all three identifiers:\n\n- iTerm session: `E8A8B722-4D2D-4C33-A49B-75F3A6B84EF1`\n- Tenex PTY: `codex-1783923115-6812`\n- Codex thread: `019f5a1a-8895-7503-abfc-7ae32801d0b5`\n\nI also verified that the exact iTerm session is currently discoverable through iTerm’s scripting interface and supports `select`.\n\nThe clean design is to capture a terminal locator with every TTS queue item, then show an “Open agent session” button only when one exists. Clicking it selects that exact iTerm split/tab and activates iTerm. If the original tab has died, it can fall back to reopening/attaching the Tenex PTY; otherwise the button disappears or reports that the session ended. [...] The only caveat is macOS may request one-time Automation permission for the TTS app to control iTerm. The HUD would remain non-focus-stealing; focus changes only when you explicitly click “Open session.” I think this feature is worth building, but I’m keeping it out of the current hover-affordance patch until you explicitly greenlight that permission-bearing behavior."
-}

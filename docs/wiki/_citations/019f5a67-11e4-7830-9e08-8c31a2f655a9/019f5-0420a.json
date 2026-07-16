@@ -1,6 +1,0 @@
-{
-  "id": "019f5-0420a",
-  "ts": "2026-07-13T07:40:50Z",
-  "session": "019f5a67-11e4-7830-9e08-8c31a2f655a9",
-  "text": "User: change the high-level skill to include guidelines to be as terse as possible without losing meaning and to favor skimmable answers rather than large paragraphs; it should say what it needs to say to convey the message in it's shorter possible version, balancing with allow the user to understand and have context of what the things mean. [...] The skill now requires:\n\n- The shortest answer that preserves meaning and context.\n- Skimmable bullets, short sentences, and compact sections.\n- No repetition, throat-clearing, or unnecessary detail."
-}

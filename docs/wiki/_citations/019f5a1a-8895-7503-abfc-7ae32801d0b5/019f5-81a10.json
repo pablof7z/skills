@@ -1,6 +1,0 @@
-{
-  "id": "019f5-81a10",
-  "ts": "2026-07-13T07:49:36Z",
-  "session": "019f5a1a-8895-7503-abfc-7ae32801d0b5",
-  "text": "- Borderless, non-activating `NSPanel`; never steals focus. [...] - Bottom-left, positioned inside the screen’s usable area. [...] Assistant: The HUD code is now present in the isolated worktree: a click-through, non-key/non-main `NSPanel`, shared playback controller, five-second prominent state, compact ongoing state, progress, subject, agent, and workspace. Compilation and app-level validation are running now. [...] Assistant: That is likely the same presentation-state boundary, not a separate player problem. I’m adding it to the active stability issue: playback start must explicitly order the HUD onscreen, independent of the menu-bar popover. I’m checking the launch/observation ordering now while the fixed build is playing."
-}

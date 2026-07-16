@@ -1,6 +1,0 @@
-{
-  "id": "019f6-5a526",
-  "ts": "2026-07-14T10:45:01Z",
-  "session": "019f602b-b99a-7061-8567-f8a022393c67",
-  "text": "Assistant: Issue [#102](https://github.com/pablof7z/skills/issues/102) now captures the false-denial need, and the isolated `fix/102-codex-workdir` worktree is ready. One small tooling mismatch surfaced: this bundled `wtg` no longer exposes `create-worktree`, so I used the guard-approved native `git worktree add` path."
-}
