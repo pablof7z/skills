@@ -8,7 +8,7 @@ struct PlayerQueueMiniPlayerTests {
         #expect(PlayerListPolicy.includes(.playing))
         #expect(PlayerListPolicy.includes(.paused))
         #expect(PlayerListPolicy.includes(.played))
-        #expect(!PlayerListPolicy.includes(.queued))
+        #expect(PlayerListPolicy.includes(.queued))
     }
 
     @Test
