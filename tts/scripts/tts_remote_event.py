@@ -58,6 +58,7 @@ def matches(
     group_ids: list[str] | None,
     since: int | None,
     kinds: list[int] | None,
+    referenced_event_id: str | None = None,
 ) -> bool:
     if kinds:
         try:
@@ -70,6 +71,8 @@ def matches(
     if author_pubkeys and event.get("pubkey") not in author_pubkeys:
         return False
     if group_ids and not tag_values(event, "h").intersection(group_ids):
+        return False
+    if referenced_event_id and referenced_event_id not in tag_values(event, "e"):
         return False
     if since is None:
         return True

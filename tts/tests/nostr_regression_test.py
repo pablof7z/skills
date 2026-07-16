@@ -127,6 +127,7 @@ class TTSNostrRegressionTests(unittest.TestCase):
                 author_pubkeys=["backend-pubkey"],
                 group_ids=["tts-pair-a", "tts-pair-b"],
                 since=123,
+                referenced_event_id="request-event-id",
             )
 
         self.assertIn("req", captured)
@@ -144,6 +145,8 @@ class TTSNostrRegressionTests(unittest.TestCase):
         self.assertIn("tts-pair-b", captured)
         self.assertIn("--since", captured)
         self.assertIn("123", captured)
+        self.assertIn("-e", captured)
+        self.assertIn("request-event-id", captured)
 
     def test_group_members_reads_relay_authored_member_and_admin_state(self) -> None:
         events = [
