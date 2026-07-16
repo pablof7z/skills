@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import uuid
 
@@ -143,13 +144,28 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
         return True
     try:
         result = materialize_request(content, event)
-    except (subprocess.CalledProcessError, ValueError):
+    except subprocess.CalledProcessError as error:
+        detail = safe_materialization_detail(error.stderr)
+        print(f"TTS materialization failed for {content.get('request_id')}: {detail}", file=sys.stderr)
         publish_reply(
             event,
             backend,
             "rejected",
             error_code="materialization_failed",
-            guidance="Check the laptop TTS endpoint and retry after local TTS works.",
+            guidance=materialization_guidance(detail),
+        )
+        return True
+    except ValueError as error:
+        print(
+            f"TTS materialization returned invalid JSON for {content.get('request_id')}: {error}",
+            file=sys.stderr,
+        )
+        publish_reply(
+            event,
+            backend,
+            "rejected",
+            error_code="materialization_failed",
+            guidance="The laptop TTS command returned an invalid response. Check its daemon log and retry.",
         )
         return True
     if content.get("ask"):
@@ -158,6 +174,25 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
     else:
         publish_reply(event, backend, "accepted")
     return True
+
+
+def safe_materialization_detail(stderr: str | None) -> str:
+    lines = [
+        line.strip()
+        for line in (stderr or "").splitlines()
+        if line.strip().startswith(("Error:", "Warning:"))
+    ]
+    return " | ".join(lines[-3:])[:1000] or "local TTS command exited without a diagnostic"
+
+
+def materialization_guidance(detail: str) -> str:
+    if detail == "local TTS command exited without a diagnostic":
+        return "The laptop TTS command failed before queueing. Check its daemon log and retry."
+    return f"Laptop TTS: {detail}"
+
+
+def environment_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def valid_request_tags(
@@ -191,7 +226,7 @@ def materialize_request(content: dict[str, object], event: dict[str, object]) ->
         command.extend(["--attach", label, str(path)])
     if content.get("ask"):
         command.extend(["--wait", str(content["wait"]), "--ask", str(content["ask"])])
-    if os.environ.get("TTS_REMOTE_DAEMON_NO_PLAY"):
+    if environment_enabled("TTS_REMOTE_DAEMON_NO_PLAY") and not content.get("ask"):
         command.append("--no-play")
     environment = os.environ.copy()
     environment["TTS_ITEM_ID"] = item_id
