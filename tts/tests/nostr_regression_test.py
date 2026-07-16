@@ -167,6 +167,9 @@ class TTSNostrRegressionTests(unittest.TestCase):
         self.assertIn("24133", captured)
         self.assertIn("receiver-pubkey", captured)
         self.assertNotIn("-h", captured)
+        self.assertIn("--stream", captured)
+        self.assertNotIn("--paginate", captured)
+        self.assertNotIn("--since", captured)
 
     def test_signer_command_failure_never_echoes_nsec(self) -> None:
         nak = self.root / "leaky-nak"

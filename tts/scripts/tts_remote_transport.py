@@ -120,14 +120,16 @@ class NakTransport(Transport):
     ) -> list[dict[str, object]]:
         if not self.relay:
             raise RuntimeError("nak transport requires a relay")
-        command = [nak_bin(), "req", "--paginate", "--limit", str(limit())]
-        for kind in sorted(set(kinds or [9, 24133])):
+        requested_kinds = sorted(set(kinds or [9, 24133]))
+        live = bool(requested_kinds) and all(20000 <= kind < 30000 for kind in requested_kinds)
+        command = [nak_bin(), "req", "--stream" if live else "--paginate", "--limit", str(limit())]
+        for kind in requested_kinds:
             command.extend(["-k", str(kind)])
         if target_pubkey:
             command.extend(["-p", target_pubkey])
         for group_id in sorted(set(group_ids or [])):
             command.extend(["-h", group_id])
-        if since is not None:
+        if since is not None and not live:
             command.extend(["--since", str(max(0, since))])
         command.append(self.relay)
         try:
@@ -137,7 +139,7 @@ class NakTransport(Transport):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
-                timeout=float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")),
+                timeout=pairing_listen_timeout() if live else command_timeout(),
             )
         except subprocess.TimeoutExpired as error:
             events = with_source_relay(parse_events(normalize_timeout_output(error.stdout)), self.relay)
@@ -212,6 +214,13 @@ def command_timeout() -> float:
         return max(0.1, float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")))
     except ValueError:
         return 5.0
+
+
+def pairing_listen_timeout() -> float:
+    try:
+        return max(0.25, float(os.environ.get("TTS_PAIRING_LISTEN_SECONDS", "1")))
+    except ValueError:
+        return 1.0
 
 
 def normalize_timeout_output(value: str | bytes | None) -> str:
