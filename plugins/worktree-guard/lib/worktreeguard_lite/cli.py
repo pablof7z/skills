@@ -25,6 +25,7 @@ from .reporting import (
     print_denial_summary,
 )
 from .repositories import protected_repo_for_path
+from .remote_cli import add_remote_parsers
 from .storage import (
     action_log_path,
     active_grants,
@@ -44,9 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except WorktreeGuardError as error:
+        if getattr(args, "json", False):
+            emit({"error": {"type": "worktreeguard_error", "message": str(error)}})
+            return 1
         print(str(error), file=sys.stderr)
         return 1
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wtg")
@@ -111,8 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
         harness_parser.add_argument("event", nargs="?", default="hook")
         harness_parser.set_defaults(func=cmd_hook_harness)
 
+    add_remote_parsers(subparsers)
     return parser
-
 
 def cmd_init(args: argparse.Namespace) -> int:
     repo = discover_repo(Path(args.repo))
@@ -121,7 +124,6 @@ def cmd_init(args: argparse.Namespace) -> int:
     save_state(state)
     print(f"Initialized WorktreeGuard state for {repo.base_path}")
     return 0
-
 
 def cmd_protect(args: argparse.Namespace) -> int:
     repo = discover_repo(Path(args.repo))
@@ -147,7 +149,6 @@ def cmd_protect(args: argparse.Namespace) -> int:
     print(f"Protected base checkout: {repo.base_path}")
     return 0
 
-
 def cmd_status(args: argparse.Namespace) -> int:
     repo = discover_repo(Path(args.repo))
     protected = protected_repo_for_path(repo.base_path)
@@ -158,7 +159,6 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Branch: {protected.get('branch', repo.branch)}")
     print(f"HEAD: {protected.get('head', repo.head)}")
     return 0
-
 
 def cmd_current(args: argparse.Namespace) -> int:
     path = resolve_path(args.repo)
@@ -172,7 +172,6 @@ def cmd_current(args: argparse.Namespace) -> int:
     }
     print(json.dumps(payload, indent=2))
     return 0
-
 
 def cmd_request_base_access(args: argparse.Namespace) -> int:
     repo = discover_repo(Path(args.repo))

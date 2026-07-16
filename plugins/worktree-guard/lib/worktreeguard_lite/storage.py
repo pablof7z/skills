@@ -99,8 +99,11 @@ def request_human_approval(
         return None
 
     if sys.platform != "darwin":
-        raise WorktreeGuardError(
-            "No approval UI is available on this platform in WorktreeGuard-lite."
+        return request_paired_laptop_approval(
+            repo=repo,
+            reason=reason,
+            requested_scope=requested_scope,
+            timeout=timeout,
         )
 
     prompt = (
@@ -131,15 +134,50 @@ def request_human_approval(
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return None
+        return request_paired_laptop_approval(
+            repo=repo,
+            reason=reason,
+            requested_scope=requested_scope,
+            timeout=timeout,
+        )
     if result.returncode != 0:
-        return None
+        return request_paired_laptop_approval(
+            repo=repo,
+            reason=reason,
+            requested_scope=requested_scope,
+            timeout=timeout,
+        )
     button = result.stdout.strip()
     if button == "Allow session":
         return "session"
     if button == "Allow once":
         return "once"
     return None
+
+
+def request_paired_laptop_approval(
+    *,
+    repo: "Repo",
+    reason: str,
+    requested_scope: str,
+    timeout: int,
+) -> str | None:
+    from .remote_approval import RemoteApprovalRequest, request_remote_approval
+
+    request = RemoteApprovalRequest(
+        operation="request-base-access",
+        worktree=str(repo.worktree_path),
+        repository=str(repo.base_path),
+        reason=reason,
+        session=os.environ.get("WTG_SESSION_ID", ""),
+        ttl_seconds=DEFAULT_GRANT_TTL_SECONDS,
+        requested_scope=requested_scope,
+    )
+    return request_remote_approval(
+        request,
+        wait_seconds=max(0, timeout),
+        create_grant_on_allow=False,
+    )
 
 
 def create_grant(
