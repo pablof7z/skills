@@ -19,7 +19,14 @@ class Transport:
         target_pubkey: str | None = None,
         group_ids: list[str] | None = None,
         since: int | None = None,
+        kinds: list[int] | None = None,
     ) -> list[dict[str, object]]:
+        raise NotImplementedError
+
+    def group_members(self, channel: str) -> set[str]:
+        raise NotImplementedError
+
+    def group_admins(self, channel: str) -> set[str]:
         raise NotImplementedError
 
 
@@ -42,6 +49,7 @@ class FileTransport(Transport):
         target_pubkey: str | None = None,
         group_ids: list[str] | None = None,
         since: int | None = None,
+        kinds: list[int] | None = None,
     ) -> list[dict[str, object]]:
         if not self.path.is_file():
             return []
@@ -51,9 +59,31 @@ class FileTransport(Transport):
                 loaded = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(loaded, dict) and matches(loaded, target_pubkey, group_ids, since):
+            if isinstance(loaded, dict) and matches(loaded, target_pubkey, group_ids, since, kinds):
                 result.append(loaded)
         return result
+
+    def group_members(self, channel: str) -> set[str]:
+        members: set[str] = set()
+        for event in self.events():
+            kind = int(event.get("kind") or -1)
+            if kind == 9000 and channel in tag_values(event, "h"):
+                members.update(tag_values(event, "p"))
+            if kind in {39001, 39002} and channel in tag_values(event, "d"):
+                members.update(tag_values(event, "p"))
+        return members
+
+    def group_admins(self, channel: str) -> set[str]:
+        admins: set[str] = set()
+        for event in self.events():
+            kind = int(event.get("kind") or -1)
+            if kind == 9007 and channel in tag_values(event, "h"):
+                admins.add(str(event.get("pubkey") or ""))
+            if kind == 9000 and channel in tag_values(event, "h"):
+                admins.update(role_tag_values(event, "p", "admin"))
+            if kind == 39001 and channel in tag_values(event, "d"):
+                admins.update(tag_values(event, "p"))
+        return admins
 
 
 class NakTransport(Transport):
@@ -86,11 +116,13 @@ class NakTransport(Transport):
         target_pubkey: str | None = None,
         group_ids: list[str] | None = None,
         since: int | None = None,
+        kinds: list[int] | None = None,
     ) -> list[dict[str, object]]:
         if not self.relay:
             raise RuntimeError("nak transport requires a relay")
-        command = [nak_bin(), "req", "--paginate", "--limit", str(limit()), "-k", "9", "-k", "24", self.relay]
-        command.pop()
+        command = [nak_bin(), "req", "--paginate", "--limit", str(limit())]
+        for kind in sorted(set(kinds or [9, 24133])):
+            command.extend(["-k", str(kind)])
         if target_pubkey:
             command.extend(["-p", target_pubkey])
         for group_id in sorted(set(group_ids or [])):
@@ -108,10 +140,51 @@ class NakTransport(Transport):
                 timeout=float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")),
             )
         except subprocess.TimeoutExpired as error:
-            return with_source_relay(parse_events(normalize_timeout_output(error.stdout)), self.relay)
+            events = with_source_relay(parse_events(normalize_timeout_output(error.stdout)), self.relay)
+            return [event for event in events if matches(event, target_pubkey, group_ids, since, kinds)]
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or "nak fetch failed")
-        return with_source_relay(parse_events(process.stdout), self.relay)
+        events = with_source_relay(parse_events(process.stdout), self.relay)
+        return [event for event in events if matches(event, target_pubkey, group_ids, since, kinds)]
+
+    def group_members(self, channel: str) -> set[str]:
+        return self._group_state(channel, [39001, 39002])
+
+    def group_admins(self, channel: str) -> set[str]:
+        return self._group_state(channel, [39001])
+
+    def _group_state(self, channel: str, kinds: list[int]) -> set[str]:
+        if not self.relay:
+            raise RuntimeError("nak transport requires a relay")
+        command = [nak_bin(), "req", "--limit", "2"]
+        for kind in kinds:
+            command.extend(["-k", str(kind)])
+        command.extend(["-d", channel, self.relay])
+        try:
+            process = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=command_timeout(),
+            )
+        except subprocess.TimeoutExpired as error:
+            events = parse_events(normalize_timeout_output(error.stdout))
+        else:
+            if process.returncode != 0:
+                raise RuntimeError(process.stderr.strip() or "nak group-state fetch failed")
+            events = parse_events(process.stdout)
+        members: set[str] = set()
+        for event in events:
+            if channel in tag_values(event, "d"):
+                members.update(tag_values(event, "p"))
+            if int(event.get("kind") or -1) == 9000 and channel in tag_values(event, "h"):
+                if kinds == [39001]:
+                    members.update(role_tag_values(event, "p", "admin"))
+                else:
+                    members.update(tag_values(event, "p"))
+        return members
 
 
 def transport(relay: str | None = None) -> Transport:
@@ -180,12 +253,26 @@ def tag_values(event: dict[str, object], name: str) -> set[str]:
     }
 
 
+def role_tag_values(event: dict[str, object], name: str, role: str) -> set[str]:
+    tags = event.get("tags")
+    if not isinstance(tags, list):
+        return set()
+    return {
+        str(tag[1])
+        for tag in tags
+        if isinstance(tag, list) and len(tag) >= 3 and tag[0] == name and tag[2] == role
+    }
+
+
 def matches(
     event: dict[str, object],
     target_pubkey: str | None,
     group_ids: list[str] | None,
     since: int | None,
+    kinds: list[int] | None,
 ) -> bool:
+    if kinds and int(event.get("kind") or -1) not in kinds:
+        return False
     if target_pubkey and target_pubkey not in tag_values(event, "p"):
         return False
     if group_ids and not tag_values(event, "h").intersection(group_ids):

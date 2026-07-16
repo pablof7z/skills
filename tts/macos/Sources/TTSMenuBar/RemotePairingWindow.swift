@@ -4,16 +4,21 @@ import SwiftUI
 
 @MainActor
 final class RemotePairingViewModel: ObservableObject {
-    @Published var relay = "wss://relay.primal.net"
+    @Published var relay: String
+    @Published var channel: String
     @Published private(set) var pairingCode: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isWorking = false
     private let service: RemotePairingService
     private let didCreateOffer: () -> Void
+    private var offerTask: Task<Void, Never>?
 
     init(service: RemotePairingService, didCreateOffer: @escaping () -> Void) {
         self.service = service
         self.didCreateOffer = didCreateOffer
+        let configuration = service.configuration()
+        relay = configuration.relay
+        channel = configuration.channel
     }
 
     func createOffer() {
@@ -22,15 +27,28 @@ final class RemotePairingViewModel: ObservableObject {
             errorMessage = "Enter a relay URL."
             return
         }
+        let trimmedChannel = channel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedChannel.isEmpty else {
+            errorMessage = "Enter a channel."
+            return
+        }
         isWorking = true
         errorMessage = nil
-        do {
-            pairingCode = try service.createOffer(relay: trimmedRelay).code
-            didCreateOffer()
-        } catch {
-            errorMessage = error.localizedDescription
+        offerTask?.cancel()
+        offerTask = Task {
+            do {
+                let offer = try await Task.detached(priority: .userInitiated) { [service] in
+                    try service.createOffer(relay: trimmedRelay, channel: trimmedChannel)
+                }.value
+                guard !Task.isCancelled else { return }
+                pairingCode = offer.code
+                didCreateOffer()
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = error.localizedDescription
+            }
+            isWorking = false
         }
-        isWorking = false
     }
 
     func copyCode() {
@@ -46,7 +64,7 @@ final class RemotePairingWindowController: NSWindowController {
         let model = RemotePairingViewModel(service: service, didCreateOffer: didCreateOffer)
         let hostingController = NSHostingController(rootView: RemotePairingView(model: model))
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 340),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -81,9 +99,21 @@ private struct RemotePairingView: View {
             Text("Create a one-time code, then give it to the agent on the other computer. Keep TTS running here while it connects.")
                 .foregroundStyle(.secondary)
 
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                GridRow {
+                    Text("Pairing Relay").foregroundStyle(.secondary)
+                    TextField("wss://relay.example", text: $model.relay)
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    Text("Channel").foregroundStyle(.secondary)
+                    TextField("wss://nip29.example/tts", text: $model.channel)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
             HStack {
-                TextField("Relay", text: $model.relay)
-                    .textFieldStyle(.roundedBorder)
+                Spacer()
                 Button(model.pairingCode == nil ? "Create Code" : "Create New Code") {
                     model.createOffer()
                 }
@@ -98,23 +128,28 @@ private struct RemotePairingView: View {
             } else if let error = model.errorMessage {
                 Text(error).foregroundStyle(.red)
             } else if let code = model.pairingCode {
-                TextEditor(text: .constant(code))
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(minHeight: 180)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.25)))
+                ScrollView(.horizontal) {
+                    Text(code)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .padding(8)
+                }
+                .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.25)))
                 HStack {
-                    Text("This code expires and can be used only once.")
+                    Text("This code can be used only once.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Copy Code") { model.copyCode() }
                 }
             } else {
-                Spacer(minLength: 150)
+                Spacer(minLength: 36)
             }
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 500, height: 430, alignment: .topLeading)
+        .frame(width: 500, height: 340, alignment: .topLeading)
     }
 }

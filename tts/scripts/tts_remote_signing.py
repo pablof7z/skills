@@ -41,7 +41,7 @@ def signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: str, r
 def nak_signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: str, relay: str | None = None) -> dict[str, object]:
     command = [nak_bin(), "event", "--kind", str(kind), "--content", content]
     for tag in tags:
-        command.extend(["--tag", "=".join(tag)])
+        command.extend(["--tag", nak_tag(tag)])
     try:
         process = subprocess.run(
             command,
@@ -63,6 +63,12 @@ def nak_signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: st
     if relay:
         event["relay"] = relay
     return event
+
+
+def nak_tag(tag: list[str]) -> str:
+    if len(tag) < 2:
+        raise RuntimeError("Nostr tags require a name and value")
+    return f"{tag[0]}={tag[1]}" + "".join(f";{value}" for value in tag[2:])
 
 
 def verify_event(event: dict[str, object]) -> bool:

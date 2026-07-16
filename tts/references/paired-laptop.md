@@ -9,7 +9,9 @@ the signing, relay, retry, and idempotency details.
 On the attended laptop:
 
 ```bash
-<skill-dir>/scripts/tts pair offer --relay <relay-url>
+<skill-dir>/scripts/tts pair offer \
+  --relay wss://relay.primal.net \
+  --channel wss://nip29.f7z.io/tts
 ```
 
 On macOS, the same flow is available from the TTS menu-bar icon under
@@ -19,15 +21,21 @@ it shows listener status, paired computers, and an unread-queue badge. Hide
 the icon with **Settings… → Show TTS in the menu bar** if you prefer to use
 only the Dock app.
 
-Send the JSON `pair_code` to the agent host. On the agent host:
+Send the opaque `pair_code` to the agent host. On the agent host:
 
 ```bash
-<skill-dir>/scripts/tts pair connect --code '<pair_code-json>'
+<skill-dir>/scripts/tts pair connect --code '<pair-code>'
 ```
 
-The pairing code contains `version`, `product=tts`, `relay`, `laptop_pubkey`,
-`pairing_id`, a per-pair `group_id`, `expires_at`, and a raw one-use `secret`.
-Do not wrap it in another secret scheme. Check, list, and revoke pairings with:
+The connect command waits until the receiving laptop has admitted the remote
+backend as a channel admin. It reports `connected` only after that relay state
+is confirmed; keep the receiving daemon running until it finishes.
+
+The compact code encodes only the receiving peer pubkey, pairing relay,
+configured NIP-29 channel, and a raw one-use secret. The pairing relay carries
+the one-time secret event; the channel coordinate identifies the managed relay
+and group used for permissions and speech. The pairing window remembers both.
+Do not wrap the code in another secret scheme. Check, list, and revoke pairings with:
 
 ```bash
 <skill-dir>/scripts/tts pair status
@@ -68,10 +76,15 @@ From the agent host:
   --message "<spoken update>"
 ```
 
-If `AGENT_NSEC` is set, that signer signs the inner request for attribution.
-The persistent TTS backend signs the outer transport event and remains the
-stable reply endpoint. Without `AGENT_NSEC`, the backend signs both layers.
+If `AGENT_NSEC` is set, the paired backend first ensures that pubkey is a member
+of the configured TTS channel, then the agent key signs and publishes the
+kind-9 request directly. The backend remains the stable reply endpoint and a
+channel admin. Without `AGENT_NSEC`, the backend signs the request itself.
 Private signer material is never included in the event payload.
+
+Pairings created by versions that used expiring JSON codes must be recreated
+before direct agent signing can be used. Generate a fresh compact code on the
+laptop and pair again so the backend receives channel-admin permission.
 
 ## Failure Modes
 
@@ -86,6 +99,7 @@ channels, paginated, and resumed from a durable cursor. Command failures emit
 structured JSON errors on stderr without exposing signer material. Tests use
 deterministic file transport or a fake `nak` executable; real relay transport
 uses `nak` for key generation, signing, publishing, verification, and bounded
-fetches. Pairing asks managed relays to create a per-pair group and add the
-backend; ordinary relays fall back gracefully to the same signed, targeted
-request flow.
+fetches. Pairing uses one p-targeted ephemeral event carrying the one-use
+secret. The receiving app admits the backend as a member and admin of its
+configured TTS channel; the backend can then admit the agent pubkeys it
+represents before they publish directly.
