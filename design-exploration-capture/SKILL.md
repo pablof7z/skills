@@ -74,6 +74,18 @@ Keep observations, assumptions, hypotheses, constraints, preferences, decisions,
 
 At each turn, update the note with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful synthesis.
 
+### Allocate Attention By Decision Relevance
+
+Shape the response as a flexible attention gradient: move loosely from material least likely to need user input toward material most likely to need it. Do not turn this into mandatory sections, symbols, or a fixed template.
+
+- Compress explicit agreement and settled direction aggressively. A label or short bullet is usually enough; do not re-argue what the user already chose.
+- Keep strong agent-selected defaults brief and distinguish them from user-approved decisions as assumptions, proposed defaults, or emerging direction.
+- State supporting evidence compactly. Explain contrary evidence in proportion to how much it threatens the direction: mention mild caveats briefly or omit them, but give potential showstoppers enough context to evaluate.
+- Spend most of the explanation budget on the decision frontier. When the user needs to make a call, make the context vertically skimmable: what the choice controls, the viable options, the recommended default and why, and the meaningful consequence of each option.
+- When several choices remain, end with a very short recap of what deserves the user's attention next.
+
+Markers such as `✅` for agreement, `➡️` for a proposed default, or `❓` for a user decision can improve scanability, but they are illustrative rather than required. Preserve natural conversation, omit empty layers, and compress low-attention material before shortening decision context.
+
 Optimize for understanding before action. Answer probing questions directly, but keep the main thread oriented around the current decision frontier:
 
 - what is known
