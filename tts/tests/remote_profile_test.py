@@ -14,7 +14,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tts" / "scripts"))
 
-from tts_remote_profile import profile_name, publish_backend_profile, refresh_peer_profiles
+from tts_remote_profile import profile_name, publish_endpoint_profile, refresh_peer_profiles
 from tts_remote_signing import fake_signed_event
 from tts_remote_state import peers, save_peers
 from tts_remote_transport import transport
@@ -47,7 +47,7 @@ class RemoteProfileTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_published_hostname_resolves_into_existing_peer_state(self) -> None:
-        self.assertTrue(publish_backend_profile(self.backend, "file://pairing"))
+        self.assertTrue(publish_endpoint_profile(self.backend, "file://pairing"))
         published = transport("file://pairing").events(
             author_pubkeys=[str(self.backend["pubkey"])],
             kinds=[0],
@@ -65,7 +65,7 @@ class RemoteProfileTests(unittest.TestCase):
         self.assertEqual(peers()[0]["name"], "kind2")
         self.assertEqual(profile_name(str(self.backend["pubkey"]), "file://pairing"), "kind2")
 
-        self.assertTrue(publish_backend_profile(self.backend, "file://pairing"))
+        self.assertTrue(publish_endpoint_profile(self.backend, "file://pairing"))
         self.assertEqual(len(transport("file://pairing").events(kinds=[0])), 1)
 
     def test_invalid_or_unavailable_profile_falls_back_without_breaking_pairing(self) -> None:
@@ -81,7 +81,7 @@ class RemoteProfileTests(unittest.TestCase):
         transport("file://pairing").publish(forged)
         self.assertIsNone(profile_name(str(self.backend["pubkey"]), "file://pairing"))
         with mock.patch("tts_remote_profile.signed_event", side_effect=RuntimeError("offline")):
-            self.assertFalse(publish_backend_profile(self.backend, "file://other"))
+            self.assertFalse(publish_endpoint_profile(self.backend, "file://other"))
 
 
 if __name__ == "__main__":

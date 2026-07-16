@@ -34,6 +34,7 @@ class RemotePairingCLITests(unittest.TestCase):
         self.base_environment["TTS_REMOTE_TRANSPORT_FILE"] = str(self.transport_file)
         self.base_environment["TTS_GROUP_CONFIRM_TIMEOUT_SECONDS"] = "3"
         self.base_environment["TTS_REMOTE_NO_MENU"] = "1"
+        self.base_environment["TTS_REMOTE_HOSTNAME"] = "attended-laptop"
 
     def tearDown(self) -> None:
         self.run_tts("daemon", "stop", check=False)
@@ -79,6 +80,10 @@ class RemotePairingCLITests(unittest.TestCase):
         guidance = " ".join(output["next_steps"]).lower()
         self.assertNotIn("nostr", guidance)
         self.assertNotIn("nip", guidance)
+        events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
+        profile = next(event for event in events if event["kind"] == 0)
+        self.assertEqual(profile["pubkey"], code["peer"])
+        self.assertEqual(json.loads(profile["content"])["name"], "attended-laptop")
 
     def test_pair_connect_waits_until_laptop_confirms_backend_admin(self) -> None:
         offer = json.loads(

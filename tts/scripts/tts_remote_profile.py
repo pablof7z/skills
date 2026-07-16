@@ -16,35 +16,45 @@ from tts_remote_transport import transport
 PROFILE_KIND = 0
 
 
-def publish_backend_profile(
-    backend: dict[str, object],
+def publish_endpoint_profile(
+    endpoint: dict[str, object],
     relay: str,
     *,
     force: bool = False,
 ) -> bool:
     name = clean_name(
-        os.environ.get("TTS_REMOTE_HOSTNAME") or socket.gethostname() or backend.get("hostname")
+        os.environ.get("TTS_REMOTE_HOSTNAME") or socket.gethostname() or endpoint.get("hostname")
     )
-    if not relay or not name or not backend.get("nsec"):
+    if not relay or not name or not endpoint.get("nsec"):
         return False
     state_path = remote_dir() / "profile-publications.json"
     loaded = read_json(state_path, {})
     state = loaded if isinstance(loaded, dict) else {}
     existing = state.get(relay)
-    if not force and isinstance(existing, dict) and existing.get("name") == name:
+    if (
+        not force
+        and isinstance(existing, dict)
+        and existing.get("name") == name
+        and existing.get("pubkey") == endpoint.get("pubkey")
+    ):
         return True
     try:
         event = signed_event(
             kind=PROFILE_KIND,
             content=json.dumps({"display_name": name, "name": name}, sort_keys=True, separators=(",", ":")),
             tags=[],
-            nsec=str(backend["nsec"]),
+            nsec=str(endpoint["nsec"]),
             relay=relay,
         )
         transport(relay).publish(event)
     except (OSError, RuntimeError):
         return False
-    state[relay] = {"name": name, "event_id": event.get("id"), "published_at": int(time.time())}
+    state[relay] = {
+        "name": name,
+        "pubkey": endpoint.get("pubkey"),
+        "event_id": event.get("id"),
+        "published_at": int(time.time()),
+    }
     write_json(state_path, state)
     return True
 

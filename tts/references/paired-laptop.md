@@ -111,11 +111,13 @@ target the pubkey that signed the request rather than a separate reply endpoint.
 Without `AGENT_NSEC`, the backend signs the request itself. Private signer
 material is never included in the event payload.
 
-The backend also publishes a signed replaceable kind-0 profile containing its
-hostname on the pairing relay. The laptop periodically verifies that profile
-and stores the hostname with the paired peer, so the menu shows a recognizable
-endpoint name. Missing, invalid, or unavailable metadata never blocks pairing
-or speech; the menu safely falls back to a shortened pubkey.
+Both endpoints publish signed replaceable kind-0 profiles containing their
+hostnames on the pairing relay. The laptop publishes when it creates an offer
+and whenever its daemon starts; the backend publishes when it connects or sends
+speech. The laptop verifies backend metadata before storing a hostname, and
+ordinary Nostr clients can discover either endpoint by pubkey. Missing, invalid,
+or unavailable metadata never blocks pairing or speech; the UI safely falls
+back to a shortened pubkey.
 
 For questions, the kind-9 event tags are the authoritative UI model: `title`,
 `message`, optional `preamble`, repeated `question`, `label`, `description`, and

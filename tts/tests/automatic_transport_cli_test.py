@@ -102,10 +102,10 @@ class AutomaticTransportCLITests(unittest.TestCase):
         self.run_tts("daemon", "run", "--once", state=self.laptop_state)
 
         events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
-        self.assertEqual([event["kind"] for event in events], [9007, 9000, 9000])
+        self.assertEqual([event["kind"] for event in events], [0, 9007, 9000, 9000])
         backend = json.loads((self.server_state / "remote" / "backend.json").read_text())
-        self.assertIn(["p", backend["pubkey"]], events[1]["tags"])
-        self.assertIn(["p", backend["pubkey"], "admin"], events[2]["tags"])
+        self.assertIn(["p", backend["pubkey"]], events[2]["tags"])
+        self.assertIn(["p", backend["pubkey"], "admin"], events[3]["tags"])
 
 
 if __name__ == "__main__":
