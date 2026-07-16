@@ -79,7 +79,17 @@ def load_state() -> dict[str, Any]:
 def save_state(state: dict[str, Any]) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
+    os.replace(temporary, path)
 
 
 def request_human_approval(
@@ -186,6 +196,7 @@ def create_grant(
     scope: str,
     reason: str,
     ttl_seconds: int,
+    session_id: str = "",
 ) -> dict[str, Any]:
     now = int(time.time())
     grant = {
@@ -196,6 +207,8 @@ def create_grant(
         "created_at": now,
         "expires_at": now + max(1, ttl_seconds),
     }
+    if session_id:
+        grant["session_id"] = session_id
     state = load_state()
     grants = state.setdefault("grants", [])
     if not isinstance(grants, list):
@@ -206,7 +219,7 @@ def create_grant(
     return grant
 
 
-def has_valid_grant(base_path: Path) -> bool:
+def has_valid_grant(base_path: Path, *, session_id: str = "") -> bool:
     state = load_state()
     now = int(time.time())
     changed = False
@@ -218,6 +231,9 @@ def has_valid_grant(base_path: Path) -> bool:
         if int(grant.get("expires_at", 0)) <= now:
             continue
         if grant.get("revoked_at") is not None:
+            continue
+        grant_session = str(grant.get("session_id") or "")
+        if grant_session and grant_session != session_id:
             continue
         scope = grant.get("scope")
         if scope == "session":

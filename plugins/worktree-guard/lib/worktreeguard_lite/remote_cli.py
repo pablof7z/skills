@@ -10,6 +10,7 @@ import time
 
 from .core import emit
 from .remote_approval import consume_decision, laptop_requests, publish_decision
+from .remote_daemon import daemon_pid_path, daemon_status, start_daemon, stop_daemon
 from .remote_pairing import connect_pair_code, create_pair_offer, pair_status, revoke_peer
 from .storage import apple_string, load_state
 
@@ -43,12 +44,14 @@ def add_remote_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     daemon_sub = daemon.add_subparsers(dest="daemon_command", required=True)
     daemon_sub.add_parser("status", help="Show daemon pairing readiness").set_defaults(func=cmd_daemon_status)
     server = daemon_sub.add_parser("server", help="Process remote approval decisions")
+    server.add_argument("action", nargs="?", default="foreground", choices=["foreground", "start", "status", "stop"])
     server.add_argument("--once", action="store_true")
-    server.add_argument("--timeout", type=int, default=30)
+    server.add_argument("--timeout", type=int, default=0)
     server.set_defaults(func=cmd_daemon_server)
     laptop = daemon_sub.add_parser("laptop", help="Listen for approval requests on this laptop")
+    laptop.add_argument("action", nargs="?", default="foreground", choices=["foreground", "start", "status", "stop"])
     laptop.add_argument("--once", action="store_true")
-    laptop.add_argument("--timeout", type=int, default=30)
+    laptop.add_argument("--timeout", type=int, default=0)
     laptop.set_defaults(func=cmd_daemon_laptop)
 
 
@@ -119,38 +122,81 @@ def cmd_daemon_status(args: argparse.Namespace) -> int:
 
 
 def cmd_daemon_server(args: argparse.Namespace) -> int:
-    deadline = time.monotonic() + max(0, args.timeout)
+    lifecycle = handle_daemon_lifecycle("server", args)
+    if lifecycle is not None:
+        emit(lifecycle)
+        return 0 if not lifecycle.get("running") or args.action != "stop" else 1
+    deadline = daemon_deadline(args)
     processed = 0
-    while True:
-        pending = load_state().get("remote", {}).get("pending_requests", {})
-        for request_id, record in list(pending.items()):
-            if isinstance(record, dict) and record.get("used_at") is None:
-                if consume_decision(request_id, deadline) is not None:
-                    processed += 1
-        if args.once or time.monotonic() >= deadline:
-            emit({"processed": processed})
-            return 0
-        time.sleep(0.25)
+    try:
+        while True:
+            pending = load_state().get("remote", {}).get("pending_requests", {})
+            for request_id, record in list(pending.items()):
+                if isinstance(record, dict) and record.get("used_at") is None:
+                    if consume_decision(request_id, deadline) is not None:
+                        processed += 1
+            if args.once or time.monotonic() >= deadline:
+                emit({"status": "stopped", "processed": processed})
+                return 0
+            time.sleep(0.25)
+    finally:
+        cleanup_foreground_pid("server")
 
 
 def cmd_daemon_laptop(args: argparse.Namespace) -> int:
-    deadline = time.monotonic() + max(0, args.timeout)
+    lifecycle = handle_daemon_lifecycle("laptop", args)
+    if lifecycle is not None:
+        emit(lifecycle)
+        return 0 if not lifecycle.get("running") or args.action != "stop" else 1
+    deadline = daemon_deadline(args)
     processed = 0
     seen: set[str] = set()
-    while True:
-        for request in laptop_requests(deadline):
-            request_id = str(request["id"])
-            if request_id in seen:
-                continue
-            seen.add(request_id)
-            decision = choose_laptop_decision(request)
-            if decision:
-                publish_decision(request_id, decision)
-                processed += 1
-        if args.once or time.monotonic() >= deadline:
-            emit({"status": "stopped", "processed": processed})
-            return 0
-        time.sleep(0.25)
+    try:
+        while True:
+            for request in laptop_requests(deadline):
+                request_id = str(request["id"])
+                if request_id in seen:
+                    continue
+                seen.add(request_id)
+                decision = choose_laptop_decision(request)
+                if decision:
+                    publish_decision(request_id, decision)
+                    processed += 1
+            if args.once or time.monotonic() >= deadline:
+                emit({"status": "stopped", "processed": processed})
+                return 0
+            time.sleep(0.25)
+    finally:
+        cleanup_foreground_pid("laptop")
+
+
+def handle_daemon_lifecycle(role: str, args: argparse.Namespace) -> dict[str, object] | None:
+    if args.action == "start":
+        return start_daemon(role, timeout=args.timeout)
+    if args.action == "status":
+        return daemon_status(role)
+    if args.action == "stop":
+        return stop_daemon(role)
+    return None
+
+
+def cleanup_foreground_pid(role: str) -> None:
+    path = daemon_pid_path(role)
+    try:
+        current = int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return
+    if current == os.getpid():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def daemon_deadline(args: argparse.Namespace) -> float:
+    if args.once or args.timeout > 0:
+        return time.monotonic() + max(0, args.timeout)
+    return float("inf")
 
 
 def choose_laptop_decision(request: dict[str, object]) -> str | None:

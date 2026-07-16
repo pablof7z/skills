@@ -16,10 +16,12 @@ from .remote_events import (
     PAIR_CODE_VERSION,
     PAIRING_KIND,
     PRODUCT,
+    has_tag,
     new_key_secret,
     new_secret,
     pubkey_for_secret,
     signed_event,
+    structurally_valid_event,
 )
 from .remote_transport import transport
 from .storage import load_state, save_state
@@ -72,6 +74,7 @@ def connect_pair_code(pair_code: str) -> dict[str, Any]:
         "role": "laptop",
         "relay": payload["relay"],
         "pairing_id": payload["pairing_id"],
+        "product": PRODUCT,
         "approved_at": int(time.time()),
     }
     save_state(state)
@@ -125,13 +128,16 @@ def derive_pubkey(secret: str) -> str:
     binary = os.environ.get("WTG_NAK_BIN", "nak")
     if shutil.which(binary) is None:
         return pubkey_for_secret(secret)
+    env = os.environ.copy()
+    env["NOSTR_SECRET_KEY"] = secret
     result = subprocess.run(
-        [binary, "key", "public", secret],
+        [binary, "key", "public"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         timeout=5,
         check=False,
+        env=env,
     )
     pubkey = result.stdout.strip()
     if result.returncode == 0 and len(pubkey) >= 64:
@@ -152,8 +158,13 @@ def publish_pairing_event(secret: str, payload: dict[str, Any]) -> None:
     event = signed_event(
         kind=PAIRING_KIND,
         secret=secret,
-        tags=[["p", payload["laptop_pubkey"]]],
+        tags=[
+            ["p", payload["laptop_pubkey"]],
+            ["h", PRODUCT],
+            ["product", PRODUCT],
+        ],
         content={
+            "version": PAIR_CODE_VERSION,
             "product": PRODUCT,
             "pairing_id": payload["pairing_id"],
             "secret": payload["secret"],
@@ -161,6 +172,38 @@ def publish_pairing_event(secret: str, payload: dict[str, Any]) -> None:
         },
     )
     transport().publish(payload["relay"], event)
+
+
+def valid_pairing_event(
+    event: dict[str, Any],
+    *,
+    laptop_pubkey: str,
+    offer: dict[str, Any],
+    now: int,
+) -> bool:
+    if offer.get("used_at") is not None:
+        return False
+    if not structurally_valid_event(event):
+        return False
+    if int(offer.get("created_at", 0)) > int(event.get("created_at", 0)):
+        return False
+    if int(event.get("created_at", 0)) > int(offer.get("expires_at", 0)):
+        return False
+    if now > int(offer.get("expires_at", 0)):
+        return False
+    if not has_tag(event, "p", laptop_pubkey):
+        return False
+    if not has_tag(event, "h", PRODUCT) or not has_tag(event, "product", PRODUCT):
+        return False
+    from .remote_events import event_content
+
+    payload = event_content(event)
+    return (
+        payload.get("version") == PAIR_CODE_VERSION
+        and payload.get("product") == PRODUCT
+        and payload.get("pairing_id") == offer.get("pairing_id")
+        and payload.get("secret") == offer.get("secret")
+    )
 
 
 def pair_status() -> dict[str, Any]:

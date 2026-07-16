@@ -28,6 +28,7 @@ from .repositories import protected_repo_for_path
 from .sessions import (
     clear_session_cwd,
     record_session_cwd,
+    session_id_from_payload,
     stored_session_cwd,
 )
 from .storage import has_valid_grant, load_hook_payload
@@ -56,6 +57,7 @@ def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
         return 0
 
     payload_cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
+    session_id = session_id_from_payload(payload)
     session_cwd = stored_session_cwd(payload) or payload_cwd
     operation = extract_operation(payload)
     cwd = effective_operation_cwd(operation, session_cwd)
@@ -64,7 +66,7 @@ def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
     write_target = protected_write_target(operation, cwd)
     if write_target is not None:
         base_path, protected = write_target
-        if has_valid_grant(base_path):
+        if has_valid_grant(base_path, session_id=session_id):
             log_action(
                 event=event,
                 payload=payload,
@@ -125,7 +127,7 @@ def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
         )
         return 0
 
-    if has_valid_grant(base_path):
+    if has_valid_grant(base_path, session_id=session_id):
         log_action(
             event=event,
             payload=payload,

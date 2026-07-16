@@ -7,8 +7,8 @@ the high-level commands in `README.md`.
 
 1. On the attended laptop, run `wtg pair offer --relay <relay-url>`.
 2. On the server, run the printed `wtg pair connect '<pair-code>'` command.
-3. Keep `wtg daemon laptop --timeout <seconds>` running on the attended laptop.
-4. Keep `wtg daemon server --timeout <seconds>` running on the server when
+3. Run `wtg daemon laptop start --timeout <seconds>` on the attended laptop.
+4. Run `wtg daemon server start --timeout <seconds>` on the server when
    decisions should be processed outside a single `request-base-access` wait.
 5. Agents still request access with `wtg request-base-access --repo <repo>
    --reason "<reason>" --scope session --wait --timeout <seconds>`.
@@ -26,24 +26,30 @@ Pair codes are JSON and contain:
 - `expires_at`
 - `secret`
 
-The secret is raw and one-use by workflow convention. There is no HMAC and no
-pairing encryption. On connect, the server creates or loads a persistent WTG
-backend identity, publishes a kind `0` profile named `<hostname> wtg daemon`,
-approves the laptop peer locally, and publishes an ephemeral pairing event that
-p-tags the laptop and includes the raw secret.
+The secret is raw and one-use by design. There is no HMAC and no pairing
+encryption. On connect, the server creates or loads a persistent WTG backend
+identity, publishes a kind `0` profile named `<hostname> wtg daemon`, approves
+the laptop peer locally, and publishes a pairing event that p-tags the laptop,
+includes `product`, `version`, `pairing_id`, and the raw secret, and is signed
+by the backend identity.
 
 ## Approval Events
 
 Remote authorization requests are signed kind `9` group messages. Requests
-p-tag the laptop daemon and include operation, worktree, repository, reason,
-session, and TTL context in JSON content.
+p-tag the laptop daemon, carry `h` and `product` tags for `worktree-guard`, and
+include operation, worktree, repository, reason, session, TTL, and product
+context in JSON content.
 
 Decisions are signed kind `9` group messages that e-tag the original request.
-Supported decision values are `allow-once`, `allow-session`, and `deny`.
+They p-tag the backend, carry the same `h` and `product` tags, and include the
+request id and product in JSON content. Supported decision values are
+`allow-once`, `allow-session`, and `deny`.
 
-The server policy remains authoritative. The server accepts only decisions from
-approved peers, for known pending requests, within the request window, and only
-once. Unknown, late, malformed, unapproved, or replayed decisions fail closed.
+The server policy remains authoritative. The server accepts only decisions
+signed by the exact approved laptop for the known pending request, targeted at
+the exact backend, within the request window, and only once. Unknown, late,
+malformed, cross-product, unapproved, forged, wrong-target, or replayed
+decisions fail closed.
 
 ## Transport
 

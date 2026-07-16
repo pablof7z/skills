@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import WorktreeGuardError, resolve_path
+from .remote_events import structurally_valid_event, verified_fake_event
 
 
 class Transport:
@@ -26,6 +27,8 @@ class FakeTransport(Transport):
         self.path = path
 
     def publish(self, relay: str, event: dict[str, Any]) -> None:
+        if not verified_fake_event(event):
+            raise WorktreeGuardError("fake transport refused an unverifiable event.")
         record = dict(event)
         record.pop("_secret", None)
         record["relay"] = relay
@@ -63,14 +66,17 @@ class NakTransport(Transport):
         if not secret:
             raise WorktreeGuardError("nak transport cannot publish an unsigned event.")
         payload = {key: value for key, value in event.items() if not key.startswith("_")}
+        env = os.environ.copy()
+        env["NOSTR_SECRET_KEY"] = secret
         result = subprocess.run(
-            [self.binary, "--sec", secret, "event", "--force-sign", relay],
+            [self.binary, "event", "--force-sign", relay],
             input=json.dumps(payload),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             timeout=15,
             check=False,
+            env=env,
         )
         if result.returncode != 0:
             raise WorktreeGuardError(f"nak publish failed: {result.stderr.strip()}")
@@ -78,7 +84,7 @@ class NakTransport(Transport):
     def fetch(self, relay: str, *, kinds: set[int] | None = None) -> list[dict[str, Any]]:
         if shutil.which(self.binary) is None:
             raise WorktreeGuardError("Remote approval requires `nak` or WTG_TRANSPORT=fake.")
-        args = [self.binary, "req", "--limit", "200", "--no-verify"]
+        args = [self.binary, "req", "--limit", "200"]
         for kind in sorted(kinds or set()):
             args.extend(["-k", str(kind)])
         args.append(relay)
@@ -97,7 +103,7 @@ class NakTransport(Transport):
             if result.returncode != 0:
                 raise WorktreeGuardError(f"nak fetch failed: {result.stderr.strip()}")
             output = result.stdout
-        return parse_events(output)
+        return [event for event in parse_events(output) if structurally_valid_event(event)]
 
 
 def transport() -> Transport:

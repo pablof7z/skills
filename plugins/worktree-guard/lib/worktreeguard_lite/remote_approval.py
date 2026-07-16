@@ -10,12 +10,13 @@ from typing import Any
 from .remote_events import (
     APPROVAL_KIND,
     PAIRING_KIND,
+    PRODUCT,
     event_content,
     has_tag,
-    new_secret,
     signed_event,
 )
-from .remote_pairing import identity
+from .remote_pairing import identity, valid_pairing_event
+from .remote_protocol import default_relay, pending_record, request_author, valid_decision
 from .remote_transport import poll_events, transport
 from .storage import create_grant, load_state, save_state
 
@@ -51,7 +52,7 @@ def request_remote_approval(
     backend = identity(state, "backend")
     active_id = request_id or publish_request(backend, relay, laptop_pubkey, request)
     pending = state.setdefault("remote", {}).setdefault("pending_requests", {})
-    pending.setdefault(active_id, pending_record(request, relay, laptop_pubkey))
+    pending.setdefault(active_id, pending_record(request, relay, laptop_pubkey, backend["pubkey"]))
     save_state(state)
     deadline = time.monotonic() + max(0, wait_seconds)
     return consume_decision(active_id, deadline, create_grant_on_allow=create_grant_on_allow)
@@ -71,32 +72,42 @@ def publish_request(
         "session": request.session,
         "ttl_seconds": request.ttl_seconds,
         "requested_scope": request.requested_scope,
+        "product": PRODUCT,
     }
     event = signed_event(
         kind=APPROVAL_KIND,
         secret=backend["secret"],
-        tags=[["p", laptop_pubkey], ["wtg", "approval-request"]],
+        tags=[
+            ["p", laptop_pubkey],
+            ["h", PRODUCT],
+            ["product", PRODUCT],
+            ["wtg", "approval-request"],
+        ],
         content=content,
     )
     transport().publish(relay, event)
     return str(event["id"])
 
 
-def publish_decision(request_id: str, decision: str, *, peer_pubkey: str | None = None) -> str:
+def publish_decision(request_id: str, decision: str) -> str:
     state = load_state()
     remote = state.setdefault("remote", {})
     laptop = identity(state, "laptop")
-    if peer_pubkey and peer_pubkey != laptop["pubkey"]:
-        laptop = {"secret": new_secret("external"), "pubkey": peer_pubkey}
     pending = remote.get("pending_requests", {}).get(request_id, {})
     relay = str(pending.get("relay") or default_relay(remote))
+    backend_pubkey = str(pending.get("backend_pubkey") or request_author(relay, request_id) or "")
     event = signed_event(
         kind=APPROVAL_KIND,
         secret=laptop["secret"],
-        tags=[["e", request_id], ["wtg", "approval-decision"]],
-        content={"decision": decision, "request_id": request_id},
+        tags=[
+            ["e", request_id],
+            ["p", backend_pubkey],
+            ["h", PRODUCT],
+            ["product", PRODUCT],
+            ["wtg", "approval-decision"],
+        ],
+        content={"decision": decision, "request_id": request_id, "product": PRODUCT},
     )
-    event["pubkey"] = laptop["pubkey"]
     transport().publish(relay, event)
     return str(event["id"])
 
@@ -113,9 +124,13 @@ def laptop_requests(deadline: float) -> list[dict[str, Any]]:
         for event in poll_events(relay, {APPROVAL_KIND}, deadline):
             if not has_tag(event, "p", laptop["pubkey"]):
                 continue
+            if not has_tag(event, "h", PRODUCT) or not has_tag(event, "product", PRODUCT):
+                continue
             if not isinstance(approved, dict) or event.get("pubkey") not in approved:
                 continue
             payload = event_content(event)
+            if payload.get("product") != PRODUCT:
+                continue
             if not payload.get("operation") or not payload.get("repository"):
                 continue
             item = dict(payload)
@@ -137,23 +152,25 @@ def accept_pairing_events(
     changed = False
     for relay in laptop_relays(state):
         for event in poll_events(relay, {PAIRING_KIND}, deadline):
-            if not has_tag(event, "p", laptop["pubkey"]):
-                continue
             payload = event_content(event)
             pairing_id = str(payload.get("pairing_id") or "")
             offer = offers.get(pairing_id)
             if not isinstance(offer, dict):
                 continue
-            if payload.get("secret") != offer.get("secret"):
+            now = int(time.time())
+            if not valid_pairing_event(event, laptop_pubkey=laptop["pubkey"], offer=offer, now=now):
                 continue
+            offer["used_at"] = now
+            save_state(state)
             approved[str(event.get("pubkey") or "")] = {
                 "role": "backend",
                 "relay": relay,
                 "pairing_id": pairing_id,
-                "approved_at": int(time.time()),
+                "product": PRODUCT,
+                "approved_at": now,
             }
-            offer["used_at"] = int(time.time())
             changed = True
+            break
     if changed:
         save_state(state)
 
@@ -201,67 +218,7 @@ def consume_decision(
                 scope=decision,
                 reason=str(record["reason"]),
                 ttl_seconds=int(record["ttl_seconds"]),
+                session_id=str(record.get("session") or ""),
             )
         return decision if decision in {"once", "session"} else None
     return None
-
-
-def valid_decision(
-    event: dict[str, Any],
-    request_id: str,
-    record: dict[str, Any],
-    remote: dict[str, Any],
-) -> str | None:
-    if not has_tag(event, "e", request_id):
-        return None
-    if int(event.get("created_at", 0)) < int(record.get("created_at", 0)):
-        return None
-    if int(time.time()) > int(record.get("expires_at", 0)):
-        return None
-    approved = remote.get("approved_peers", {})
-    if not isinstance(approved, dict) or event.get("pubkey") not in approved:
-        return None
-    payload = event_content(event)
-    raw = str(payload.get("decision") or "").lower()
-    if raw in {"allow-session", "session", "allow"}:
-        return "session"
-    if raw in {"allow-once", "once", "operation"}:
-        return "once"
-    if raw == "deny":
-        return "deny"
-    return None
-
-
-def pending_record(
-    request: RemoteApprovalRequest,
-    relay: str,
-    laptop_pubkey: str,
-) -> dict[str, Any]:
-    now = int(time.time())
-    return {
-        "relay": relay,
-        "laptop_pubkey": laptop_pubkey,
-        "operation": request.operation,
-        "worktree": request.worktree,
-        "repository": request.repository,
-        "reason": request.reason,
-        "session": request.session,
-        "ttl_seconds": request.ttl_seconds,
-        "requested_scope": request.requested_scope,
-        "created_at": now,
-        "expires_at": now + max(1, request.ttl_seconds),
-    }
-
-
-def default_relay(remote: dict[str, Any]) -> str:
-    offers = remote.get("pair_offers", {})
-    if isinstance(offers, dict):
-        for offer in offers.values():
-            if isinstance(offer, dict) and offer.get("relay"):
-                return str(offer["relay"])
-    approved = remote.get("approved_peers", {})
-    if isinstance(approved, dict):
-        for peer in approved.values():
-            if isinstance(peer, dict) and peer.get("relay"):
-                return str(peer["relay"])
-    return ""

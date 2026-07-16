@@ -48,6 +48,25 @@ def signed_event(
     return event
 
 
+def verified_fake_event(event: dict[str, Any]) -> bool:
+    secret = str(event.get("_secret") or "")
+    if not secret:
+        return False
+    if event.get("pubkey") != pubkey_for_secret(secret):
+        return False
+    if event.get("id") != event_id(event):
+        return False
+    expected_sig = hashlib.sha256((str(event["id"]) + secret).encode("utf-8")).hexdigest()
+    return event.get("sig") == expected_sig
+
+
+def structurally_valid_event(event: dict[str, Any]) -> bool:
+    try:
+        return event.get("id") == event_id(event) and bool(event.get("sig"))
+    except (KeyError, TypeError):
+        return False
+
+
 def event_id(event: dict[str, Any]) -> str:
     payload = [
         0,
@@ -74,3 +93,10 @@ def has_tag(event: dict[str, Any], name: str, value: str) -> bool:
         if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name and tag[1] == value:
             return True
     return False
+
+
+def tag_value(event: dict[str, Any], name: str) -> str:
+    for tag in event.get("tags", []):
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name:
+            return str(tag[1])
+    return ""
