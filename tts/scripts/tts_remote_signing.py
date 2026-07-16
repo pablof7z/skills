@@ -42,16 +42,20 @@ def nak_signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: st
     command = [nak_bin(), "event", "--kind", str(kind), "--content", content]
     for tag in tags:
         command.extend(["--tag", "=".join(tag)])
-    process = subprocess.run(
-        command,
-        env={**os.environ, "NOSTR_SECRET_KEY": nsec},
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            command,
+            env={**os.environ, "NOSTR_SECRET_KEY": nsec},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=command_timeout(),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("nak signing timed out") from error
     if process.returncode != 0:
-        raise RuntimeError(process.stderr.strip() or "nak signing failed")
+        raise RuntimeError("nak signing failed")
     lines = process.stdout.splitlines()
     if not lines:
         raise RuntimeError("nak signing produced no event")
@@ -66,14 +70,18 @@ def verify_event(event: dict[str, object]) -> bool:
     fake_sig = hashlib.sha256((event_id + str(event.get("pubkey"))).encode("utf-8")).hexdigest()
     if fake_nostr_enabled() and event.get("id") == event_id and event.get("sig") == fake_sig:
         return True
-    process = subprocess.run(
-        [nak_bin(), "verify"],
-        input=json.dumps(event),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            [nak_bin(), "verify"],
+            input=json.dumps(event),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=command_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return process.returncode == 0
 
 
@@ -83,3 +91,10 @@ def public_key(nsec: str) -> str:
 
 def nak_bin() -> str:
     return os.environ.get("TTS_NAK_BIN", "nak")
+
+
+def command_timeout() -> float:
+    try:
+        return max(0.1, float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")))
+    except ValueError:
+        return 5.0

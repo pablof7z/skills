@@ -67,31 +67,39 @@ def fake_nostr_enabled() -> bool:
 def generated_secret() -> str:
     if fake_nostr_enabled():
         return "nsec" + secrets.token_urlsafe(32)
-    process = subprocess.run(
-        [os.environ.get("TTS_NAK_BIN", "nak"), "key", "generate"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            [os.environ.get("TTS_NAK_BIN", "nak"), "key", "generate"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=command_timeout(),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("nak key generation timed out") from error
     if process.returncode != 0:
-        raise RuntimeError(process.stderr.strip() or "nak key generate failed")
+        raise RuntimeError("nak key generation failed")
     return process.stdout.strip()
 
 
 def public_key_for_secret(nsec: str) -> str:
     if fake_nostr_enabled():
         return pubkey_for_nsec(nsec)
-    process = subprocess.run(
-        [os.environ.get("TTS_NAK_BIN", "nak"), "event", "--kind", "1", "--content", ""],
-        env={**os.environ, "NOSTR_SECRET_KEY": nsec},
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
+    try:
+        process = subprocess.run(
+            [os.environ.get("TTS_NAK_BIN", "nak"), "event", "--kind", "1", "--content", ""],
+            env={**os.environ, "NOSTR_SECRET_KEY": nsec},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=command_timeout(),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("nak offline public key probe timed out") from error
     if process.returncode != 0:
-        raise RuntimeError(process.stderr.strip() or "nak offline public key probe failed")
+        raise RuntimeError("nak offline public key probe failed")
     for event in reversed(parse_events(process.stdout)):
         pubkey = str(event.get("pubkey") or "")
         if re.fullmatch(r"[0-9a-fA-F]{64}", pubkey):
@@ -184,3 +192,10 @@ def error(code: str, message: str, guidance: str | None = None) -> dict[str, obj
     if guidance:
         value["guidance"] = guidance
     return {"status": "error", "error": value}
+
+
+def command_timeout() -> float:
+    try:
+        return max(0.1, float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")))
+    except ValueError:
+        return 5.0

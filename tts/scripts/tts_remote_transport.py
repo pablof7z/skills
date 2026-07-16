@@ -13,7 +13,13 @@ class Transport:
     def publish(self, event: dict[str, object]) -> dict[str, object]:
         raise NotImplementedError
 
-    def events(self) -> list[dict[str, object]]:
+    def events(
+        self,
+        *,
+        target_pubkey: str | None = None,
+        group_ids: list[str] | None = None,
+        since: int | None = None,
+    ) -> list[dict[str, object]]:
         raise NotImplementedError
 
 
@@ -30,7 +36,13 @@ class FileTransport(Transport):
             handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
         return {"transport": "file", "path": str(self.path)}
 
-    def events(self) -> list[dict[str, object]]:
+    def events(
+        self,
+        *,
+        target_pubkey: str | None = None,
+        group_ids: list[str] | None = None,
+        since: int | None = None,
+    ) -> list[dict[str, object]]:
         if not self.path.is_file():
             return []
         result = []
@@ -39,7 +51,7 @@ class FileTransport(Transport):
                 loaded = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(loaded, dict):
+            if isinstance(loaded, dict) and matches(loaded, target_pubkey, group_ids, since):
                 result.append(loaded)
         return result
 
@@ -52,22 +64,40 @@ class NakTransport(Transport):
         relay = self.relay or str(event.get("relay") or "")
         if not relay:
             raise RuntimeError("nak transport requires a relay")
-        process = subprocess.run(
-            [nak_bin(), "event", relay],
-            input=json.dumps(event),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        try:
+            process = subprocess.run(
+                [nak_bin(), "event", relay],
+                input=json.dumps(event),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=command_timeout(),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("nak publish timed out") from error
         if process.returncode != 0:
-            raise RuntimeError(process.stderr.strip() or "nak publish failed")
+            raise RuntimeError("nak publish failed")
         return {"transport": "nak", "relay": relay, "stdout": process.stdout.strip()}
 
-    def events(self) -> list[dict[str, object]]:
+    def events(
+        self,
+        *,
+        target_pubkey: str | None = None,
+        group_ids: list[str] | None = None,
+        since: int | None = None,
+    ) -> list[dict[str, object]]:
         if not self.relay:
             raise RuntimeError("nak transport requires a relay")
-        command = [nak_bin(), "req", "--limit", str(limit()), "-k", "9", "-k", "24", self.relay]
+        command = [nak_bin(), "req", "--paginate", "--limit", str(limit()), "-k", "9", "-k", "24", self.relay]
+        command.pop()
+        if target_pubkey:
+            command.extend(["-p", target_pubkey])
+        for group_id in sorted(set(group_ids or [])):
+            command.extend(["-h", group_id])
+        if since is not None:
+            command.extend(["--since", str(max(0, since))])
+        command.append(self.relay)
         try:
             process = subprocess.run(
                 command,
@@ -78,10 +108,10 @@ class NakTransport(Transport):
                 timeout=float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")),
             )
         except subprocess.TimeoutExpired as error:
-            return parse_events(normalize_timeout_output(error.stdout))
+            return with_source_relay(parse_events(normalize_timeout_output(error.stdout)), self.relay)
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or "nak fetch failed")
-        return parse_events(process.stdout)
+        return with_source_relay(parse_events(process.stdout), self.relay)
 
 
 def transport(relay: str | None = None) -> Transport:
@@ -102,6 +132,13 @@ def limit() -> int:
         return max(1, min(500, int(os.environ.get("TTS_NAK_REQ_LIMIT", "200"))))
     except ValueError:
         return 200
+
+
+def command_timeout() -> float:
+    try:
+        return max(0.1, float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")))
+    except ValueError:
+        return 5.0
 
 
 def normalize_timeout_output(value: str | bytes | None) -> str:
@@ -130,3 +167,33 @@ def parse_events(raw: str) -> list[dict[str, object]]:
             if isinstance(item, dict):
                 candidates.append(item)
     return [item for item in candidates if isinstance(item, dict)]
+
+
+def tag_values(event: dict[str, object], name: str) -> set[str]:
+    tags = event.get("tags")
+    if not isinstance(tags, list):
+        return set()
+    return {
+        str(tag[1])
+        for tag in tags
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name
+    }
+
+
+def matches(
+    event: dict[str, object],
+    target_pubkey: str | None,
+    group_ids: list[str] | None,
+    since: int | None,
+) -> bool:
+    if target_pubkey and target_pubkey not in tag_values(event, "p"):
+        return False
+    if group_ids and not tag_values(event, "h").intersection(group_ids):
+        return False
+    return since is None or int(event.get("created_at") or 0) >= since
+
+
+def with_source_relay(events: list[dict[str, object]], relay: str) -> list[dict[str, object]]:
+    for event in events:
+        event["relay"] = relay
+    return events

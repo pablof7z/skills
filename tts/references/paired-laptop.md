@@ -26,8 +26,8 @@ Send the JSON `pair_code` to the agent host. On the agent host:
 ```
 
 The pairing code contains `version`, `product=tts`, `relay`, `laptop_pubkey`,
-`pairing_id`, `expires_at`, and a raw one-use `secret`. Do not wrap it in another
-secret scheme. Check, list, and revoke pairings with:
+`pairing_id`, a per-pair `group_id`, `expires_at`, and a raw one-use `secret`.
+Do not wrap it in another secret scheme. Check, list, and revoke pairings with:
 
 ```bash
 <skill-dir>/scripts/tts pair status
@@ -52,7 +52,10 @@ For foreground operation or supervised sessions:
 ```
 
 The daemon deduplicates accepted requests and materializes them through the same
-local queue/playback path used by ordinary `tts` calls.
+local queue/playback path used by ordinary `tts` calls. `daemon start` detaches
+the listener, leaves it running until `daemon stop`, and is safe to repeat. On
+macOS it also ensures the TTS app is running so the optional menu-bar item stays
+available after the player window closes.
 
 ## Send Speech
 
@@ -73,12 +76,16 @@ Private signer material is never included in the event payload.
 ## Failure Modes
 
 Remote text speech should work once paired and the laptop daemon is running.
-Remote attachments are accepted only when the laptop can read the referenced
-paths. If a path is unavailable, the daemon rejects the request with structured
-JSON guidance; retry with text only or with a path that exists on the paired
-laptop.
+Remote attachments are passed into the ordinary local TTS attachment flow only
+when the laptop can read the referenced paths. If a path is unavailable, the
+daemon rejects the request with structured JSON guidance; retry with text only
+or with a path that exists on the paired laptop.
 
-All waits are bounded. Command failures emit structured JSON errors on stderr
-where practical. Tests use deterministic file transport or a fake `nak`
-executable; real relay transport uses `nak` for key generation, signing,
-publishing, verification, and bounded fetches.
+All waits are bounded. Relay reads are scoped to the laptop and its paired
+channels, paginated, and resumed from a durable cursor. Command failures emit
+structured JSON errors on stderr without exposing signer material. Tests use
+deterministic file transport or a fake `nak` executable; real relay transport
+uses `nak` for key generation, signing, publishing, verification, and bounded
+fetches. Pairing asks managed relays to create a per-pair group and add the
+backend; ordinary relays fall back gracefully to the same signed, targeted
+request flow.

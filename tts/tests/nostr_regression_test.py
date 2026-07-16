@@ -15,7 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tts" / "scripts"))
 
-from tts_remote_signing import fake_signed_event, public_key, verify_event
+from tts_remote_signing import fake_signed_event, nak_signed_event, public_key, verify_event
 from tts_remote_state import ensure_backend, ensure_laptop_identity, public_key_for_secret
 from tts_remote_transport import NakTransport
 
@@ -80,10 +80,15 @@ class TTSNostrRegressionTests(unittest.TestCase):
             "tts_remote_transport.subprocess.run",
             side_effect=TimeoutExpired(["nak"], 0.1, output=json.dumps(event) + "\n"),
         ):
-            events = NakTransport("ws://relay").events()
+            events = NakTransport("ws://relay").events(
+                target_pubkey="laptop-pubkey",
+                group_ids=["tts-pair-a"],
+                since=123,
+            )
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["kind"], 9)
+        self.assertEqual(events[0]["relay"], "ws://relay")
 
     def test_nak_events_requests_kinds_9_and_24_with_finite_limit(self) -> None:
         captured: list[str] = []
@@ -93,13 +98,41 @@ class TTSNostrRegressionTests(unittest.TestCase):
             return mock.Mock(returncode=0, stdout="", stderr="")
 
         with mock.patch("tts_remote_transport.subprocess.run", run):
-            NakTransport("ws://relay").events()
+            NakTransport("ws://relay").events(
+                target_pubkey="laptop-pubkey",
+                group_ids=["tts-pair-a", "tts-pair-b"],
+                since=123,
+            )
 
         self.assertIn("req", captured)
         self.assertIn("--limit", captured)
+        self.assertIn("--paginate", captured)
         self.assertIn("200", captured)
         self.assertIn("9", captured)
         self.assertIn("24", captured)
+        self.assertIn("-p", captured)
+        self.assertIn("laptop-pubkey", captured)
+        self.assertEqual(captured.count("-h"), 2)
+        self.assertIn("tts-pair-a", captured)
+        self.assertIn("tts-pair-b", captured)
+        self.assertIn("--since", captured)
+        self.assertIn("123", captured)
+
+    def test_signer_command_failure_never_echoes_nsec(self) -> None:
+        nak = self.root / "leaky-nak"
+        nak.write_text(
+            "#!/bin/sh\n"
+            "echo 'failed with NOSTR_SECRET_KEY=nsec-super-secret' >&2\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        nak.chmod(0o700)
+        os.environ["TTS_NAK_BIN"] = str(nak)
+
+        with self.assertRaisesRegex(RuntimeError, "signing failed") as raised:
+            nak_signed_event(kind=9, content="{}", tags=[], nsec="nsec-super-secret")
+
+        self.assertNotIn("nsec-super-secret", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = daemon_commands.add_parser("run")
     run.add_argument("--once", action="store_true")
     run.add_argument("--max-events", type=int, default=100)
-    run.add_argument("--wait-seconds", type=float, default=30.0)
+    run.add_argument("--wait-seconds", type=float)
     run.set_defaults(func=daemon_run)
     return parser
 

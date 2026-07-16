@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import fcntl
 from pathlib import Path
 import secrets
 import subprocess
@@ -13,6 +14,7 @@ import time
 import uuid
 
 from tts_remote_daemon import process_events
+from tts_remote_groups import request_group_creation
 from tts_remote_signing import public_key, signed_event
 from tts_remote_state import active_peer, ensure_backend, ensure_laptop_identity, error, peers, remote_dir, save_peers, upsert_peer, write_json, read_json
 from tts_remote_transport import transport
@@ -34,6 +36,7 @@ def fail(code: str, message: str, guidance: str | None = None, exit_code: int = 
 def pair_offer(args) -> int:
     laptop = ensure_laptop_identity()
     pairing_id = secrets.token_hex(16)
+    group_id = f"tts-{secrets.token_hex(12)}"
     expires_at = int(time.time()) + args.ttl
     code = {
         "version": 1,
@@ -41,10 +44,15 @@ def pair_offer(args) -> int:
         "relay": args.relay,
         "laptop_pubkey": laptop["pubkey"],
         "pairing_id": pairing_id,
+        "group_id": group_id,
         "expires_at": expires_at,
         "secret": secrets.token_urlsafe(32),
     }
-    write_json(remote_dir() / "pairings" / f"{pairing_id}.json", {"code": code, "status": "offered"})
+    nip29 = request_group_creation(args.relay, group_id, str(laptop["nsec"]))
+    write_json(
+        remote_dir() / "pairings" / f"{pairing_id}.json",
+        {"code": code, "status": "offered", "nip29_group": nip29},
+    )
     return emit({
         "status": "offered",
         "pair_code": code,
@@ -60,7 +68,7 @@ def pair_connect(args) -> int:
         code = json.loads(args.code)
     except ValueError:
         return fail("invalid_pair_code", "pair code must be JSON")
-    required = {"version", "product", "relay", "laptop_pubkey", "pairing_id", "expires_at", "secret"}
+    required = {"version", "product", "relay", "laptop_pubkey", "pairing_id", "group_id", "expires_at", "secret"}
     if not isinstance(code, dict) or required - set(code) or code.get("product") != "tts":
         return fail("invalid_pair_code", "pair code is not a TTS pairing code")
     if int(code["expires_at"]) < int(time.time()):
@@ -83,7 +91,7 @@ def pair_connect(args) -> int:
     event = signed_event(
         kind=24,
         content=str(code["secret"]),
-        tags=[["p", str(code["laptop_pubkey"])], ["pairing", str(code["pairing_id"])], ["product", "tts"], ["version", "1"], ["expires", str(code["expires_at"])]],
+        tags=[["p", str(code["laptop_pubkey"])], ["h", str(code["group_id"])], ["pairing", str(code["pairing_id"])], ["product", "tts"], ["version", "1"], ["expires", str(code["expires_at"])]],
         nsec=str(backend["nsec"]),
         relay=str(code["relay"]),
     )
@@ -93,6 +101,7 @@ def pair_connect(args) -> int:
         "pubkey": str(code["laptop_pubkey"]),
         "relay": str(code["relay"]),
         "pairing_id": str(code["pairing_id"]),
+        "group_id": str(code["group_id"]),
         "product": "tts",
         "approved": True,
         "created_at": int(time.time()),
@@ -150,7 +159,7 @@ def remote_speak(args) -> int:
     inner_event = signed_event(
         kind=9,
         content=json.dumps(inner_content, ensure_ascii=False, sort_keys=True),
-        tags=[["p", str(peer["pubkey"])], ["h", "tts"], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
+        tags=[["p", str(peer["pubkey"])], ["h", str(peer["group_id"])], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
         nsec=signer_nsec,
         relay=str(peer.get("relay") or ""),
     )
@@ -162,7 +171,7 @@ def remote_speak(args) -> int:
     event = signed_event(
         kind=9,
         content=json.dumps(outer_content, ensure_ascii=False, sort_keys=True),
-        tags=[["p", str(peer["pubkey"])], ["h", "tts"], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
+        tags=[["p", str(peer["pubkey"])], ["h", str(peer["group_id"])], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
         nsec=str(backend["nsec"]),
         relay=str(peer.get("relay") or ""),
     )
@@ -180,16 +189,55 @@ def daemon_status(_args) -> int:
 
 
 def daemon_start(args) -> int:
-    state = {"running": True, "started_at": int(time.time()), "pid": os.getpid() if args.dry_run else None}
-    write_json(remote_dir() / "daemon.json", state)
-    if args.dry_run:
-        return emit({"status": "started", "dry_run": True})
-    log = remote_dir() / "daemon.log"
-    with log.open("a", encoding="utf-8") as handle:
-        process = subprocess.Popen([str(SCRIPT_DIR / "tts"), "daemon", "run", "--wait-seconds", "31536000"], stdout=handle, stderr=handle)
-    state["pid"] = process.pid
-    write_json(remote_dir() / "daemon.json", state)
-    return emit({"status": "started", "pid": process.pid, "log": str(log)})
+    lock_path = remote_dir() / "daemon-start.lock"
+    with lock_path.open("a", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        existing = read_json(remote_dir() / "daemon.json", {})
+        if isinstance(existing, dict) and pid_alive(existing.get("pid")):
+            pid = int(existing["pid"])
+            status = "already_running"
+            log = remote_dir() / "daemon.log"
+        elif args.dry_run:
+            return emit({"status": "started", "dry_run": True})
+        else:
+            log = remote_dir() / "daemon.log"
+            with log.open("a", encoding="utf-8") as handle:
+                process = subprocess.Popen(
+                    [str(SCRIPT_DIR / "tts"), "daemon", "run"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=handle,
+                    stderr=handle,
+                    close_fds=True,
+                    start_new_session=True,
+                )
+            pid = process.pid
+            status = "started"
+            write_json(
+                remote_dir() / "daemon.json",
+                {"running": True, "started_at": int(time.time()), "pid": pid},
+            )
+    return emit({"status": status, "pid": pid, "log": str(log), "menu_bar": start_menu_bar()})
+
+
+def start_menu_bar() -> str:
+    override = os.environ.get("TTS_REMOTE_MENU_COMMAND")
+    disabled = os.environ.get("TTS_REMOTE_NO_MENU", "").lower() in {"1", "true", "yes"}
+    if disabled or (sys.platform != "darwin" and not override):
+        return "not_requested"
+    command = override or str(SCRIPT_DIR / "tts-menu")
+    try:
+        completed = subprocess.run(
+            [command, "start"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "failed"
+    return "started" if completed.returncode == 0 else "failed"
 
 
 def daemon_stop(_args) -> int:
@@ -227,11 +275,11 @@ def daemon_run(args) -> int:
     backend = ensure_laptop_identity()
     write_json(remote_dir() / "daemon.json", {"running": True, "pid": os.getpid(), "started_at": int(time.time())})
     processed = 0
-    deadline = time.monotonic() + args.wait_seconds
+    deadline = time.monotonic() + args.wait_seconds if args.wait_seconds is not None else None
     try:
         while True:
             processed += process_events(args, backend)
-            if args.once or processed >= args.max_events or time.monotonic() >= deadline:
+            if args.once or (deadline is not None and time.monotonic() >= deadline):
                 break
             time.sleep(0.25)
         return emit({"status": "idle", "processed": min(processed, args.max_events)})

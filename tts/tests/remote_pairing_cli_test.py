@@ -59,6 +59,7 @@ class RemotePairingCLITests(unittest.TestCase):
         self.assertEqual(code["relay"], "wss://relay.example.test")
         self.assertRegex(code["laptop_pubkey"], r"^[a-f0-9]{64}$")
         self.assertRegex(code["pairing_id"], r"^[a-f0-9]{32}$")
+        self.assertRegex(code["group_id"], r"^tts-[a-f0-9]{24}$")
         self.assertRegex(code["secret"], r"^[A-Za-z0-9_-]{32,}$")
         laptop = json.loads((self.laptop_state / "remote" / "laptop.json").read_text())
         self.assertEqual(laptop["pubkey"], code["laptop_pubkey"])
@@ -89,6 +90,9 @@ class RemotePairingCLITests(unittest.TestCase):
         self.assertEqual(pairing_event["content"], offer["pair_code"]["secret"])
         self.assertIn(["p", laptop_pubkey], pairing_event["tags"])
         self.assertIn(["pairing", offer["pair_code"]["pairing_id"]], pairing_event["tags"])
+        self.assertIn(["h", offer["pair_code"]["group_id"]], pairing_event["tags"])
+        self.assertEqual(events[0]["kind"], 9007)
+        self.assertIn(["h", offer["pair_code"]["group_id"]], events[0]["tags"])
 
         backend = json.loads((self.server_state / "remote" / "backend.json").read_text())
         self.assertTrue(backend["nsec"].startswith("nsec"))
@@ -104,6 +108,11 @@ class RemotePairingCLITests(unittest.TestCase):
         laptop_peers = json.loads((self.laptop_state / "remote" / "peers.json").read_text())
         self.assertEqual(laptop_peers[0]["pubkey"], connected["backend_pubkey"])
         self.assertEqual(laptop_peers[0]["approved"], True)
+        self.assertEqual(laptop_peers[0]["group_id"], offer["pair_code"]["group_id"])
+        membership = [json.loads(line) for line in self.transport_file.read_text().splitlines()][-1]
+        self.assertEqual(membership["kind"], 9000)
+        self.assertIn(["h", offer["pair_code"]["group_id"]], membership["tags"])
+        self.assertIn(["p", connected["backend_pubkey"]], membership["tags"])
 
         replay = json.loads(self.run_tts("daemon", "run", "--once", "--max-events", "1").stdout)
         self.assertEqual(replay["processed"], 0)

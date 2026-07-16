@@ -30,6 +30,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.base_environment = os.environ.copy()
         self.base_environment["TTS_REMOTE_TRANSPORT"] = "file"
         self.base_environment["TTS_REMOTE_TRANSPORT_FILE"] = str(self.transport_file)
+        self.base_environment["TTS_REMOTE_NO_MENU"] = "1"
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -99,7 +100,8 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertNotIn(backend["nsec"], complete_transport)
         self.assertEqual(request["kind"], 9)
         self.assertIn(["p", laptop_pubkey], request["tags"])
-        self.assertIn(["h", "tts"], request["tags"])
+        group_id = next(tag[1] for tag in request["tags"] if tag[0] == "h")
+        self.assertRegex(group_id, r"^tts-[a-f0-9]{24}$")
         content = json.loads(request["content"])
         self.assertEqual(content["signer"]["source"], "AGENT_NSEC")
         self.assertEqual(request["pubkey"], backend_pubkey)
@@ -143,7 +145,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
             reply = events[-1]
             self.assertEqual(reply["kind"], 9)
             self.assertIn(["e", item["remote_request"]["event_id"]], reply["tags"])
-            self.assertIn(["h", "tts"], reply["tags"])
+            self.assertIn(["h", connected["peer"]["group_id"]], reply["tags"])
             self.assertEqual(json.loads(reply["content"])["status"], "accepted")
         finally:
             server.shutdown()
@@ -171,12 +173,58 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertEqual(reply["error"]["code"], "remote_attachment_unavailable")
         self.assertIn("send text only", reply["error"]["guidance"].lower())
 
+    def test_daemon_passes_laptop_accessible_attachments_to_local_queue(self) -> None:
+        connected = self.pair()
+        attachment = self.state / "shared-notes.md"
+        attachment.write_text("# Remote notes\n\nVerified on the laptop.\n", encoding="utf-8")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            self.run_tts(
+                "remote", "speak",
+                "--peer", str(connected["laptop_pubkey"]),
+                "--agent-name", "remote agent",
+                "--subject", "Remote accessible attachment delivery test",
+                "--message", "The attachment should appear locally.",
+                "--attach", "Remote notes", str(attachment),
+                state=self.server_state,
+            )
+            result = self.run_tts(
+                "daemon", "run", "--once", "--max-events", "1",
+                env={
+                    "KOKORO_API_ENDPOINT": f"http://127.0.0.1:{server.server_port}/v1/audio/speech",
+                    "TTS_REMOTE_DAEMON_NO_PLAY": "1",
+                },
+            )
+            self.assertEqual(json.loads(result.stdout)["processed"], 1)
+            item = json.loads(next((self.laptop_state / "items").glob("*.json")).read_text())
+            self.assertEqual(item["attachments"][0]["label"], "Remote notes")
+            self.assertTrue(Path(item["attachments"][0]["source_file"]).is_file())
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
     def test_daemon_lifecycle_status_uses_real_child_liveness(self) -> None:
         status = json.loads(self.run_tts("daemon", "status").stdout)
         self.assertEqual(status["running"], False)
 
-        started = json.loads(self.run_tts("daemon", "start").stdout)
+        fake_menu = self.state / "fake-menu"
+        menu_marker = self.state / "menu-started"
+        fake_menu.write_text(
+            "#!/bin/sh\n"
+            f"touch {str(menu_marker)!r}\n",
+            encoding="utf-8",
+        )
+        fake_menu.chmod(0o700)
+        started = json.loads(self.run_tts(
+            "daemon", "start",
+            env={"TTS_REMOTE_NO_MENU": "0", "TTS_REMOTE_MENU_COMMAND": str(fake_menu)},
+        ).stdout)
         self.assertEqual(started["status"], "started")
+        self.assertEqual(started["menu_bar"], "started")
+        self.assertTrue(menu_marker.is_file())
         for _ in range(20):
             status = json.loads(self.run_tts("daemon", "status").stdout)
             if status["running"]:
@@ -184,12 +232,18 @@ class RemoteDaemonCLITests(unittest.TestCase):
             time.sleep(0.1)
         self.assertEqual(status["running"], True)
         self.assertIsInstance(status["state"]["pid"], int)
+        self.assertEqual(os.getsid(status["state"]["pid"]), status["state"]["pid"])
+
+        duplicate = json.loads(self.run_tts("daemon", "start").stdout)
+        self.assertEqual(duplicate["status"], "already_running")
+        self.assertEqual(duplicate["pid"], status["state"]["pid"])
 
         stopped = json.loads(self.run_tts("daemon", "stop").stdout)
         self.assertEqual(stopped["status"], "stopped")
         self.assertEqual(json.loads(self.run_tts("daemon", "status").stdout)["running"], False)
 
     def test_cli_boundary_emits_structured_json_for_remote_transport_errors(self) -> None:
+        self.run_tts("pair", "offer", "--relay", "wss://relay.example.test")
         result = self.run_tts(
             "daemon", "run", "--once", "--max-events", "1",
             env={"TTS_REMOTE_TRANSPORT": "unsupported"},
@@ -241,6 +295,8 @@ class RemoteDaemonCLITests(unittest.TestCase):
                 },
             )
             self.assertEqual(json.loads(result.stdout)["processed"], 1)
+            cursor = json.loads((self.laptop_state / "remote" / "relay-cursors.json").read_text())
+            self.assertGreater(cursor["file://transport"], 0)
         finally:
             server.shutdown()
             thread.join(timeout=2)
