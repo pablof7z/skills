@@ -101,12 +101,7 @@ struct NowSpeakingHUDView: View {
         let current = selectedQuestion(in: questions)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "questionmark.bubble.fill")
-                    .font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 42, height: 42)
-                    .background(accent.opacity(0.16), in: Circle())
-                    .accessibilityHidden(true)
+                QuestionIndicatorView(item: item, accent: accent, size: .header)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.subjectLabel ?? "Questions from \(item.displayAgent)")

@@ -194,23 +194,8 @@ private struct PlayerHistoryRow: View {
 
     @ViewBuilder
     private var queueItemIndicator: some View {
-        if item.isPendingQuestion {
-            Image(systemName: "questionmark.bubble.fill")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(Color.orange, in: Circle())
-                .shadow(color: Color.orange.opacity(0.28), radius: 4, y: 1)
-                .help("Contains unanswered questions")
-                .accessibilityLabel("Unanswered questions")
-        } else if item.isQuestion {
-            Image(systemName: "questionmark.bubble.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.purple)
-                .frame(width: 28, height: 28)
-                .background(Color.purple.opacity(0.12), in: Circle())
-                .help("Contains questions")
-                .accessibilityLabel("Contains questions")
+        if item.isQuestion {
+            QuestionIndicatorView(item: item, accent: .purple, size: .row)
         } else {
             Circle()
                 .fill(item.unheard ? Color.accentColor : .clear)
@@ -226,6 +211,7 @@ private struct PlayerHistoryRow: View {
     private var accessibilityLabel: String {
         let title = item.subjectLabel ?? item.text
         if item.isPendingQuestion { return "Answer needed for \(title)" }
+        if item.questionStatus == .answered { return "Answered question \(title)" }
         if item.isQuestion { return "Question item \(title)" }
         if item.status == .generating { return "Open pending update \(title)" }
         if item.status == .failed { return "Failed synthesis for \(title)" }
