@@ -195,6 +195,7 @@ def materialize_request(content: dict[str, object], event: dict[str, object]) ->
         command.append("--no-play")
     environment = os.environ.copy()
     environment["TTS_ITEM_ID"] = item_id
+    environment["TTS_FORCE_LOCAL"] = "1"
     completed = subprocess.run(command, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     output = json.loads(completed.stdout)
     item_path = tts_state_dir() / "items" / f"{item_id}.json"

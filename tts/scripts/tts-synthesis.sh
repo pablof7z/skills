@@ -84,8 +84,8 @@ if [ -n "$PLAY_EXISTING_FILE" ]; then
 fi
 
 if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
-  echo "Error: KOKORO_API_ENDPOINT is not set." >&2
-  echo "No KOKORO_API_ENDPOINT env var is set. Read references/setup.md for instructions on how to set it up." >&2
+  echo "Error: no TTS playback destination is available." >&2
+  echo "No local Kokoro endpoint is configured and ordinary routing found no approved paired laptop. Read references/setup.md or references/paired-laptop.md." >&2
   exit 1
 fi
 

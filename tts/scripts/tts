@@ -17,6 +17,8 @@ source "$SCRIPT_DIR/tts-attachments.sh"
 source "$SCRIPT_DIR/tts-native-queue.sh"
 # shellcheck source=tts-synthesis.sh
 source "$SCRIPT_DIR/tts-synthesis.sh"
+# shellcheck source=tts-routing.sh
+source "$SCRIPT_DIR/tts-routing.sh"
 
 [[ "${1:-}" =~ ^(pair|remote|daemon)$ ]] && exec python3 "$SCRIPT_DIR/tts-remote-cli.py" "$@"
 
@@ -409,6 +411,27 @@ if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")
 fi
 
+if [ "$ASK" -eq 1 ] && [ -z "$RAW_BUNDLE_JSON" ]; then
+  RAW_BUNDLE_JSON="$(python3 - "$DISPLAY_TEXT" "$SUGGESTIONS_JSON" <<'PY'
+import json
+import sys
+print(json.dumps({
+    "questions_preamble": None,
+    "questions": [{
+        "short_title": sys.argv[1],
+        "title": sys.argv[1],
+        "type": "single_choice",
+        "description": None,
+        "attachments": [],
+        "suggestions": json.loads(sys.argv[2]),
+    }],
+}, ensure_ascii=False, separators=(",", ":")))
+PY
+)"
+fi
+
+route_ordinary_tts_if_needed
+
 SESSION_ID="$(infer_session_id)"
 SESSION_STORAGE_SOURCE="${TTS_SESSION_STORAGE_ID:-$SESSION_ID}"
 if [ -z "$SESSION_STORAGE_SOURCE" ]; then
@@ -435,24 +458,6 @@ if [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; then
 fi
 
 if [ "$ASK" -eq 1 ]; then
-  if [ -z "$RAW_BUNDLE_JSON" ]; then
-    RAW_BUNDLE_JSON="$(python3 - "$DISPLAY_TEXT" "$SUGGESTIONS_JSON" <<'PY'
-import json
-import sys
-print(json.dumps({
-    "questions_preamble": None,
-    "questions": [{
-        "short_title": sys.argv[1],
-        "title": sys.argv[1],
-        "type": "single_choice",
-        "description": None,
-        "attachments": [],
-        "suggestions": json.loads(sys.argv[2]),
-    }],
-}, ensure_ascii=False, separators=(",", ":")))
-PY
-)"
-  fi
   QUESTION_BUNDLE_FILE="$ITEM_DIRECTORY/question-bundle.json"
   if [ -z "$ATTACHMENT_MANIFEST" ]; then
     ATTACHMENT_MANIFEST="$ITEM_DIRECTORY/attachments/manifest.json"
