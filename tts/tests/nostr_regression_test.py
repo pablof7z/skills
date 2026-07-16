@@ -218,6 +218,26 @@ class TTSNostrRegressionTests(unittest.TestCase):
         self.assertEqual(result["stdout"], "published")
         self.assertEqual(event["relay"], "ws://relay")
 
+    def test_nak_publish_rejects_failed_relay_ack_even_when_process_exits_zero(self) -> None:
+        event = {
+            "id": "rejected-event",
+            "pubkey": "author",
+            "created_at": 123,
+            "kind": 9,
+            "tags": [["h", "missing"]],
+            "content": "speech",
+            "sig": "signature",
+        }
+        completed = mock.Mock(
+            returncode=0,
+            stdout=json.dumps(event),
+            stderr="publishing to relay... failed: group 'missing' doesn't exist",
+        )
+
+        with mock.patch("tts_remote_transport.subprocess.run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "group 'missing' doesn't exist"):
+                NakTransport("ws://relay").publish(event)
+
     def test_signer_command_failure_never_echoes_nsec(self) -> None:
         nak = self.root / "leaky-nak"
         nak.write_text(

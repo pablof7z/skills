@@ -65,6 +65,10 @@ the listener, leaves it running until `daemon stop`, and is safe to repeat. On
 macOS it also ensures the TTS app is running so the optional menu-bar item stays
 available after the player window closes.
 
+The listener periodically reconciles the managed channel and paired peer
+permissions. If the relay restarts and loses channel state, the existing
+pairing repairs itself without requiring a new pairing code.
+
 ## Send Speech
 
 Ordinary `<skill-dir>/scripts/tts` invocations automatically use an approved

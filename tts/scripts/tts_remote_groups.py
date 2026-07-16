@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import time
 
+from tts_remote_channel import channel_parts
 from tts_remote_signing import signed_event
 from tts_remote_transport import transport
 
@@ -51,6 +52,33 @@ def ensure_group_member(relay: str, group_id: str, admin_nsec: str, pubkey: str)
     request_group_membership(relay, group_id, admin_nsec, pubkey)
     wait_for_group_identity(tx.group_members, group_id, pubkey, "member")
     return "confirmed"
+
+
+def ensure_group_admin(relay: str, group_id: str, admin_nsec: str, pubkey: str) -> str:
+    tx = transport(relay)
+    if pubkey in tx.group_admins(group_id):
+        return "present"
+    request_group_admin(relay, group_id, admin_nsec, pubkey)
+    wait_for_group_identity(tx.group_admins, group_id, pubkey, "admin")
+    return "confirmed"
+
+
+def reconcile_paired_channels(
+    laptop: dict[str, object],
+    paired_peers: list[dict[str, object]],
+) -> None:
+    for peer in paired_peers:
+        if not peer.get("approved") or peer.get("revoked_at"):
+            continue
+        relay, group_id = channel_parts(
+            str(peer.get("channel") or peer.get("group_id") or ""),
+            str(peer.get("relay") or ""),
+        )
+        laptop_nsec = str(laptop["nsec"])
+        request_group_creation(relay, group_id, laptop_nsec)
+        wait_for_group_admin(relay, group_id, str(laptop["pubkey"]))
+        ensure_group_member(relay, group_id, laptop_nsec, str(peer["pubkey"]))
+        ensure_group_admin(relay, group_id, laptop_nsec, str(peer["pubkey"]))
 
 
 def wait_for_group_admin(relay: str, group_id: str, pubkey: str, on_wait=None) -> None:

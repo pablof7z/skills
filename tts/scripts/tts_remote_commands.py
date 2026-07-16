@@ -22,7 +22,7 @@ from tts_pair_token import (
 )
 from tts_remote_channel import channel_parts
 from tts_remote_config import remote_config, save_remote_config
-from tts_remote_groups import request_group_creation, wait_for_group_admin
+from tts_remote_groups import reconcile_paired_channels, request_group_creation, wait_for_group_admin
 from tts_remote_profile import profile_refresh_interval, publish_backend_profile, refresh_peer_profiles
 from tts_remote_signing import signed_event
 from tts_remote_state import (
@@ -252,8 +252,16 @@ def daemon_run(args) -> int:
     processed = 0
     deadline = time.monotonic() + args.wait_seconds if args.wait_seconds is not None else None
     next_profile_refresh = 0.0
+    next_channel_reconcile = 0.0
     try:
         while True:
+            if time.monotonic() >= next_channel_reconcile:
+                try:
+                    reconcile_paired_channels(backend, peers())
+                except RuntimeError:
+                    next_channel_reconcile = time.monotonic() + 5
+                else:
+                    next_channel_reconcile = time.monotonic() + channel_reconcile_interval()
             if time.monotonic() >= next_profile_refresh:
                 refresh_peer_profiles()
                 next_profile_refresh = time.monotonic() + profile_refresh_interval()
@@ -264,3 +272,10 @@ def daemon_run(args) -> int:
         return emit({"status": "idle", "processed": min(processed, args.max_events)})
     finally:
         write_json(remote_dir() / "daemon.json", {"running": False, "pid": os.getpid(), "stopped_at": int(time.time())})
+
+
+def channel_reconcile_interval() -> float:
+    try:
+        return max(5.0, float(os.environ.get("TTS_CHANNEL_RECONCILE_SECONDS", "60")))
+    except ValueError:
+        return 60.0
