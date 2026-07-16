@@ -79,9 +79,10 @@ struct NowSpeakingHUDView: View {
                 "\(isPreviewingPending ? "Pending update" : "Now speaking"). \(item.nowSpeakingTitle). \(item.nowSpeakingContext)"
             )
         } else {
-            PlayerHistoryView(
+            PlayerQueueView(
                 controller: controller,
                 presentation: presentation,
+                hiddenItemID: presentation.hiddenItemID,
                 historyClock: controller.historyTimestampClock,
                 historyRevision: controller.historyRevision,
                 generationProgressNow: controller.isGenerating ? controller.generationProgressNow : .distantPast,
