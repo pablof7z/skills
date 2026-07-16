@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import tempfile
@@ -66,32 +65,22 @@ class RemoteRequestBindingTests(unittest.TestCase):
         self,
         *,
         nsec: str | None = None,
-        updates: dict[str, object] | None = None,
+        content: str = "hello",
         tags: list[list[str]] | None = None,
     ) -> dict[str, object]:
         request_id = "req-1"
-        content = {
-            "version": 1,
-            "product": "tts",
-            "request_id": request_id,
-            "message": "hello",
-            "subject": "subject",
-            "agent_name": "agent",
-            "attachments": [],
-            "backend": {"pubkey": self.server_pubkey},
-        }
-        if updates:
-            content.update(updates)
         event_tags = tags or [
             ["p", "laptop-pub"],
             ["h", "tts"],
             ["product", "tts"],
             ["request", request_id],
             ["reply", self.server_pubkey],
+            ["subject", "subject"],
+            ["agent", "agent"],
         ]
         return fake_signed_event(
             kind=9,
-            content=json.dumps(content, sort_keys=True),
+            content=content,
             tags=event_tags,
             nsec=nsec or self.agent_nsec,
             relay="file://relay",
@@ -107,21 +96,19 @@ class RemoteRequestBindingTests(unittest.TestCase):
     def test_rejects_author_that_backend_has_not_admitted(self) -> None:
         self.assert_rejected_before_materialization(self.request(nsec="unadmitted-agent"))
 
-    def test_rejects_wrong_backend_or_reply_endpoint(self) -> None:
-        wrong_backend = self.request(updates={"backend": {"pubkey": "wrong-backend"}})
+    def test_rejects_wrong_reply_endpoint(self) -> None:
         wrong_reply = self.request(tags=[
             ["p", "laptop-pub"], ["h", "tts"], ["product", "tts"],
             ["request", "req-1"], ["reply", "wrong-backend"],
         ])
 
-        self.assert_rejected_before_materialization(wrong_backend)
         self.assert_rejected_before_materialization(wrong_reply)
 
     def test_rejects_wrong_target_channel_or_request_tag(self) -> None:
         variants = [
             [["p", "other"], ["h", "tts"], ["product", "tts"], ["request", "req-1"], ["reply", self.server_pubkey]],
             [["p", "laptop-pub"], ["h", "other"], ["product", "tts"], ["request", "req-1"], ["reply", self.server_pubkey]],
-            [["p", "laptop-pub"], ["h", "tts"], ["product", "tts"], ["request", "other"], ["reply", self.server_pubkey]],
+            [["p", "laptop-pub"], ["h", "tts"], ["product", "tts"], ["reply", self.server_pubkey]],
         ]
         for tags in variants:
             self.assert_rejected_before_materialization(self.request(tags=tags))
