@@ -179,6 +179,7 @@ def daemon_start(args) -> int:
             with log.open("a", encoding="utf-8") as handle:
                 process = subprocess.Popen(
                     [str(SCRIPT_DIR / "tts"), "daemon", "run"],
+                    cwd=Path.home(),
                     stdin=subprocess.DEVNULL,
                     stdout=handle,
                     stderr=handle,
