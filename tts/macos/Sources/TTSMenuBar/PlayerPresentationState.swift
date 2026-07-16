@@ -111,6 +111,11 @@ enum PlayerNavigationPolicy {
         itemID != nil && itemID != hiddenItemID
     }
 
+    static func shouldShowMiniPlayer(currentItemID: String?, hiddenItemID: String?) -> Bool {
+        guard let currentItemID else { return false }
+        return currentItemID == hiddenItemID
+    }
+
     static func hiddenItemID(
         afterAutomaticallySelecting itemID: String,
         currentlyHidden hiddenItemID: String?
