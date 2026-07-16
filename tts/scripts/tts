@@ -403,10 +403,12 @@ if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   VOICE="$(select_voice_from_seed "$VOICE_SEED")"
 fi
 if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
-  SUBJECT_WORDS=$(word_count "$SUBJECT")
-  if [ "$SUBJECT_WORDS" -lt 5 ] || [ "$SUBJECT_WORDS" -gt 14 ]; then
-    echo "Error: --subject must be between 5 and 14 words." >&2
-    exit 1
+  if ! truthy "${TTS_REMOTE_MATERIALIZATION:-0}"; then
+    SUBJECT_WORDS=$(word_count "$SUBJECT")
+    if [ "$SUBJECT_WORDS" -lt 5 ] || [ "$SUBJECT_WORDS" -gt 14 ]; then
+      echo "Error: --subject must be between 5 and 14 words." >&2
+      exit 1
+    fi
   fi
   TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")
 fi

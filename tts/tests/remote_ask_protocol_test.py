@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for blocking remote TTS asks."""
+"""Contracts for readable blocking remote TTS asks."""
 
 from __future__ import annotations
 
@@ -13,8 +13,14 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tts" / "scripts"))
 
-from tts_remote_ask import prepare_ask, safe_response, wait_for_answer
-from tts_remote_protocol import reply_tags, request_payload, request_tags
+from tts_remote_ask import answers_from_result, prepare_ask, wait_for_answer
+from tts_remote_protocol import (
+    render_reply_content,
+    render_request_content,
+    reply_tags,
+    request_payload,
+    request_tags,
+)
 from tts_remote_signing import fake_signed_event
 from tts_remote_transport import transport
 
@@ -35,76 +41,134 @@ class RemoteAskProtocolTests(unittest.TestCase):
         os.environ.update(self.old_env)
         self.temporary.cleanup()
 
-    def test_ask_stays_in_tags_and_round_trips_a_safe_answer(self) -> None:
-        bundle = prepare_ask(json.dumps({
+    def ask(self) -> dict[str, object]:
+        value = prepare_ask(json.dumps({
+            "questions_preamble": "Settle the remaining deployment details.",
             "questions": [{
-                "short_title": "Choice",
-                "title": "Which option should the remote agent use?",
-                "suggestions": [{"title": "First"}, {"title": "Second"}],
+                "short_title": "Regions",
+                "title": "Where should we deploy?",
+                "description": "Select every applicable region.",
+                "type": "multiple_choice",
+                "suggestions": [
+                    {"title": "Europe"},
+                    {"title": "North America", "description": "Serve US and Canadian users."},
+                ],
+            }, {
+                "short_title": "Timing",
+                "title": "When should deployment begin?",
+                "suggestions": [{"title": "Monday"}],
             }],
         }), "30s")
+        assert value is not None
+        return value
+
+    def request(self) -> dict[str, object]:
+        ask = self.ask()
+        title = "Choose the deployment regions"
+        message = "The release is ready for a deployment decision."
         tags = request_tags(
             peer_pubkey="laptop-pub",
             group_id="tts",
-            backend_pubkey="backend-pub",
-            request_id="request-1",
-            subject="Choosing the next remote agent action",
+            title=title,
             agent_name="remote-agent",
+            message=message,
             attachments=[],
-            ask=bundle,
+            ask=ask,
             wait="30s",
         )
-        request = fake_signed_event(
+        return fake_signed_event(
             kind=9,
-            content="Please choose how I should continue.",
+            content=render_request_content(tags),
             tags=tags,
             nsec="agent-secret",
             relay="file://relay",
         )
+
+    def test_questions_are_native_tags_with_readable_markdown(self) -> None:
+        request = self.request()
+
+        self.assertEqual(
+            request["content"],
+            "# Choose the deployment regions\n\n"
+            "The release is ready for a deployment decision.\n\n"
+            "Settle the remaining deployment details.\n\n"
+            "1. **Where should we deploy?**\n"
+            "   Select every applicable region.\n"
+            "   - [ ] Europe\n"
+            "   - [ ] North America — Serve US and Canadian users.\n\n"
+            "2. **When should deployment begin?**\n"
+            "   - [ ] Monday",
+        )
+        self.assertIn(["question", "q-01", "multiple", "Where should we deploy?"], request["tags"])
+        self.assertIn(["option", "q-01", "Europe"], request["tags"])
+        self.assertIn(["option", "q-01", "North America", "Serve US and Canadian users."], request["tags"])
+        self.assertFalse({"ask", "product", "request", "reply", "response", "status"}.intersection(
+            tag[0] for tag in request["tags"]
+        ))
+
         payload = request_payload(request)
-        self.assertEqual(request["content"], "Please choose how I should continue.")
-        self.assertEqual(payload["ask"], bundle)
+        self.assertIsNotNone(payload)
+        bundle = json.loads(str(payload["ask"]))
+        self.assertEqual(bundle["questions"][0]["short_title"], "Regions")
+        self.assertEqual(bundle["questions"][0]["type"], "multiple_choice")
+        self.assertEqual(bundle["questions"][0]["suggestions"][1]["title"], "North America")
 
-        response = {"status": "answered", "questions": [{
-            "id": "q-01",
-            "status": "answered",
-            "response": {"answer": "First, with edits.", "suggestion_ids": ["q-01-s-01"]},
-        }]}
-        reply = fake_signed_event(
-            kind=9,
-            content=request["content"],
-            tags=reply_tags(request, "answered", response=response),
-            nsec="laptop-secret",
-            relay="file://relay",
-        )
-        request["pubkey"] = str(request["pubkey"])
-        laptop_pubkey = str(reply["pubkey"])
-        transport("file://relay").publish(reply)
-        result = wait_for_answer(
-            request_event=request,
-            backend_pubkey="backend-pub",
-            laptop_pubkey=laptop_pubkey,
-            relay="file://relay",
-            group_id="tts",
-            wait="1s",
-        )
-        self.assertEqual(result["status"], "answered")
-        self.assertEqual(result["response"]["questions"][0]["response"]["answer"], "First, with edits.")
-
-    def test_safe_response_drops_laptop_attachment_paths(self) -> None:
-        safe = safe_response({
+    def test_answer_tags_round_trip_multiple_values_without_ui_metadata(self) -> None:
+        request = self.request()
+        local_result = {
             "status": "answered",
             "questions": [{
                 "id": "q-01",
                 "status": "answered",
                 "response": {
-                    "answer": "Proceed",
+                    "answer": "Europe, North America",
+                    "interaction": "suggestion",
+                    "modified": False,
+                    "selected_suggestions": [{"title": "Europe"}, {"title": "North America"}],
                     "attachments": [{"source_file": "/Users/private/answer.txt"}],
                 },
+            }, {
+                "id": "q-02",
+                "status": "answered",
+                "response": {"answer": "Monday", "interaction": "freeform"},
             }],
-            "answer_attachment_paths": ["/Users/private/answer.txt"],
-        })
-        self.assertNotIn("/Users/private", json.dumps(safe))
+        }
+        answers = answers_from_result(local_result, request)
+        tags = reply_tags(request, answers=answers)
+        reply = fake_signed_event(
+            kind=9,
+            content=render_reply_content(request, tags),
+            tags=tags,
+            nsec="laptop-secret",
+            relay="file://relay",
+        )
+        laptop_pubkey = str(reply["pubkey"])
+        transport("file://relay").publish(reply)
+
+        result = wait_for_answer(
+            request_event=request,
+            recipient_pubkey=str(request["pubkey"]),
+            laptop_pubkey=laptop_pubkey,
+            relay="file://relay",
+            group_id="tts",
+            wait="1s",
+        )
+
+        self.assertEqual(result["status"], "answered")
+        self.assertEqual(result["answers"], [
+            {"id": "q-01", "values": ["Europe", "North America"]},
+            {"id": "q-02", "values": ["Monday"]},
+        ])
+        self.assertEqual(reply["content"], (
+            "# User has replied\n\n"
+            "1. **Where should we deploy?** Europe, North America\n"
+            "2. **When should deployment begin?** Monday"
+        ))
+        self.assertIn(["answer", "q-01", "Europe", "North America"], reply["tags"])
+        self.assertNotIn("/Users/private", json.dumps(reply))
+        self.assertFalse({"product", "request", "response", "status"}.intersection(
+            tag[0] for tag in reply["tags"]
+        ))
 
     def test_remote_ask_rejects_attachment_paths(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "paths are private"):

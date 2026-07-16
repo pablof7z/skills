@@ -81,7 +81,7 @@ class AutomaticTransportCLITests(unittest.TestCase):
         self.assertEqual(request["kind"], 9)
         self.assertEqual(request["content"], "The agent does not choose a transport.")
         self.assertIn(["agent", "automatic transport"], request["tags"])
-        self.assertIn(["subject", "Ordinary speech chooses paired playback"], request["tags"])
+        self.assertIn(["title", "Ordinary speech chooses paired playback"], request["tags"])
 
     def test_missing_endpoint_still_explains_setup_when_no_pair_exists(self) -> None:
         result = self.run_tts(

@@ -114,10 +114,11 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertEqual(request["pubkey"], output["author_pubkey"])
         self.assertNotEqual(request["pubkey"], backend_pubkey)
         self.assertEqual(request["content"], "Text speech request.")
-        self.assertIn(["request", output["request_id"]], request["tags"])
-        self.assertIn(["reply", backend_pubkey], request["tags"])
-        self.assertIn(["subject", "Remote signer selection test case"], request["tags"])
+        self.assertIn(["title", "Remote signer selection test case"], request["tags"])
         self.assertIn(["agent", "agent one"], request["tags"])
+        self.assertFalse({"product", "request", "reply", "subject"}.intersection(
+            tag[0] for tag in request["tags"]
+        ))
         self.assertEqual(membership["kind"], 9000)
         self.assertIn(["p", request["pubkey"]], membership["tags"])
         self.assertEqual(membership["pubkey"], backend_pubkey)
@@ -157,8 +158,11 @@ class RemoteDaemonCLITests(unittest.TestCase):
             self.assertIn(["e", item["remote_request"]["event_id"]], reply["tags"])
             self.assertIn(["h", "tts"], reply["tags"])
             self.assertIn(["p", connected["backend_pubkey"]], reply["tags"])
-            self.assertIn(["status", "accepted"], reply["tags"])
-            self.assertEqual(reply["content"], "Remote text works.")
+            self.assertEqual(
+                reply["content"],
+                "# TTS request accepted\n\nRemote text playback through queue",
+            )
+            self.assertEqual({tag[0] for tag in reply["tags"]}, {"e", "p", "h"})
             self.assertNotIn(str(item["output_file"]), json.dumps(reply))
         finally:
             server.shutdown()
@@ -182,11 +186,8 @@ class RemoteDaemonCLITests(unittest.TestCase):
 
         events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
         reply = events[-1]
-        self.assertEqual(reply["content"], "Attachment should fail safely.")
-        self.assertIn(["status", "rejected"], reply["tags"])
+        self.assertIn("Send text only", reply["content"])
         self.assertIn(["error", "remote_attachment_unavailable"], reply["tags"])
-        guidance = next(tag[1] for tag in reply["tags"] if tag[0] == "guidance")
-        self.assertIn("send text only", guidance.lower())
 
     def test_daemon_passes_laptop_accessible_attachments_to_local_queue(self) -> None:
         connected = self.pair()
