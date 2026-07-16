@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -125,13 +126,15 @@ def identity(state: dict[str, Any], name: str) -> dict[str, str]:
 
 
 def derive_pubkey(secret: str) -> str:
+    if os.environ.get("WTG_TRANSPORT", "nak").strip().lower() == "fake":
+        return pubkey_for_secret(secret)
     binary = os.environ.get("WTG_NAK_BIN", "nak")
     if shutil.which(binary) is None:
         return pubkey_for_secret(secret)
     env = os.environ.copy()
     env["NOSTR_SECRET_KEY"] = secret
     result = subprocess.run(
-        [binary, "key", "public"],
+        [binary, "event", "--kind", "1", "--content", ""],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -139,10 +142,32 @@ def derive_pubkey(secret: str) -> str:
         check=False,
         env=env,
     )
-    pubkey = result.stdout.strip()
-    if result.returncode == 0 and len(pubkey) >= 64:
-        return pubkey[-64:]
+    if result.returncode == 0:
+        for event in reversed(parse_events(result.stdout)):
+            pubkey = str(event.get("pubkey") or "")
+            if re.fullmatch(r"[0-9a-fA-F]{64}", pubkey):
+                return pubkey.lower()
     return pubkey_for_secret(secret)
+
+
+def parse_events(raw: str) -> list[dict[str, Any]]:
+    stripped = raw.strip()
+    if not stripped:
+        return []
+    try:
+        loaded = json.loads(stripped)
+    except json.JSONDecodeError:
+        loaded = None
+    candidates = loaded if isinstance(loaded, list) else [loaded] if isinstance(loaded, dict) else []
+    if not candidates:
+        for line in stripped.splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                candidates.append(item)
+    return [item for item in candidates if isinstance(item, dict)]
 
 
 def publish_backend_metadata(secret: str, relay: str) -> None:

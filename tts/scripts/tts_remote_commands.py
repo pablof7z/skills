@@ -32,7 +32,7 @@ def fail(code: str, message: str, guidance: str | None = None, exit_code: int = 
 
 
 def pair_offer(args) -> int:
-    laptop = ensure_laptop_identity(args.laptop_pubkey)
+    laptop = ensure_laptop_identity()
     pairing_id = secrets.token_hex(16)
     expires_at = int(time.time()) + args.ttl
     code = {

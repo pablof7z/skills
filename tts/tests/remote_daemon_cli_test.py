@@ -65,19 +65,20 @@ class RemoteDaemonCLITests(unittest.TestCase):
             self.run_tts(
                 "pair", "offer",
                 "--relay", "file://transport",
-                "--laptop-pubkey", "laptop-daemon",
             ).stdout
         )
         connected = json.loads(self.run_tts("pair", "connect", "--code", json.dumps(offer["pair_code"]), state=self.server_state).stdout)
         self.run_tts("daemon", "run", "--once", "--max-events", "1")
+        connected["laptop_pubkey"] = offer["pair_code"]["laptop_pubkey"]
         return connected
 
     def test_remote_request_never_serializes_signer_secret_and_keeps_stable_backend_reply_endpoint(self) -> None:
         connected = self.pair()
         backend_pubkey = connected["backend_pubkey"]
+        laptop_pubkey = connected["laptop_pubkey"]
         result = self.run_tts(
             "remote", "speak",
-            "--peer", "laptop-daemon",
+            "--peer", str(laptop_pubkey),
             "--agent-name", "agent one",
             "--subject", "Remote signer selection test case",
             "--message", "Text speech request.",
@@ -97,7 +98,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertNotIn("nsec-agent-secret", complete_transport)
         self.assertNotIn(backend["nsec"], complete_transport)
         self.assertEqual(request["kind"], 9)
-        self.assertIn(["p", "laptop-daemon"], request["tags"])
+        self.assertIn(["p", laptop_pubkey], request["tags"])
         self.assertIn(["h", "tts"], request["tags"])
         content = json.loads(request["content"])
         self.assertEqual(content["signer"]["source"], "AGENT_NSEC")
@@ -110,14 +111,14 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertEqual(inner["pubkey"], content["signer"]["pubkey"])
 
     def test_daemon_materializes_text_request_through_existing_tts_queue(self) -> None:
-        self.pair()
+        connected = self.pair()
         server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             self.run_tts(
                 "remote", "speak",
-                "--peer", "laptop-daemon",
+                "--peer", str(connected["laptop_pubkey"]),
                 "--agent-name", "remote agent",
                 "--subject", "Remote text playback through queue",
                 "--message", "Remote text works.",
@@ -150,10 +151,10 @@ class RemoteDaemonCLITests(unittest.TestCase):
             server.server_close()
 
     def test_daemon_rejects_inaccessible_remote_attachments_with_structured_guidance(self) -> None:
-        self.pair()
+        connected = self.pair()
         self.run_tts(
             "remote", "speak",
-            "--peer", "laptop-daemon",
+            "--peer", str(connected["laptop_pubkey"]),
             "--agent-name", "remote agent",
             "--subject", "Remote attachment safe failure",
             "--message", "Attachment should fail safely.",
@@ -201,7 +202,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def test_daemon_accepts_request_fetched_through_bounded_fake_nak_poll(self) -> None:
-        self.pair()
+        connected = self.pair()
         server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -221,7 +222,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         nak.chmod(0o700)
         self.run_tts(
             "remote", "speak",
-            "--peer", "laptop-daemon",
+            "--peer", str(connected["laptop_pubkey"]),
             "--agent-name", "remote agent",
             "--subject", "Fake nak request",
             "--message", "Fetched through fake nak.",

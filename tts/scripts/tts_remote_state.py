@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import subprocess
@@ -59,8 +60,12 @@ def pubkey_for_nsec(nsec: str) -> str:
     return hashlib.sha256(nsec.encode("utf-8")).hexdigest()
 
 
+def fake_nostr_enabled() -> bool:
+    return os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1"
+
+
 def generated_secret() -> str:
-    if os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1":
+    if fake_nostr_enabled():
         return "nsec" + secrets.token_urlsafe(32)
     process = subprocess.run(
         [os.environ.get("TTS_NAK_BIN", "nak"), "key", "generate"],
@@ -75,10 +80,10 @@ def generated_secret() -> str:
 
 
 def public_key_for_secret(nsec: str) -> str:
-    if os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1":
+    if fake_nostr_enabled():
         return pubkey_for_nsec(nsec)
     process = subprocess.run(
-        [os.environ.get("TTS_NAK_BIN", "nak"), "key", "public"],
+        [os.environ.get("TTS_NAK_BIN", "nak"), "event", "--kind", "1", "--content", ""],
         env={**os.environ, "NOSTR_SECRET_KEY": nsec},
         text=True,
         stdout=subprocess.PIPE,
@@ -86,8 +91,32 @@ def public_key_for_secret(nsec: str) -> str:
         check=False,
     )
     if process.returncode != 0:
-        raise RuntimeError(process.stderr.strip() or "nak key public failed")
-    return process.stdout.strip()
+        raise RuntimeError(process.stderr.strip() or "nak offline public key probe failed")
+    for event in reversed(parse_events(process.stdout)):
+        pubkey = str(event.get("pubkey") or "")
+        if re.fullmatch(r"[0-9a-fA-F]{64}", pubkey):
+            return pubkey.lower()
+    raise RuntimeError("nak offline public key probe produced no valid pubkey")
+
+
+def parse_events(raw: str) -> list[dict[str, object]]:
+    stripped = raw.strip()
+    if not stripped:
+        return []
+    try:
+        loaded = json.loads(stripped)
+    except ValueError:
+        loaded = None
+    candidates = loaded if isinstance(loaded, list) else [loaded] if isinstance(loaded, dict) else []
+    if not candidates:
+        for line in stripped.splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(item, dict):
+                candidates.append(item)
+    return [item for item in candidates if isinstance(item, dict)]
 
 
 def ensure_backend() -> dict[str, object]:
@@ -111,12 +140,12 @@ def ensure_backend() -> dict[str, object]:
 def ensure_laptop_identity(pubkey: str | None = None) -> dict[str, object]:
     path = remote_dir() / "laptop.json"
     existing = read_json(path, {})
-    if isinstance(existing, dict) and existing.get("pubkey"):
+    if isinstance(existing, dict) and existing.get("nsec") and existing.get("pubkey"):
         return existing
-    nsec = generated_secret() if not pubkey else None
+    nsec = generated_secret()
     identity = {
         "nsec": nsec,
-        "pubkey": pubkey or pubkey_for_nsec(str(nsec)),
+        "pubkey": public_key_for_secret(nsec),
         "product": "tts",
         "created_at": int(time.time()),
     }

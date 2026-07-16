@@ -50,7 +50,6 @@ class RemotePairingCLITests(unittest.TestCase):
         result = self.run_tts(
             "pair", "offer",
             "--relay", "wss://relay.example.test",
-            "--laptop-pubkey", "laptop-pubkey",
             "--ttl", "60",
         )
         output = json.loads(result.stdout)
@@ -58,9 +57,12 @@ class RemotePairingCLITests(unittest.TestCase):
         self.assertEqual(code["version"], 1)
         self.assertEqual(code["product"], "tts")
         self.assertEqual(code["relay"], "wss://relay.example.test")
-        self.assertEqual(code["laptop_pubkey"], "laptop-pubkey")
+        self.assertRegex(code["laptop_pubkey"], r"^[a-f0-9]{64}$")
         self.assertRegex(code["pairing_id"], r"^[a-f0-9]{32}$")
         self.assertRegex(code["secret"], r"^[A-Za-z0-9_-]{32,}$")
+        laptop = json.loads((self.laptop_state / "remote" / "laptop.json").read_text())
+        self.assertEqual(laptop["pubkey"], code["laptop_pubkey"])
+        self.assertIsNotNone(laptop["nsec"])
         self.assertNotIn("hmac", json.dumps(code).lower())
         self.assertNotIn("encrypted", json.dumps(code).lower())
         guidance = " ".join(output["next_steps"]).lower()
@@ -148,7 +150,6 @@ class RemotePairingCLITests(unittest.TestCase):
             self.run_tts(
                 "pair", "offer",
                 "--relay", "wss://relay.example.test",
-                "--laptop-pubkey", "laptop-pubkey",
             ).stdout
         )
         self.run_tts("pair", "connect", "--code", json.dumps(offer["pair_code"]))

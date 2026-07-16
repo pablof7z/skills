@@ -120,9 +120,8 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
     if not content:
         publish_reply(event, backend, {"status": "rejected", "error": {"code": "invalid_request", "message": "request content is not JSON"}})
         return True
-    if not valid_inner_request(content):
-        publish_reply(event, backend, {"status": "rejected", "request_id": content.get("request_id"), "error": {"code": "invalid_signature", "message": "inner request signature is invalid"}})
-        return True
+    if not valid_inner_request(content, event):
+        return False
     attachments = content.get("attachments") if isinstance(content, dict) else []
     missing = [item for item in attachments or [] if not Path(str(item.get("path", ""))).is_file()]
     if missing:
@@ -167,9 +166,31 @@ def request_content(event: dict[str, object]) -> dict[str, object]:
     return content if isinstance(content, dict) else {}
 
 
-def valid_inner_request(content: dict[str, object]) -> bool:
+def valid_inner_request(content: dict[str, object], outer: dict[str, object]) -> bool:
     inner = content.get("inner_event")
-    return isinstance(inner, dict) and inner.get("kind") == 9 and verify_event(inner)
+    if not isinstance(inner, dict) or inner.get("kind") != 9 or not verify_event(inner):
+        return False
+    signer = content.get("signer")
+    if not isinstance(signer, dict) or inner.get("pubkey") != signer.get("pubkey"):
+        return False
+    backend = content.get("backend")
+    request_id = content.get("request_id")
+    if not isinstance(backend, dict) or not request_id:
+        return False
+    outer_tags = outer.get("tags")
+    inner_tags = inner.get("tags")
+    outer_author = str(outer.get("pubkey") or "")
+    target = tag_value(outer_tags, "p")
+    return (
+        backend.get("pubkey") == outer_author
+        and tags_include(inner_tags, "reply", outer_author)
+        and bool(target)
+        and tags_include(inner_tags, "p", target)
+        and tags_include(inner_tags, "h", str(tag_value(outer_tags, "h")))
+        and tags_include(inner_tags, "product", str(tag_value(outer_tags, "product")))
+        and tags_include(inner_tags, "request", str(request_id))
+        and tags_include(outer_tags, "request", str(request_id))
+    )
 
 
 def rejection(content: dict[str, object], code: str) -> dict[str, object]:

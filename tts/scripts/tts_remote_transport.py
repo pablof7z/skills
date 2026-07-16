@@ -67,25 +67,21 @@ class NakTransport(Transport):
     def events(self) -> list[dict[str, object]]:
         if not self.relay:
             raise RuntimeError("nak transport requires a relay")
-        process = subprocess.run(
-            [nak_bin(), "req", self.relay],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")),
-        )
+        command = [nak_bin(), "req", "--limit", str(limit()), "-k", "9", "-k", "24", self.relay]
+        try:
+            process = subprocess.run(
+                command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=float(os.environ.get("TTS_NAK_TIMEOUT_SECONDS", "5")),
+            )
+        except subprocess.TimeoutExpired as error:
+            return parse_events(normalize_timeout_output(error.stdout))
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or "nak fetch failed")
-        events = []
-        for line in process.stdout.splitlines():
-            try:
-                loaded = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(loaded, dict):
-                events.append(loaded)
-        return events
+        return parse_events(process.stdout)
 
 
 def transport(relay: str | None = None) -> Transport:
@@ -99,3 +95,38 @@ def transport(relay: str | None = None) -> Transport:
 
 def nak_bin() -> str:
     return os.environ.get("TTS_NAK_BIN", "nak")
+
+
+def limit() -> int:
+    try:
+        return max(1, min(500, int(os.environ.get("TTS_NAK_REQ_LIMIT", "200"))))
+    except ValueError:
+        return 200
+
+
+def normalize_timeout_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def parse_events(raw: str) -> list[dict[str, object]]:
+    stripped = raw.strip()
+    if not stripped:
+        return []
+    try:
+        loaded = json.loads(stripped)
+    except ValueError:
+        loaded = None
+    candidates = loaded if isinstance(loaded, list) else [loaded] if isinstance(loaded, dict) else []
+    if not candidates:
+        for line in stripped.splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(item, dict):
+                candidates.append(item)
+    return [item for item in candidates if isinstance(item, dict)]

@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 
-from tts_remote_state import pubkey_for_nsec
+from tts_remote_state import fake_nostr_enabled, pubkey_for_nsec, public_key_for_secret
 
 
 def canonical(event: dict[str, object]) -> str:
@@ -33,7 +33,7 @@ def fake_signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: s
 
 
 def signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: str, relay: str | None = None) -> dict[str, object]:
-    if os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1":
+    if fake_nostr_enabled():
         return fake_signed_event(kind=kind, content=content, tags=tags, nsec=nsec, relay=relay)
     return nak_signed_event(kind=kind, content=content, tags=tags, nsec=nsec, relay=relay)
 
@@ -64,7 +64,7 @@ def nak_signed_event(*, kind: int, content: str, tags: list[list[str]], nsec: st
 def verify_event(event: dict[str, object]) -> bool:
     event_id = hashlib.sha256(canonical(event).encode("utf-8")).hexdigest()
     fake_sig = hashlib.sha256((event_id + str(event.get("pubkey"))).encode("utf-8")).hexdigest()
-    if event.get("id") == event_id and event.get("sig") == fake_sig:
+    if fake_nostr_enabled() and event.get("id") == event_id and event.get("sig") == fake_sig:
         return True
     process = subprocess.run(
         [nak_bin(), "verify"],
@@ -78,19 +78,7 @@ def verify_event(event: dict[str, object]) -> bool:
 
 
 def public_key(nsec: str) -> str:
-    if os.environ.get("TTS_REMOTE_TRANSPORT") == "file" or os.environ.get("TTS_FAKE_NOSTR") == "1":
-        return pubkey_for_nsec(nsec)
-    process = subprocess.run(
-        [nak_bin(), "key", "public"],
-        env={**os.environ, "NOSTR_SECRET_KEY": nsec},
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if process.returncode != 0:
-        raise RuntimeError(process.stderr.strip() or "nak key public failed")
-    return process.stdout.strip()
+    return public_key_for_secret(nsec)
 
 
 def nak_bin() -> str:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -60,11 +61,22 @@ class FakeRelayTransport:
         return "fake-pub-" + hashlib.sha256(secret_key.encode("utf-8")).hexdigest()[:16]
 
 
+HEX_PUBKEY = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
 class NakTransport:
-    def __init__(self, *, relay_url: str | None = None, nsec: str | None = None, nak_path: str = "nak"):
+    def __init__(
+        self,
+        *,
+        relay_url: str | None = None,
+        nsec: str | None = None,
+        nak_path: str = "nak",
+        timeout_seconds: float = 5.0,
+    ):
         self.relay_url = relay_url
         self.nsec = nsec
         self.nak_path = nak_path
+        self.timeout_seconds = timeout_seconds
 
     def publish(self, event: dict[str, Any]) -> dict[str, Any]:
         nak = shutil.which(self.nak_path)
@@ -126,22 +138,44 @@ class NakTransport:
             for tag_value in values:
                 command.extend(["--tag", f"{key[1:]}={tag_value}"])
         command.append(self.relay_url)
-        completed = self._run(command)
+        try:
+            completed = self._run(command)
+            output = completed.stdout
+        except subprocess.TimeoutExpired as error:
+            output = normalize_timeout_output(error.stdout)
+            return parse_nak_events(output)
         if completed.returncode != 0:
             raise RemoteHumanError(
                 "transport_query_failed",
                 "nak failed to query Nostr events.",
                 {"stderr": completed.stderr.strip()},
             )
-        return parse_nak_events(completed.stdout)
+        return parse_nak_events(output)
 
     def generate_secret_key(self) -> str:
         completed = self._run_key_command(["key", "generate"])
         return completed.stdout.strip()
 
     def public_key_for_secret(self, secret_key: str) -> str:
-        completed = self._run_key_command(["key", "public"], secret_key=secret_key)
-        return completed.stdout.strip()
+        nak = shutil.which(self.nak_path)
+        if nak is None:
+            raise RemoteHumanError(
+                "missing_dependency",
+                f"Cannot manage Nostr keys because nak is not installed or not executable: {self.nak_path}",
+                {"dependency": "nak", "path": self.nak_path},
+            )
+        completed = self._run([nak, "event", "--kind", "1", "--content", ""], secret_key=secret_key)
+        if completed.returncode != 0:
+            raise RemoteHumanError(
+                "transport_key_failed",
+                "nak failed to derive the public key from an offline signed probe event.",
+                {"stderr": completed.stderr.strip()},
+            )
+        for event in reversed(parse_nak_events(completed.stdout)):
+            pubkey = str(event.get("pubkey") or "")
+            if HEX_PUBKEY.fullmatch(pubkey):
+                return pubkey.lower()
+        raise RemoteHumanError("transport_key_failed", "nak probe event did not include a valid 64-hex public key.")
 
     def _run_key_command(self, arguments: list[str], *, secret_key: str | None = None) -> subprocess.CompletedProcess[str]:
         nak = shutil.which(self.nak_path)
@@ -171,6 +205,7 @@ class NakTransport:
             stderr=subprocess.PIPE,
             check=False,
             env=env,
+            timeout=self.timeout_seconds,
         )
 
 
@@ -224,6 +259,14 @@ def parse_nak_events(raw: str) -> list[dict[str, Any]]:
     for candidate in candidates:
         events.append(_validate_raw_event(candidate))
     return events
+
+
+def normalize_timeout_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def _validate_raw_event(candidate: Any) -> dict[str, Any]:
