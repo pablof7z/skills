@@ -43,11 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var endpointMonitor = RemoteEndpointMonitor(
         reader: RemoteEndpointStateReader(stateDirectory: store.stateDirectory)
     )
+    private lazy var remotePairingService = RemotePairingService(
+        stateDirectory: store.stateDirectory,
+        commandRunner: ShellTTSRemoteCommandRunner()
+    )
     private lazy var pairingWindowController = RemotePairingWindowController(
-        service: RemotePairingService(
-            stateDirectory: store.stateDirectory,
-            commandRunner: ShellTTSRemoteCommandRunner()
-        ),
+        service: remotePairingService,
         didCreateOffer: { [weak endpointMonitor] in endpointMonitor?.refresh() }
     )
     private lazy var menuBarController = MenuBarController(
@@ -72,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playerWindowController.refresh()
         controller.start()
         askAttentionController.start()
+        ensureRemoteListenerRunning()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -92,6 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             playerWindowController.showPlayer()
         }
         return true
+    }
+
+    private func ensureRemoteListenerRunning() {
+        let service = remotePairingService
+        Task.detached(priority: .utility) {
+            try? service.ensureListenerRunning()
+        }
     }
 
     private func configureMainMenu() {

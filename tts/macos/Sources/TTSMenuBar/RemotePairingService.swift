@@ -43,7 +43,7 @@ struct RemotePairingConfiguration: Decodable, Equatable {
     }
 }
 
-struct RemotePairingService {
+struct RemotePairingService: Sendable {
     let stateDirectory: URL
     let commandRunner: any RemoteCommandRunning
 
@@ -71,7 +71,7 @@ struct RemotePairingService {
         return RemotePairingOffer(code: pairCode)
     }
 
-    private func ensureListenerRunning() throws {
+    func ensureListenerRunning() throws {
         let response = try commandRunner.run(
             arguments: ["daemon", "status"],
             stateDirectory: stateDirectory
