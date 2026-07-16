@@ -67,13 +67,12 @@ class RemoteAskMaterializationTests(unittest.TestCase):
             "ask": json.dumps(question),
             "attachments": [],
             "message": "What's your favorite place in the world?",
-            "request_id": "paired-question-test",
             "subject": "A simple spoken greeting test",
             "wait": "0.01s",
         }
 
         with patch.dict(os.environ, self.environment, clear=False):
-            output = materialize_request(content, {"id": "request-event"})
+            output = materialize_request(content, {"id": "paired-question-test"})
 
         self.assertEqual(output["status"], "pending")
         item = json.loads(
@@ -81,7 +80,7 @@ class RemoteAskMaterializationTests(unittest.TestCase):
         )
         self.assertEqual(item["kind"], "question")
         self.assertIn(item["status"], {"queued", "playing"})
-        self.assertEqual(item["remote_request"]["event_id"], "request-event")
+        self.assertEqual(item["remote_request"]["event_id"], "paired-question-test")
 
     def test_listener_switch_requires_an_explicit_true_value(self) -> None:
         for false_value in ("", "0", "false", "no", "off"):

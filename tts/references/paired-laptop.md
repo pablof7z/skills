@@ -99,16 +99,17 @@ same structured question bundle and bounded wait used by local TTS:
 
 The laptop presents the ordinary question UI. The remote process stays in the
 foreground until the user answers, skips every question, or the bounded wait
-expires. Its final JSON contains safe answer text and suggestion IDs. Answer
-attachments and laptop-local paths are never returned over the relay. Remote
-ask bundles cannot contain attachments; provide their context in the question
-text instead.
+expires. Its final JSON contains only the question IDs and human-readable answer
+values. Answer attachments and laptop-local paths are never returned over the
+relay. Remote ask bundles cannot contain attachments; provide their context in
+the question text instead.
 
 If `AGENT_NSEC` is set, the paired backend first ensures that pubkey is a member
 of the configured TTS channel, then the agent key signs and publishes the
-kind-9 request directly. The backend remains the stable reply endpoint and a
-channel admin. Without `AGENT_NSEC`, the backend signs the request itself.
-Private signer material is never included in the event payload.
+kind-9 request directly. The backend remains a stable channel admin. Replies
+target the pubkey that signed the request rather than a separate reply endpoint.
+Without `AGENT_NSEC`, the backend signs the request itself. Private signer
+material is never included in the event payload.
 
 The backend also publishes a signed replaceable kind-0 profile containing its
 hostname on the pairing relay. The laptop periodically verifies that profile
@@ -116,11 +117,20 @@ and stores the hostname with the paired peer, so the menu shows a recognizable
 endpoint name. Missing, invalid, or unavailable metadata never blocks pairing
 or speech; the menu safely falls back to a shortened pubkey.
 
-The kind-9 event content is exactly the text to speak. Routing, request ID,
-subject, agent name, and optional attachment descriptors are ordinary Nostr
-tags rather than a JSON envelope. Delivery replies echo only that message and
-report acceptance or a safe error code in tags; they never publish generated
-item records or laptop filesystem paths.
+For questions, the kind-9 event tags are the authoritative UI model: `title`,
+`message`, optional `preamble`, repeated `question`, `label`, `description`, and
+`option` tags, plus the bounded `wait`. Event content is a deterministic
+Markdown rendering of those tags so an ordinary NIP-29 client can read and
+understand the question. The laptop UI ignores that rendering and reconstructs
+its local question bundle from the tags.
+
+Question replies reference the request with `e`, target its author with `p`,
+and carry one repeated `answer` tag per answered question. Each answer tag is
+`["answer", <question-id>, <value>...]`, so multiple-choice answers remain one
+compact tag with several human-readable values. Reply content is the equivalent
+readable Markdown. The wire format contains no stringified ask or response JSON,
+request UUID, product marker, answered-status marker, suggestion IDs, UI
+interaction metadata, generated item records, or laptop filesystem paths.
 
 Pairings created by versions that used expiring JSON codes must be recreated
 before direct agent signing can be used. Generate a fresh compact code on the
@@ -131,8 +141,8 @@ laptop and pair again so the backend receives channel-admin permission.
 Remote text speech should work once paired and the laptop daemon is running.
 Remote attachments are passed into the ordinary local TTS attachment flow only
 when the laptop can read the referenced paths. If a path is unavailable, the
-daemon rejects the request with error and guidance tags; retry with text only
-or with a path that exists on the paired laptop.
+daemon rejects the request with an error tag and readable Markdown guidance;
+retry with text only or with a path that exists on the paired laptop.
 
 All waits are bounded. Relay reads are scoped to the laptop and its paired
 channels, paginated, and resumed from a durable cursor. Command failures emit

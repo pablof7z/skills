@@ -68,14 +68,10 @@ class RemoteRequestBindingTests(unittest.TestCase):
         content: str = "hello",
         tags: list[list[str]] | None = None,
     ) -> dict[str, object]:
-        request_id = "req-1"
         event_tags = tags or [
             ["p", "laptop-pub"],
             ["h", "tts"],
-            ["product", "tts"],
-            ["request", request_id],
-            ["reply", self.server_pubkey],
-            ["subject", "subject"],
+            ["title", "Readable remote speech request"],
             ["agent", "agent"],
         ]
         return fake_signed_event(
@@ -96,22 +92,29 @@ class RemoteRequestBindingTests(unittest.TestCase):
     def test_rejects_author_that_backend_has_not_admitted(self) -> None:
         self.assert_rejected_before_materialization(self.request(nsec="unadmitted-agent"))
 
-    def test_rejects_wrong_reply_endpoint(self) -> None:
-        wrong_reply = self.request(tags=[
-            ["p", "laptop-pub"], ["h", "tts"], ["product", "tts"],
-            ["request", "req-1"], ["reply", "wrong-backend"],
-        ])
-
-        self.assert_rejected_before_materialization(wrong_reply)
-
-    def test_rejects_wrong_target_channel_or_request_tag(self) -> None:
+    def test_rejects_wrong_target_or_channel(self) -> None:
         variants = [
-            [["p", "other"], ["h", "tts"], ["product", "tts"], ["request", "req-1"], ["reply", self.server_pubkey]],
-            [["p", "laptop-pub"], ["h", "other"], ["product", "tts"], ["request", "req-1"], ["reply", self.server_pubkey]],
-            [["p", "laptop-pub"], ["h", "tts"], ["product", "tts"], ["reply", self.server_pubkey]],
+            [["p", "other"], ["h", "tts"], ["title", "Wrong target"], ["agent", "agent"]],
+            [["p", "laptop-pub"], ["h", "other"], ["title", "Wrong channel"], ["agent", "agent"]],
         ]
         for tags in variants:
             self.assert_rejected_before_materialization(self.request(tags=tags))
+
+    def test_legacy_wire_tags_receive_an_invalid_request_error(self) -> None:
+        event = self.request(tags=[
+            ["p", "laptop-pub"],
+            ["h", "tts"],
+            ["title", "Legacy request"],
+            ["agent", "agent"],
+            ["product", "tts"],
+        ])
+        with mock.patch(
+            "tts_remote_daemon.materialize_request",
+            side_effect=AssertionError("materialized legacy request"),
+        ):
+            self.assertTrue(handle_request_event(event, self.laptop))
+        reply = transport("file://relay").events()[-1]
+        self.assertIn(["error", "invalid_request"], reply["tags"])
 
 
 if __name__ == "__main__":

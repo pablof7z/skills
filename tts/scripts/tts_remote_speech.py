@@ -6,12 +6,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-import uuid
 
 from tts_remote_ask import prepare_ask, wait_for_answer
 from tts_remote_channel import channel_parts
 from tts_remote_groups import ensure_group_member
-from tts_remote_protocol import request_tags
+from tts_remote_protocol import render_request_content, request_tags
 from tts_remote_profile import publish_backend_profile
 from tts_remote_signing import public_key, signed_event
 from tts_remote_state import active_peer, ensure_backend, error
@@ -40,28 +39,27 @@ def remote_speak(args) -> int:
         {"label": label, "path": path}
         for label, path in zip(args.attach[0::2], args.attach[1::2])
     ]
-    request_id = str(uuid.uuid4())
+    tags = request_tags(
+        peer_pubkey=str(peer["pubkey"]),
+        group_id=group_id,
+        title=args.subject,
+        agent_name=args.agent_name,
+        message=args.message,
+        attachments=attachments,
+        ask=ask,
+        wait=args.wait,
+    )
+    content = render_request_content(tags) if ask else args.message
     event = signed_event(
         kind=9,
-        content=args.message,
-        tags=request_tags(
-            peer_pubkey=str(peer["pubkey"]),
-            group_id=group_id,
-            backend_pubkey=str(backend["pubkey"]),
-            request_id=request_id,
-            subject=args.subject,
-            agent_name=args.agent_name,
-            attachments=attachments,
-            ask=ask,
-            wait=args.wait,
-        ),
+        content=content,
+        tags=tags,
         nsec=signer_nsec,
         relay=relay,
     )
     transport(relay).publish(event)
     sent = {
         "status": "sent",
-        "request_id": request_id,
         "event_id": event["id"],
         "author_pubkey": signer_pubkey,
         "peer": peer["pubkey"],
@@ -70,7 +68,7 @@ def remote_speak(args) -> int:
         return emit(sent)
     answer = wait_for_answer(
         request_event=event,
-        backend_pubkey=str(backend["pubkey"]),
+        recipient_pubkey=signer_pubkey,
         laptop_pubkey=str(peer["pubkey"]),
         relay=relay,
         group_id=group_id,
