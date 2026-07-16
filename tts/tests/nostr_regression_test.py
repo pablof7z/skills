@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -116,9 +117,11 @@ class TTSNostrRegressionTests(unittest.TestCase):
 
     def test_nak_events_requests_chat_and_ephemeral_pairing_with_finite_limit(self) -> None:
         captured: list[str] = []
+        captured_stdin: list[object] = []
 
         def run(args: list[str], **kwargs: object) -> object:
             captured.extend(args)
+            captured_stdin.append(kwargs.get("stdin"))
             return mock.Mock(returncode=0, stdout="", stderr="")
 
         with mock.patch("tts_remote_transport.subprocess.run", run):
@@ -147,6 +150,7 @@ class TTSNostrRegressionTests(unittest.TestCase):
         self.assertIn("123", captured)
         self.assertIn("-e", captured)
         self.assertIn("request-event-id", captured)
+        self.assertEqual(captured_stdin, [subprocess.DEVNULL])
 
     def test_group_members_reads_relay_authored_member_and_admin_state(self) -> None:
         events = [

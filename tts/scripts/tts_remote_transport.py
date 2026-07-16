@@ -163,6 +163,7 @@ class NakTransport(Transport):
         try:
             process = subprocess.run(
                 command,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -217,6 +218,7 @@ class NakTransport(Transport):
         try:
             process = subprocess.run(
                 command,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
