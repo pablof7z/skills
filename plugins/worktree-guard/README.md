@@ -55,8 +55,10 @@ server, run that connect command once. Use `wtg daemon <role> start`,
 `wtg daemon <role> foreground --timeout <seconds>` when you want the process
 attached to the current terminal. Agents should use the high-level `pair`,
 `daemon`, and `request-base-access` commands; relay internals are intentionally
-hidden from normal workflow docs. See `references/remote-approval.md` for
-failure modes and protocol details.
+hidden from normal workflow docs. Each pairing uses its own relay group; NIP-29
+group creation and membership are enabled when the chosen relay supports them,
+with ordinary public relays remaining compatible. See
+`references/remote-approval.md` for failure modes and protocol details.
 
 ## Architecture
 

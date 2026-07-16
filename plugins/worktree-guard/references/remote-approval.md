@@ -22,6 +22,7 @@ Pair codes are JSON and contain:
 - `relay`
 - `laptop_pubkey`
 - `pairing_id`
+- `group_id`
 - `created_at`
 - `expires_at`
 - `secret`
@@ -30,19 +31,25 @@ The secret is raw and one-use by design. There is no HMAC and no pairing
 encryption. On connect, the server creates or loads a persistent WTG backend
 identity, publishes a kind `0` profile named `<hostname> wtg daemon`, approves
 the laptop peer locally, and publishes a pairing event that p-tags the laptop,
-includes `product`, `version`, `pairing_id`, and the raw secret, and is signed
-by the backend identity.
+targets the pair's `group_id`, includes `product`, `version`, `pairing_id`, and
+the raw secret, and is signed by the backend identity.
+
+Each pair gets a distinct NIP-29 group id. The laptop attempts kind `9007`
+group creation when it offers the code. After accepting the one-use pairing
+event, it attempts kind `9000` membership for the backend and kind `9002`
+closed/public metadata. These administration events are best-effort: relays
+without NIP-29 support can still carry the p- and h-targeted kind `9` messages.
 
 ## Approval Events
 
 Remote authorization requests are signed kind `9` group messages. Requests
-p-tag the laptop daemon, carry `h` and `product` tags for `worktree-guard`, and
-include operation, worktree, repository, reason, session, TTL, and product
-context in JSON content.
+p-tag the laptop daemon, carry the pair-specific `h` group and a
+`product=worktree-guard` tag, and include operation, worktree, repository,
+reason, session, TTL, and product context in JSON content.
 
 Decisions are signed kind `9` group messages that e-tag the original request.
 They p-tag the backend, carry the same `h` and `product` tags, and include the
-request id and product in JSON content. Supported decision values are
+request id, session id, and product in JSON content. Supported decision values are
 `allow-once`, `allow-session`, and `deny`.
 
 The server policy remains authoritative. The server accepts only decisions
@@ -50,6 +57,12 @@ signed by the exact approved laptop for the known pending request, targeted at
 the exact backend, within the request window, and only once. Unknown, late,
 malformed, cross-product, unapproved, forged, wrong-target, or replayed
 decisions fail closed.
+
+Production relay reads use kind, recipient `p`, and pair `h` filters. Although
+`nak req` verifies by default, WTG also verifies each returned event with
+`nak verify` before protocol validation. Publication uses the event returned
+by `nak`, including its real post-signing id; pending requests never rely on
+the placeholder id assembled before the production signer runs.
 
 ## Transport
 

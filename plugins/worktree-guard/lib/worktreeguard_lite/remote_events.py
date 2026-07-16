@@ -11,8 +11,11 @@ from typing import Any
 
 PRODUCT = "worktree-guard"
 PAIR_CODE_VERSION = 1
-PAIRING_KIND = 9001
+PAIRING_KIND = 9
 APPROVAL_KIND = 9
+GROUP_CREATE_KIND = 9007
+GROUP_PUT_USER_KIND = 9000
+GROUP_EDIT_METADATA_KIND = 9002
 
 
 def new_secret(prefix: str) -> str:

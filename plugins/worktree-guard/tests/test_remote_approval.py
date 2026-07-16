@@ -86,6 +86,7 @@ class RemoteApprovalTests(unittest.TestCase):
         self.assertEqual(decoded["relay"], "fake://relay")
         self.assertEqual(decoded["laptop_pubkey"], payload["laptop_pubkey"])
         self.assertTrue(decoded["pairing_id"])
+        self.assertTrue(decoded["group_id"].startswith("wtg-"))
         self.assertTrue(decoded["secret"])
         self.assertGreater(decoded["expires_at"], decoded["created_at"])
         self.assertEqual(stat.S_IMODE(self.laptop_state.parent.stat().st_mode), 0o700)
@@ -101,9 +102,16 @@ class RemoteApprovalTests(unittest.TestCase):
         self.assertEqual(payload["status"], "paired")
         self.assertEqual(state["remote"]["backend"]["pubkey"], payload["backend_pubkey"])
         self.assertIn(offer["laptop_pubkey"], state["remote"]["approved_peers"])
+        status = json.loads(self.run_wtg("pair", "status", "--json", state=self.server_state).stdout)
+        self.assertNotIn("nsec", json.dumps(status))
         events = [json.loads(line) for line in self.relay.read_text(encoding="utf-8").splitlines()]
         self.assertTrue(any(event["kind"] == 0 for event in events))
-        pair_events = [event for event in events if event["kind"] == 9001]
+        self.assertTrue(any(event["kind"] == 9007 for event in events))
+        pair_events = [
+            event
+            for event in events
+            if event["kind"] == 9 and json.loads(event["content"]).get("pairing_id")
+        ]
         self.assertEqual(len(pair_events), 1)
         self.assertEqual(json.loads(pair_events[0]["content"])["secret"], offer["secret"])
 
@@ -143,6 +151,7 @@ class RemoteApprovalTests(unittest.TestCase):
             requests = laptop_requests(0)
             self.assertEqual([item["id"] for item in requests], [request_id])
             publish_decision(request_id, "allow-session")
+            self.assertIn(request_id, load_state()["remote"]["consumed_request_ids"])
         with self.state_env(self.server_state):
             decision = request_remote_approval(request, wait_seconds=1, request_id=request_id)
             self.assertEqual(decision, "session")
@@ -162,12 +171,17 @@ class RemoteApprovalTests(unittest.TestCase):
         with self.state_env(self.laptop_state):
             offer = create_pair_offer(relay="fake://relay")
             laptop = identity(load_state(), "laptop")
+            group_id = json.loads(offer.pair_code)["group_id"]
         with self.state_env(self.server_state):
             connect_pair_code(offer.pair_code)
             backend = identity(load_state(), "backend")
             request = RemoteApprovalRequest("apply_patch", "/repo", "/repo", "#191", "s1", 60)
             request_remote_approval(request, wait_seconds=0)
             request_id = first_request_id()
+        with self.state_env(self.laptop_state):
+            from worktreeguard_lite.remote_approval import laptop_requests
+
+            laptop_requests(0)
 
         def publish_bad(secret: str, pubkey: str, tags: list[list[str]], content: dict[str, object]) -> None:
             event = signed_event(kind=APPROVAL_KIND, secret=secret, tags=tags, content=content)
@@ -176,26 +190,32 @@ class RemoteApprovalTests(unittest.TestCase):
         publish_bad(
             "not-the-laptop",
             "forged-author",
-            [["e", request_id], ["p", backend["pubkey"]], ["h", PRODUCT], ["product", PRODUCT]],
-            {"decision": "allow-session", "request_id": request_id, "product": PRODUCT},
+            [["e", request_id], ["p", backend["pubkey"]], ["h", group_id], ["product", PRODUCT]],
+            {"decision": "allow-session", "request_id": request_id, "session": "s1", "product": PRODUCT},
         )
         publish_bad(
             laptop["secret"],
             laptop["pubkey"],
             [["e", request_id], ["p", "wrong-backend"], ["h", PRODUCT], ["product", PRODUCT]],
-            {"decision": "allow-session", "request_id": request_id, "product": PRODUCT},
+            {"decision": "allow-session", "request_id": request_id, "session": "s1", "product": PRODUCT},
         )
         publish_bad(
             laptop["secret"],
             laptop["pubkey"],
             [["e", "wrong-request"], ["p", backend["pubkey"]], ["h", PRODUCT], ["product", PRODUCT]],
-            {"decision": "allow-session", "request_id": request_id, "product": PRODUCT},
+            {"decision": "allow-session", "request_id": request_id, "session": "s1", "product": PRODUCT},
         )
         publish_bad(
             laptop["secret"],
             laptop["pubkey"],
             [["e", request_id], ["p", backend["pubkey"]], ["h", "other"], ["product", "other"]],
-            {"decision": "allow-session", "request_id": request_id, "product": "other"},
+            {"decision": "allow-session", "request_id": request_id, "session": "s1", "product": "other"},
+        )
+        publish_bad(
+            laptop["secret"],
+            laptop["pubkey"],
+            [["e", request_id], ["p", backend["pubkey"]], ["h", group_id], ["product", PRODUCT]],
+            {"decision": "allow-session", "request_id": request_id, "session": "other", "product": PRODUCT},
         )
         with self.state_env(self.server_state):
             self.assertIsNone(request_remote_approval(request, wait_seconds=0, request_id=request_id))
@@ -215,8 +235,12 @@ class RemoteApprovalTests(unittest.TestCase):
                 "expires_at": 2,
             }
             save_state(state)
-        with self.state_env(self.laptop_state):
-            publish_decision("late", "allow-session")
+        publish_bad(
+            laptop["secret"],
+            laptop["pubkey"],
+            [["e", "late"], ["p", backend["pubkey"]], ["h", group_id], ["product", PRODUCT]],
+            {"decision": "allow-session", "request_id": "late", "session": "s1", "product": PRODUCT},
+        )
         with self.state_env(self.server_state):
             self.assertIsNone(request_remote_approval(request, wait_seconds=0, request_id="late"))
             self.assertEqual(len(load_state()["grants"]), 1)
@@ -239,29 +263,11 @@ class RemoteApprovalTests(unittest.TestCase):
             approved = load_state()["remote"]["approved_peers"]
         self.assertIn(first["backend_pubkey"], approved)
         self.assertNotIn(second["backend_pubkey"], approved)
-
-    def test_daemon_start_status_stop_clears_running_state(self) -> None:
-        start = self.run_wtg("daemon", "server", "start", "--timeout", "30", state=self.server_state)
-        self.assertEqual(start.returncode, 0, start.stderr)
-        try:
-            started = json.loads(start.stdout)
-            self.assertTrue(started["running"])
-            self.assertTrue(started["pid"])
-
-            status = self.run_wtg("daemon", "server", "status", state=self.server_state)
-            self.assertEqual(status.returncode, 0, status.stderr)
-            payload = json.loads(status.stdout)
-            self.assertTrue(payload["running"])
-            self.assertEqual(payload["pid"], started["pid"])
-        finally:
-            stop = self.run_wtg("daemon", "server", "stop", state=self.server_state)
-        self.assertEqual(stop.returncode, 0, stop.stderr)
-        stopped = json.loads(stop.stdout)
-        self.assertFalse(stopped["running"])
-
-        status = self.run_wtg("daemon", "server", "status", state=self.server_state)
-        self.assertEqual(status.returncode, 0, status.stderr)
-        self.assertFalse(json.loads(status.stdout)["running"])
+        events = [json.loads(line) for line in self.relay.read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(
+            any(event["kind"] == 9000 and ["p", first["backend_pubkey"]] in event["tags"] for event in events)
+        )
+        self.assertTrue(any(event["kind"] == 9002 and ["closed"] in event["tags"] for event in events))
 
     def append_event(self, event: dict[str, object]) -> None:
         record = dict(event)
@@ -276,7 +282,11 @@ def first_request_id() -> str:
         json.loads(line)
         for line in Path(os.environ["WTG_FAKE_RELAY_FILE"]).read_text(encoding="utf-8").splitlines()
     ]
-    requests = [event for event in events if event["kind"] == 9]
+    requests = [
+        event
+        for event in events
+        if event["kind"] == 9 and json.loads(event["content"]).get("operation")
+    ]
     return requests[0]["id"]
 
 

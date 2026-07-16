@@ -21,7 +21,9 @@ def valid_decision(
         return None
     if not has_tag(event, "p", str(record.get("backend_pubkey") or "")):
         return None
-    if not has_tag(event, "h", PRODUCT) or not has_tag(event, "product", PRODUCT):
+    if not has_tag(event, "h", str(record.get("group_id") or "")):
+        return None
+    if not has_tag(event, "product", PRODUCT):
         return None
     if int(event.get("created_at", 0)) < int(record.get("created_at", 0)):
         return None
@@ -35,9 +37,11 @@ def valid_decision(
     payload = event_content(event)
     if payload.get("request_id") != request_id or payload.get("product") != PRODUCT:
         return None
+    if str(payload.get("session") or "") != str(record.get("session") or ""):
+        return None
     raw = str(payload.get("decision") or "").lower()
     if raw in {"allow-session", "session", "allow"}:
-        return "session"
+        return "session" if record.get("session") else None
     if raw in {"allow-once", "once", "operation"}:
         return "once"
     if raw == "deny":
@@ -50,12 +54,14 @@ def pending_record(
     relay: str,
     laptop_pubkey: str,
     backend_pubkey: str,
+    group_id: str,
 ) -> dict[str, Any]:
     now = int(time.time())
     return {
         "relay": relay,
         "laptop_pubkey": laptop_pubkey,
         "backend_pubkey": backend_pubkey,
+        "group_id": group_id,
         "operation": request.operation,
         "worktree": request.worktree,
         "repository": request.repository,
@@ -68,11 +74,17 @@ def pending_record(
     }
 
 
-def request_author(relay: str, request_id: str) -> str:
+def request_author(relay: str, request_id: str, *, group_id: str = "", p_tag: str = "") -> str:
     if not relay:
         return ""
-    for event in poll_events(relay, {APPROVAL_KIND}, time.monotonic()):
-        if event.get("id") == request_id and has_tag(event, "h", PRODUCT):
+    for event in poll_events(
+        relay,
+        {APPROVAL_KIND},
+        time.monotonic(),
+        p_tag=p_tag,
+        h_tag=group_id,
+    ):
+        if event.get("id") == request_id and has_tag(event, "product", PRODUCT):
             return str(event.get("pubkey") or "")
     return ""
 

@@ -17,6 +17,7 @@ from .remote_events import (
     PAIR_CODE_VERSION,
     PAIRING_KIND,
     PRODUCT,
+    GROUP_CREATE_KIND,
     has_tag,
     new_key_secret,
     new_secret,
@@ -53,8 +54,12 @@ def create_pair_offer(*, relay: str, ttl_seconds: int = 600) -> PairOffer:
         "expires_at": now + max(30, ttl_seconds),
         "secret": secret,
     }
+    payload["group_id"] = "wtg-" + payload["pairing_id"].removeprefix("pid_")
     state.setdefault("remote", {}).setdefault("pair_offers", {})[payload["pairing_id"]] = payload
     save_state(state)
+    publish_group_event(
+        laptop["secret"], relay, GROUP_CREATE_KIND, [["h", payload["group_id"]]]
+    )
     return PairOffer(
         pair_code=json.dumps(payload, sort_keys=True, separators=(",", ":")),
         relay=relay,
@@ -76,6 +81,7 @@ def connect_pair_code(pair_code: str) -> dict[str, Any]:
         "relay": payload["relay"],
         "pairing_id": payload["pairing_id"],
         "product": PRODUCT,
+        "group_id": payload["group_id"],
         "approved_at": int(time.time()),
     }
     save_state(state)
@@ -104,7 +110,7 @@ def decode_pair_code(pair_code: str) -> dict[str, Any]:
         raise WorktreeGuardError("Pair code is not for this WorktreeGuard version.")
     if int(payload.get("expires_at", 0)) <= int(time.time()):
         raise WorktreeGuardError("Pair code expired.")
-    for key in ("relay", "laptop_pubkey", "pairing_id", "secret"):
+    for key in ("relay", "laptop_pubkey", "pairing_id", "group_id", "secret"):
         if not isinstance(payload.get(key), str) or not payload[key]:
             raise WorktreeGuardError(f"Pair code is missing {key}.")
     return payload
@@ -115,6 +121,17 @@ def identity(state: dict[str, Any], name: str) -> dict[str, str]:
     identities = remote.setdefault("identities", {})
     current = identities.get(name)
     if isinstance(current, dict) and current.get("secret") and current.get("pubkey"):
+        if (
+            os.environ.get("WTG_TRANSPORT", "nak").strip().lower() != "fake"
+            and current.get("pubkey") == pubkey_for_secret(str(current["secret"]))
+        ):
+            current["pubkey"] = derive_pubkey(str(current["secret"]))
+            if name == "backend":
+                remote["backend"] = {
+                    "nsec": str(current["secret"]),
+                    "pubkey": str(current["pubkey"]),
+                }
+            save_state(state)
         return {"secret": str(current["secret"]), "pubkey": str(current["pubkey"])}
     secret = new_key_secret()
     current = {"secret": secret, "pubkey": derive_pubkey(secret)}
@@ -130,24 +147,31 @@ def derive_pubkey(secret: str) -> str:
         return pubkey_for_secret(secret)
     binary = os.environ.get("WTG_NAK_BIN", "nak")
     if shutil.which(binary) is None:
-        return pubkey_for_secret(secret)
+        raise WorktreeGuardError("Remote approval requires `nak` or WTG_TRANSPORT=fake.")
     env = os.environ.copy()
     env["NOSTR_SECRET_KEY"] = secret
-    result = subprocess.run(
-        [binary, "event", "--kind", "1", "--content", ""],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=5,
-        check=False,
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            [binary, "event", "--kind", "1", "--content", ""],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+            check=False,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise WorktreeGuardError("Could not derive a Nostr identity: nak timed out.") from error
     if result.returncode == 0:
+        from .remote_transport import NakTransport
+
+        adapter = NakTransport(binary)
         for event in reversed(parse_events(result.stdout)):
             pubkey = str(event.get("pubkey") or "")
-            if re.fullmatch(r"[0-9a-fA-F]{64}", pubkey):
+            if re.fullmatch(r"[0-9a-fA-F]{64}", pubkey) and adapter.verify(event):
                 return pubkey.lower()
-    return pubkey_for_secret(secret)
+    detail = result.stderr.strip() if result.returncode else "invalid signed probe"
+    raise WorktreeGuardError(f"Could not derive a Nostr identity with nak: {detail}")
 
 
 def parse_events(raw: str) -> list[dict[str, Any]]:
@@ -185,7 +209,7 @@ def publish_pairing_event(secret: str, payload: dict[str, Any]) -> None:
         secret=secret,
         tags=[
             ["p", payload["laptop_pubkey"]],
-            ["h", PRODUCT],
+            ["h", payload["group_id"]],
             ["product", PRODUCT],
         ],
         content={
@@ -218,7 +242,9 @@ def valid_pairing_event(
         return False
     if not has_tag(event, "p", laptop_pubkey):
         return False
-    if not has_tag(event, "h", PRODUCT) or not has_tag(event, "product", PRODUCT):
+    if not has_tag(event, "h", str(offer.get("group_id") or "")):
+        return False
+    if not has_tag(event, "product", PRODUCT):
         return False
     from .remote_events import event_content
 
@@ -234,11 +260,34 @@ def valid_pairing_event(
 def pair_status() -> dict[str, Any]:
     state = load_state()
     remote = state.get("remote", {})
+    backend = remote.get("backend", {})
+    safe_backend = {"pubkey": backend.get("pubkey", "")} if isinstance(backend, dict) else {}
+    offers = remote.get("pair_offers", {})
+    safe_offers = {
+        key: {field: value for field, value in offer.items() if field != "secret"}
+        for key, offer in offers.items()
+        if isinstance(offer, dict)
+    } if isinstance(offers, dict) else {}
     return {
-        "backend": remote.get("backend", {}),
+        "backend": safe_backend,
         "approved_peers": remote.get("approved_peers", {}),
-        "pair_offers": remote.get("pair_offers", {}),
+        "pair_offers": safe_offers,
     }
+
+
+def publish_group_event(
+    secret: str,
+    relay: str,
+    kind: int,
+    tags: list[list[str]],
+) -> bool:
+    """Try NIP-29 administration without requiring a NIP-29 relay."""
+    event = signed_event(kind=kind, secret=secret, tags=tags, content={})
+    try:
+        transport().publish(relay, event)
+    except WorktreeGuardError:
+        return False
+    return True
 
 
 def revoke_peer(pubkey: str) -> bool:
