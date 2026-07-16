@@ -31,11 +31,13 @@ extension PlaybackController {
         if currentItem != nil {
             finishCurrentForReplacement()
         }
-        if pendingQuestionQueueHoldID != item.id {
-            pendingQuestionQueueHoldID = nil
+        if visibleAskQueueHoldID != item.id {
+            visibleAskQueueHoldID = nil
         }
 
-        let requested = item.status == .queued ? item : item.requeuedForReplay()
+        let requested = item.status == .queued
+            ? item
+            : item.requeuedForReplay(startingAt: item.playbackOffset)
         do {
             try store.save(requested)
             replaceItem(requested)
@@ -105,7 +107,7 @@ extension PlaybackController {
             let updated = try store.setArchived(archived, id: item.id, actor: "tts-menu")
             replaceItem(updated)
             if archived {
-                releasePendingQuestionQueueHold(for: item.id)
+                clearVisibleAskQueueHold(for: item.id)
             }
         } catch {
             NSLog("Unable to update TTS archive state: %@", error.localizedDescription)
@@ -121,7 +123,7 @@ extension PlaybackController {
                 interaction: suggestionIndex == nil ? "freeform" : "suggestion"
             )
             replaceItem(updated)
-            releasePendingQuestionQueueHold(for: item.id)
+            clearVisibleAskQueueHold(for: item.id)
         } catch {
             NSLog("Unable to answer TTS question: %@", error.localizedDescription)
             refresh()
@@ -136,7 +138,7 @@ extension PlaybackController {
                 actor: "tts-menu"
             )
             replaceItem(updated)
-            releasePendingQuestionQueueHold(for: item.id)
+            clearVisibleAskQueueHold(for: item.id)
         } catch {
             NSLog("Unable to submit TTS question bundle: %@", error.localizedDescription)
             refresh()

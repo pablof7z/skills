@@ -96,46 +96,34 @@ struct AskAttentionTests {
     }
 
     @Test
-    func completedAskHoldsSpeechQueueUntilItIsResolved() throws {
+    func completedVisibleAskHoldsSpeechQueueUntilItCloses() throws {
         let context = makeContext(outputIsMuted: false)
         defer { context.cleanup() }
-        try FileManager.default.createDirectory(
-            at: context.directory,
-            withIntermediateDirectories: true
-        )
-        let questionAudio = context.directory.appendingPathComponent("question.caf")
-        let nextAudio = context.directory.appendingPathComponent("next.caf")
-        try writeSilentAudio(to: questionAudio)
-        try writeSilentAudio(to: nextAudio)
-        var question = pendingQuestion(id: "question")
-        question.outputFile = questionAudio.path
-        question.status = .playing
-        var next = QueueStoreTests().item(id: "next", createdAt: 20, outputFile: nextAudio.path)
-        next.status = .queued
-        try context.controller.store.save(question)
-        try context.controller.store.save(next)
-        context.controller.items = [question, next]
-        context.controller.currentItemID = question.id
+        let (question, next) = try prepareQuestionQueue(in: context)
+        context.controller.setVisibleAskQueueHold(question.id)
 
         context.controller.finishCurrent(success: true, error: nil)
         context.controller.refresh()
 
         #expect(context.controller.currentItem == nil)
-        #expect(context.controller.pendingQuestionQueueHoldID == question.id)
+        #expect(context.controller.visibleAskQueueHoldID == question.id)
 
-        try context.controller.store.save(question.requeuedForReplay())
-        context.controller.refresh()
-        #expect(context.controller.currentItem?.id == question.id)
-        context.controller.finishCurrentForReplacement()
+        context.controller.setVisibleAskQueueHold(nil)
 
-        var resolved = try #require(try context.controller.store.item(id: question.id))
-        resolved.questionStatus = .answered
-        try context.controller.store.save(resolved)
-        context.controller.refresh()
-
-        #expect(context.controller.pendingQuestionQueueHoldID == nil)
+        #expect(context.controller.visibleAskQueueHoldID == nil)
         #expect(context.controller.currentItem?.id == next.id)
-        context.controller.shutdown()
+    }
+
+    @Test
+    func completedAskInHistoryDoesNotHoldSpeechQueue() throws {
+        let context = makeContext(outputIsMuted: false)
+        defer { context.cleanup() }
+        let (_, next) = try prepareQuestionQueue(in: context)
+
+        context.controller.finishCurrent(success: true, error: nil)
+
+        #expect(context.controller.visibleAskQueueHoldID == nil)
+        #expect(context.controller.currentItem?.id == next.id)
     }
 
     @Test
@@ -153,6 +141,23 @@ struct AskAttentionTests {
         item.kind = .question
         item.questionStatus = .pending
         return item
+    }
+
+    private func prepareQuestionQueue(in context: TestContext) throws -> (TTSItem, TTSItem) {
+        try FileManager.default.createDirectory(at: context.directory, withIntermediateDirectories: true)
+        let questionAudio = context.directory.appendingPathComponent("question.caf")
+        let nextAudio = context.directory.appendingPathComponent("next.caf")
+        try writeSilentAudio(to: questionAudio)
+        try writeSilentAudio(to: nextAudio)
+        var question = pendingQuestion(id: "question")
+        question.outputFile = questionAudio.path
+        question.status = .playing
+        let next = QueueStoreTests().item(id: "next", createdAt: 20, outputFile: nextAudio.path)
+        try context.controller.store.save(question)
+        try context.controller.store.save(next)
+        context.controller.items = [question, next]
+        context.controller.currentItemID = question.id
+        return (question, next)
     }
 
     private func makeContext(outputIsMuted: Bool = true) -> TestContext {

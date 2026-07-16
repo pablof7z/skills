@@ -275,42 +275,6 @@ extension QueueStoreTests {
     }
 
     @Test @MainActor
-    func hoverDeferralHoldsAndThenContinuesThePlaybackQueue() throws {
-        let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audio = directory.appendingPathComponent("silence.wav")
-        try writeSilentAudio(to: audio)
-        let store = QueueStore(stateDirectory: directory)
-        let first = item(id: "first", createdAt: 10, outputFile: audio.path)
-        let second = item(id: "second", createdAt: 20, outputFile: audio.path)
-        try store.save(first)
-        try store.save(second)
-        let controller = PlaybackController(
-            store: store,
-            mediaController: disabledMediaController(stateDirectory: directory),
-            outputIsMuted: { false }
-        )
-        defer { controller.shutdown() }
-
-        controller.setAutomaticQueueAdvanceDeferred(true)
-        controller.start()
-        #expect(controller.currentItem == nil)
-        #expect(controller.nextQueuedItem?.id == first.id)
-
-        controller.setAutomaticQueueAdvanceDeferred(false)
-        #expect(controller.currentItem?.id == first.id)
-
-        controller.setAutomaticQueueAdvanceDeferred(true)
-        controller.audioPlayerDidFinishPlaying(AVAudioPlayer(), successfully: true)
-        #expect(controller.currentItem == nil)
-        #expect(controller.nextQueuedItem?.id == second.id)
-
-        controller.setAutomaticQueueAdvanceDeferred(false)
-        #expect(controller.currentItem?.id == second.id)
-    }
-
-    @Test @MainActor
     func explicitPlaybackRecordsDirectInteractionEvidence() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

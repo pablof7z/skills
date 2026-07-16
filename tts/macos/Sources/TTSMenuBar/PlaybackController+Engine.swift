@@ -27,9 +27,9 @@ extension PlaybackController {
             let itemsChangeToken = try store.itemsChangeToken()
             let shouldReloadItems = itemsChangeToken != lastItemsChangeToken
             let loaded = shouldReloadItems ? try store.loadItems() : items
-            if let heldID = pendingQuestionQueueHoldID,
+            if let heldID = visibleAskQueueHoldID,
                loaded.first(where: { $0.id == heldID })?.isPendingQuestion != true {
-                pendingQuestionQueueHoldID = nil
+                visibleAskQueueHoldID = nil
             }
             lastItemsChangeToken = itemsChangeToken
             let historyChanged = shouldReloadItems && loaded != items
@@ -50,11 +50,20 @@ extension PlaybackController {
                 if abs(duration - nextDuration) > 0.001 {
                     duration = nextDuration
                 }
-            } else if !isPlaybackBlocked, !isAutomaticQueueAdvanceDeferred {
-                if let heldID = pendingQuestionQueueHoldID,
+                if currentItem?.status == .paused,
+                   automaticallyPausedItemID == nil,
+                   visibleAskQueueHoldID == nil,
+                   !isPlaybackBlocked,
+                   let next = Self.nextQueuedItem(in: loaded)
+                {
+                    parkPausedCurrentForQueueAdvance()
+                    play(next)
+                }
+            } else if !isPlaybackBlocked {
+                if let heldID = visibleAskQueueHoldID,
                    let replay = loaded.first(where: { $0.id == heldID && $0.status == .queued }) {
                     play(replay)
-                } else if pendingQuestionQueueHoldID == nil,
+                } else if visibleAskQueueHoldID == nil,
                           let next = Self.nextQueuedItem(in: loaded) {
                     play(next)
                 }

@@ -35,8 +35,7 @@ extension PlaybackController {
         duration = 0
         replaceItem(item)
 
-        if item.isPendingQuestion {
-            pendingQuestionQueueHoldID = item.id
+        if item.isPendingQuestion, visibleAskQueueHoldID == item.id {
             mediaController.scheduleResume(after: mediaController.mediaResumeDelay) { [weak self] in
                 self?.mediaResumeAllowed() ?? false
             }
@@ -75,8 +74,34 @@ extension PlaybackController {
         guard let persisted = try? store.loadItems() else { return false }
         return !persisted.contains { item in
             item.status == .playing
-                || (item.status == .queued && pendingQuestionQueueHoldID == nil)
+                || (item.status == .queued && visibleAskQueueHoldID == nil)
         }
+    }
+
+    func parkPausedCurrentForQueueAdvance() {
+        guard var item = currentItem, item.status == .paused, let player else { return }
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        let offset = player.currentTime
+        player.stop()
+        item.status = .interrupted
+        item.playbackOffset = offset
+        item.completedAt = Int64(Date().timeIntervalSince1970)
+        item.duration = player.duration
+        item.error = nil
+        if !item.isAttachmentPlayback {
+            item.isUnheard = true
+        }
+        finalizeEngagement(on: &item)
+        try? store.save(item)
+
+        self.player = nil
+        isAudioPlaying = false
+        currentItemID = nil
+        automaticallyPausedItemID = nil
+        currentTime = 0
+        duration = 0
+        replaceItem(item)
     }
 
     func finishCurrentForReplacement() {
