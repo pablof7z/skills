@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -41,7 +42,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     publish = subparsers.add_parser("publish-nak", help="Publish a raw event through nak")
     publish.add_argument("--relay-url", required=True)
-    publish.add_argument("--nsec", required=True)
     publish.add_argument("--nak-path", default="nak")
     publish.add_argument("event_json")
     publish.set_defaults(func=cmd_publish_nak)
@@ -80,7 +80,13 @@ def cmd_publish_nak(args: argparse.Namespace) -> int:
         event = json.loads(args.event_json)
     except json.JSONDecodeError as error:
         raise RemoteHumanError("invalid_event", "event_json must be valid JSON.") from error
-    transport = NakTransport(relay_url=args.relay_url, nsec=args.nsec, nak_path=args.nak_path)
+    nsec = os.environ.get("NOSTR_SECRET_KEY")
+    if not nsec:
+        raise RemoteHumanError(
+            "missing_secret",
+            "Set NOSTR_SECRET_KEY in the environment before publishing with nak.",
+        )
+    transport = NakTransport(relay_url=args.relay_url, nsec=nsec, nak_path=args.nak_path)
     print(json.dumps(transport.publish(event), sort_keys=True))
     return 0
 

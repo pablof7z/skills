@@ -28,7 +28,7 @@ class LaptopEndpoint:
         return PairingCode(
             version=PAIRING_VERSION,
             product=self.product,
-            relay_url=self.relay_url,
+            relay=self.relay_url,
             laptop_pubkey=self.pubkey,
             pairing_id=pairing_id,
             expires_at=int(self.now()) + expires_in,
@@ -49,6 +49,7 @@ class LaptopEndpoint:
         state["approved_backends"][backend_pubkey] = {
             "product": code.product,
             "relay_url": code.relay_url,
+            "laptop_pubkey": code.laptop_pubkey,
             "approved_at": int(self.now()),
             "pairing_id": code.pairing_id,
             "group": group_for(code.product, code.pairing_id),
@@ -63,6 +64,7 @@ class LaptopEndpoint:
             raise RemoteHumanError("backend_not_approved", "Request came from an unapproved backend.")
         if backend.get("revoked_at") is not None:
             raise RemoteHumanError("backend_revoked", "Request came from a revoked backend.")
+        _validate_request_event(event, backend=backend, laptop_pubkey=self.pubkey)
         if event["id"] not in state["seen_events"]:
             state["seen_events"].append(event["id"])
             self.state.save(state)
@@ -77,7 +79,7 @@ class LaptopEndpoint:
             "kind": GROUP_MESSAGE_KIND,
             "pubkey": self.pubkey,
             "content": content,
-            "tags": [["e", request_id], ["p", request["pubkey"]]],
+            "tags": [["e", request_id], ["p", request["pubkey"]], ["h", _tag_value(request, "h")]],
             "created_at": int(self.now()),
         }
         event["id"] = _stable_event_id(event)
@@ -109,6 +111,14 @@ class BackendEndpoint:
 
     def publish_pairing_request(self, code: PairingCode) -> dict[str, Any]:
         _validate_pairing(code, product=self.product, now=int(self.now()))
+        state = self.state.load()
+        state.setdefault("backend", {}).setdefault("pairings", {})[self.product] = {
+            "relay_url": code.relay_url,
+            "laptop_pubkey": code.laptop_pubkey,
+            "pairing_id": code.pairing_id,
+            "group": group_for(code.product, code.pairing_id),
+        }
+        self.state.save(state)
         self.transport.publish({
             "kind": 0,
             "pubkey": self.pubkey,
@@ -126,11 +136,12 @@ class BackendEndpoint:
         })
 
     def send_request(self, content: str, request_id: str) -> dict[str, Any]:
+        pairing = self._current_pairing()
         event = {
             "kind": GROUP_MESSAGE_KIND,
             "pubkey": self.pubkey,
             "content": content,
-            "tags": [["d", request_id]],
+            "tags": [["d", request_id], ["p", pairing["laptop_pubkey"]], ["h", pairing["group"]["id"]]],
             "created_at": int(self.now()),
         }
         event["id"] = _stable_event_id(event)
@@ -143,15 +154,19 @@ class BackendEndpoint:
         seen: set[str] = set()
         while True:
             target_ids = self._request_event_ids(request_id)
+            state = self.state.load()
             replies = []
-            for event in self.transport.query({"kind": GROUP_MESSAGE_KIND}):
+            for event in self.transport.query({"kind": GROUP_MESSAGE_KIND, "#e": target_ids, "limit": 100}):
                 if not any(["e", target_id] in event.get("tags", []) for target_id in target_ids):
                     continue
-                if event["id"] in seen:
+                self._validate_reply(event, target_ids=target_ids)
+                if event["id"] in seen or event["id"] in state["seen_replies"]:
                     continue
                 seen.add(event["id"])
+                state["seen_replies"].append(event["id"])
                 replies.append(event)
             if replies:
+                self.state.save(state)
                 return replies
             if time.monotonic() >= deadline:
                 raise RemoteHumanError("timeout", "Timed out waiting for a remote human reply.", {"request_id": request_id})
@@ -164,6 +179,23 @@ class BackendEndpoint:
             if ["d", request_id] in event.get("tags", [])
         ]
         return ids or [request_id]
+
+    def _current_pairing(self) -> dict[str, Any]:
+        pairing = self.state.load().get("backend", {}).get("pairings", {}).get(self.product)
+        if not pairing:
+            raise RemoteHumanError("pairing_required", "Backend must be paired before sending requests.")
+        return pairing
+
+    def _validate_reply(self, event: dict[str, Any], *, target_ids: list[str]) -> None:
+        pairing = self._current_pairing()
+        if event.get("pubkey") != pairing["laptop_pubkey"]:
+            raise RemoteHumanError("reply_author_mismatch", "Reply came from an unexpected laptop author.")
+        if _tag_value(event, "p") != self.pubkey:
+            raise RemoteHumanError("target_mismatch", "Reply is not targeted to this backend.")
+        if _tag_value(event, "h") != pairing["group"]["id"]:
+            raise RemoteHumanError("group_mismatch", "Reply is for a different product group.")
+        if _tag_value(event, "e") not in target_ids:
+            raise RemoteHumanError("correlation_mismatch", "Reply does not reference the request event.")
 
     def _load_or_create_identity(self) -> dict[str, str]:
         state = self.state.load()
@@ -200,3 +232,21 @@ def _stable_event_id(event: dict[str, Any]) -> str:
     from .transport import event_id
 
     return event_id(event)
+
+
+def _validate_request_event(event: dict[str, Any], *, backend: dict[str, Any], laptop_pubkey: str) -> None:
+    if event.get("kind") != GROUP_MESSAGE_KIND:
+        raise RemoteHumanError("kind_mismatch", "Request is not a kind:9 group message.")
+    if _tag_value(event, "p") != laptop_pubkey:
+        raise RemoteHumanError("target_mismatch", "Request is not targeted to this laptop.")
+    if _tag_value(event, "h") != backend["group"]["id"]:
+        raise RemoteHumanError("group_mismatch", "Request is for a different product group.")
+    if not _tag_value(event, "d"):
+        raise RemoteHumanError("correlation_missing", "Request is missing its correlation tag.")
+
+
+def _tag_value(event: dict[str, Any], name: str) -> str | None:
+    for tag in event.get("tags", []):
+        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name:
+            return str(tag[1])
+    return None

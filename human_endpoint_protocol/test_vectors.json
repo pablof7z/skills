@@ -2,7 +2,7 @@
   "pairing_code_v1": {
     "version": 1,
     "product": "tts",
-    "relay_url": "ws://relay.test",
+    "relay": "ws://relay.test",
     "laptop_pubkey": "laptop-pub",
     "pairing_id": "pair-1",
     "expires_at": 1800000060,
@@ -11,11 +11,11 @@
   "nip29_request": {
     "kind": 9,
     "content": "Approve?",
-    "tags": [["d", "req-1"], ["p", "laptop-pub"]]
+    "tags": [["d", "req-1"], ["p", "laptop-pub"], ["h", "tts:pair-1"]]
   },
   "nip29_reply": {
     "kind": 9,
     "content": "Approved",
-    "tags": [["e", "request-event-id"], ["p", "backend-pub"]]
+    "tags": [["e", "request-event-id"], ["p", "backend-pub"], ["h", "tts:pair-1"]]
   }
 }

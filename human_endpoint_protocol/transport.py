@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -39,9 +40,17 @@ class FakeRelayTransport:
         authors = set(filters.get("authors", []))
         if authors:
             result = [event for event in result if event.get("pubkey") in authors]
-        tagged_event = filters.get("#e")
-        if tagged_event:
-            result = [event for event in result if ["e", tagged_event] in event.get("tags", [])]
+        for key, value in filters.items():
+            if key.startswith("#") and value:
+                values = value if isinstance(value, list) else [value]
+                result = [
+                    event
+                    for event in result
+                    if any([key[1:], tag_value] in event.get("tags", []) for tag_value in values)
+                ]
+        limit = filters.get("limit")
+        if limit is not None:
+            result = result[: int(limit)]
         return result
 
     def generate_secret_key(self) -> str:
@@ -72,8 +81,6 @@ class NakTransport:
             )
         command = [
             nak,
-            "--sec",
-            self.nsec,
             "event",
             "--kind",
             str(event["kind"]),
@@ -83,7 +90,7 @@ class NakTransport:
         for tag in event.get("tags", []):
             command.extend(["--tag", format_nak_tag(tag)])
         command.append(self.relay_url)
-        completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        completed = self._run(command, secret_key=self.nsec)
         if completed.returncode != 0:
             raise RemoteHumanError(
                 "transport_publish_failed",
@@ -97,15 +104,46 @@ class NakTransport:
             published.setdefault("id", event_id(published))
             return published
 
+    def query(self, filters: dict[str, Any]) -> list[dict[str, Any]]:
+        nak = shutil.which(self.nak_path)
+        if nak is None:
+            raise RemoteHumanError(
+                "missing_dependency",
+                f"Cannot query Nostr events because nak is not installed or not executable: {self.nak_path}",
+                {"dependency": "nak", "path": self.nak_path},
+            )
+        if not self.relay_url:
+            raise RemoteHumanError("transport_not_configured", "NakTransport requires relay_url before querying.")
+        command = [nak, "req", "--limit", str(int(filters.get("limit", 100)))]
+        if "kind" in filters:
+            command.extend(["--kind", str(filters["kind"])])
+        for author in filters.get("authors", []):
+            command.extend(["--author", str(author)])
+        for key, value in filters.items():
+            if not key.startswith("#") or not value:
+                continue
+            values = value if isinstance(value, list) else [value]
+            for tag_value in values:
+                command.extend(["--tag", f"{key[1:]}={tag_value}"])
+        command.append(self.relay_url)
+        completed = self._run(command)
+        if completed.returncode != 0:
+            raise RemoteHumanError(
+                "transport_query_failed",
+                "nak failed to query Nostr events.",
+                {"stderr": completed.stderr.strip()},
+            )
+        return parse_nak_events(completed.stdout)
+
     def generate_secret_key(self) -> str:
         completed = self._run_key_command(["key", "generate"])
         return completed.stdout.strip()
 
     def public_key_for_secret(self, secret_key: str) -> str:
-        completed = self._run_key_command(["key", "public", secret_key])
+        completed = self._run_key_command(["key", "public"], secret_key=secret_key)
         return completed.stdout.strip()
 
-    def _run_key_command(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    def _run_key_command(self, arguments: list[str], *, secret_key: str | None = None) -> subprocess.CompletedProcess[str]:
         nak = shutil.which(self.nak_path)
         if nak is None:
             raise RemoteHumanError(
@@ -113,13 +151,7 @@ class NakTransport:
                 f"Cannot manage Nostr keys because nak is not installed or not executable: {self.nak_path}",
                 {"dependency": "nak", "path": self.nak_path},
             )
-        completed = subprocess.run(
-            [nak, *arguments],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        completed = self._run([nak, *arguments], secret_key=secret_key)
         if completed.returncode != 0:
             raise RemoteHumanError(
                 "transport_key_failed",
@@ -127,6 +159,19 @@ class NakTransport:
                 {"stderr": completed.stderr.strip()},
             )
         return completed
+
+    def _run(self, command: list[str], *, secret_key: str | None = None) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        if secret_key is not None:
+            env["NOSTR_SECRET_KEY"] = secret_key
+        return subprocess.run(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=env,
+        )
 
 
 def format_nak_tag(tag: list[Any]) -> str:
@@ -150,3 +195,53 @@ def event_id(event: dict[str, Any]) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def parse_nak_events(raw: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    stripped = raw.strip()
+    if not stripped:
+        return events
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        candidates = parsed
+    elif isinstance(parsed, dict):
+        candidates = [parsed]
+    else:
+        candidates = []
+        for line in stripped.splitlines():
+            try:
+                candidates.append(json.loads(line))
+            except json.JSONDecodeError as error:
+                raise RemoteHumanError(
+                    "transport_invalid_event",
+                    "nak returned a line that is not valid JSON.",
+                    {"line": line},
+                ) from error
+    for candidate in candidates:
+        events.append(_validate_raw_event(candidate))
+    return events
+
+
+def _validate_raw_event(candidate: Any) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        raise RemoteHumanError("transport_invalid_event", "nak returned a non-object event.")
+    required = {"id": str, "kind": int, "pubkey": str, "content": str, "tags": list, "created_at": int, "sig": str}
+    for key, expected in required.items():
+        if not isinstance(candidate.get(key), expected):
+            raise RemoteHumanError(
+                "transport_invalid_event",
+                "nak returned an event with missing or invalid fields.",
+                {"field": key},
+            )
+    for tag in candidate["tags"]:
+        if not isinstance(tag, list) or not tag or not all(isinstance(part, str) for part in tag):
+            raise RemoteHumanError(
+                "transport_invalid_event",
+                "nak returned an event with invalid tags.",
+                {"event_id": candidate["id"]},
+            )
+    return dict(candidate)

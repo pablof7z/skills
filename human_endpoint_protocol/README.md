@@ -18,7 +18,7 @@ pairing code with:
 
 - `version`
 - `product`
-- `relay_url`
+- `relay`
 - `laptop_pubkey`
 - `pairing_id`
 - `expires_at`
@@ -29,21 +29,24 @@ identity, publishes kind:0 metadata named like `<hostname> <product> daemon`,
 and publishes a signed ephemeral pairing request containing the raw one-use
 secret. The laptop validates version, product, expiry, pairing id, and secret,
 consumes the pairing once, then persists the backend identity and NIP-29 group
-configuration.
+configuration. Readers may accept the historical `relay_url` alias for
+backward compatibility, but executable vectors serialize only `relay`.
 
 ## Messages
 
 Ordinary requests and replies are kind:9 NIP-29 group messages. Requests carry
-product correlation tags such as `["d", "<request id>"]` and p-tags for the
-intended endpoint. Replies e-tag the signed request event id and p-tag the
-backend. Duplicate request and reply events are idempotent.
+`d` correlation tags, `p` tags for the intended laptop, and `h` tags for the
+product group. Replies `e`-tag the signed request event id, `p`-tag the backend,
+and repeat the `h` product group. Consumers validate approved author, target,
+product group, correlation, and replay before acting.
 
 ## Operations
 
 Durable state is JSON-backed. Waits must be bounded. Revoked backends are
 rejected before request handling. Transport errors are structured JSON errors.
-The deterministic fake relay is for tests only; real publishing is provided by
-the thin `nak` adapter.
+The deterministic fake relay is for tests only; real publishing and querying are
+provided by the thin `nak` adapter. `nak` signing reads `NOSTR_SECRET_KEY` from
+the environment; the shared CLI does not accept nsec values on argv.
 
 Run the shared vectors:
 
