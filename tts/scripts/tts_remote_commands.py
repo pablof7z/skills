@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from tts_remote_daemon import process_events
+from tts_remote_listener import daemon_run
 from tts_pair_token import (
     PAIRING_KIND,
     PairTokenError,
@@ -22,8 +22,8 @@ from tts_pair_token import (
 )
 from tts_remote_channel import channel_parts
 from tts_remote_config import remote_config, save_remote_config
-from tts_remote_groups import reconcile_paired_channels, request_group_creation, wait_for_group_admin
-from tts_remote_profile import profile_refresh_interval, publish_endpoint_profile, refresh_peer_profiles
+from tts_remote_groups import request_group_creation, wait_for_group_admin
+from tts_remote_profile import publish_endpoint_profile
 from tts_remote_signing import signed_event
 from tts_remote_state import (
     ensure_backend,
@@ -246,51 +246,3 @@ def wait_for_exit(pid: int, timeout: float = 5.0) -> None:
         if not pid_alive(pid):
             return
         time.sleep(0.05)
-
-
-def daemon_run(args) -> int:
-    laptop = ensure_laptop_identity()
-    publish_laptop_profiles(laptop, force=True)
-    write_json(remote_dir() / "daemon.json", {"running": True, "pid": os.getpid(), "started_at": int(time.time())})
-    processed = 0
-    deadline = time.monotonic() + args.wait_seconds if args.wait_seconds is not None else None
-    next_profile_refresh = 0.0
-    next_channel_reconcile = 0.0
-    try:
-        while True:
-            if time.monotonic() >= next_channel_reconcile:
-                try:
-                    reconcile_paired_channels(laptop, peers())
-                except RuntimeError:
-                    next_channel_reconcile = time.monotonic() + 5
-                else:
-                    next_channel_reconcile = time.monotonic() + channel_reconcile_interval()
-            if time.monotonic() >= next_profile_refresh:
-                publish_laptop_profiles(laptop)
-                refresh_peer_profiles()
-                next_profile_refresh = time.monotonic() + profile_refresh_interval()
-            processed += process_events(args, laptop)
-            if args.once or (deadline is not None and time.monotonic() >= deadline):
-                break
-            time.sleep(0.25)
-        return emit({"status": "idle", "processed": min(processed, args.max_events)})
-    finally:
-        write_json(remote_dir() / "daemon.json", {"running": False, "pid": os.getpid(), "stopped_at": int(time.time())})
-
-
-def publish_laptop_profiles(laptop: dict[str, object], *, force: bool = False) -> None:
-    relays = {str(remote_config()["relay"])}
-    relays.update(
-        str(peer.get("relay") or "")
-        for peer in peers()
-        if peer.get("approved") and not peer.get("revoked_at")
-    )
-    for relay in relays:
-        publish_endpoint_profile(laptop, relay, force=force)
-
-
-def channel_reconcile_interval() -> float:
-    try:
-        return max(5.0, float(os.environ.get("TTS_CHANNEL_RECONCILE_SECONDS", "60")))
-    except ValueError:
-        return 60.0

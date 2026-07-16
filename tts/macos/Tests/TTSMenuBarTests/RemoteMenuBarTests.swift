@@ -104,6 +104,25 @@ struct RemoteMenuBarTests {
     }
 
     @Test
+    func listenerCanStartWhenThePlayerOpensWithoutCreatingAnOffer() throws {
+        let runner = RecordingRemoteCommandRunner(responses: [
+            ["daemon", "status"]: Data(#"{"running":false}"#.utf8),
+            ["daemon", "start"]: Data(#"{"status":"started","pid":10}"#.utf8),
+        ])
+        let service = RemotePairingService(
+            stateDirectory: URL(fileURLWithPath: "/tmp/tts-test"),
+            commandRunner: runner
+        )
+
+        try service.ensureListenerRunning()
+
+        #expect(runner.commands == [
+            ["daemon", "status"],
+            ["daemon", "start"],
+        ])
+    }
+
+    @Test
     func pairingConfigurationLoadsSavedRelayAndChannel() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
