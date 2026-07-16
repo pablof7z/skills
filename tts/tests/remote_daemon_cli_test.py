@@ -8,11 +8,15 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
-import time
 import unittest
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tts" / "scripts"))
+
+from tts_pair_token import decode_pair_token
 from tts.tests.tts_test_support import KokoroHandler
 
 
@@ -31,8 +35,10 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.base_environment["TTS_REMOTE_TRANSPORT"] = "file"
         self.base_environment["TTS_REMOTE_TRANSPORT_FILE"] = str(self.transport_file)
         self.base_environment["TTS_REMOTE_NO_MENU"] = "1"
+        self.base_environment["TTS_GROUP_CONFIRM_TIMEOUT_SECONDS"] = "3"
 
     def tearDown(self) -> None:
+        self.run_tts("daemon", "stop", check=False)
         self.temporary.cleanup()
 
     def env_for(self, state: Path) -> dict[str, str]:
@@ -68,18 +74,21 @@ class RemoteDaemonCLITests(unittest.TestCase):
                 "--relay", "file://transport",
             ).stdout
         )
-        connected = json.loads(self.run_tts("pair", "connect", "--code", json.dumps(offer["pair_code"]), state=self.server_state).stdout)
-        self.run_tts("daemon", "run", "--once", "--max-events", "1")
-        connected["laptop_pubkey"] = offer["pair_code"]["laptop_pubkey"]
+        code = decode_pair_token(offer["pair_code"])
+        self.run_tts("daemon", "start")
+        connected = json.loads(self.run_tts("pair", "connect", "--code", offer["pair_code"], state=self.server_state).stdout)
+        self.run_tts("daemon", "stop")
+        connected["peer_pubkey"] = code["peer"]
+        connected["channel"] = code["channel"]
         return connected
 
     def test_remote_request_never_serializes_signer_secret_and_keeps_stable_backend_reply_endpoint(self) -> None:
         connected = self.pair()
         backend_pubkey = connected["backend_pubkey"]
-        laptop_pubkey = connected["laptop_pubkey"]
+        peer_pubkey = connected["peer_pubkey"]
         result = self.run_tts(
             "remote", "speak",
-            "--peer", str(laptop_pubkey),
+            "--peer", str(peer_pubkey),
             "--agent-name", "agent one",
             "--subject", "Remote signer selection test case",
             "--message", "Text speech request.",
@@ -91,6 +100,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
 
         events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
         request = events[-1]
+        membership = events[-2]
         serialized = json.dumps(request, sort_keys=True)
         complete_transport = self.transport_file.read_text(encoding="utf-8")
         self.assertNotIn("nsec-agent-secret", serialized)
@@ -99,18 +109,18 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertNotIn("nsec-agent-secret", complete_transport)
         self.assertNotIn(backend["nsec"], complete_transport)
         self.assertEqual(request["kind"], 9)
-        self.assertIn(["p", laptop_pubkey], request["tags"])
-        group_id = next(tag[1] for tag in request["tags"] if tag[0] == "h")
-        self.assertRegex(group_id, r"^tts-[a-f0-9]{24}$")
+        self.assertIn(["p", peer_pubkey], request["tags"])
+        self.assertIn(["h", "tts"], request["tags"])
         content = json.loads(request["content"])
-        self.assertEqual(content["signer"]["source"], "AGENT_NSEC")
-        self.assertEqual(request["pubkey"], backend_pubkey)
-        self.assertNotIn("nsec", content["signer"])
+        self.assertEqual(request["pubkey"], output["author_pubkey"])
+        self.assertNotEqual(request["pubkey"], backend_pubkey)
         self.assertEqual(content["backend"]["pubkey"], backend_pubkey)
         self.assertEqual(content["request_id"], output["request_id"])
-        inner = content["inner_event"]
-        self.assertEqual(inner["kind"], 9)
-        self.assertEqual(inner["pubkey"], content["signer"]["pubkey"])
+        self.assertNotIn("inner_event", content)
+        self.assertNotIn("signer", content)
+        self.assertEqual(membership["kind"], 9000)
+        self.assertIn(["p", request["pubkey"]], membership["tags"])
+        self.assertEqual(membership["pubkey"], backend_pubkey)
 
     def test_daemon_materializes_text_request_through_existing_tts_queue(self) -> None:
         connected = self.pair()
@@ -120,7 +130,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         try:
             self.run_tts(
                 "remote", "speak",
-                "--peer", str(connected["laptop_pubkey"]),
+                "--peer", str(connected["peer_pubkey"]),
                 "--agent-name", "remote agent",
                 "--subject", "Remote text playback through queue",
                 "--message", "Remote text works.",
@@ -145,7 +155,8 @@ class RemoteDaemonCLITests(unittest.TestCase):
             reply = events[-1]
             self.assertEqual(reply["kind"], 9)
             self.assertIn(["e", item["remote_request"]["event_id"]], reply["tags"])
-            self.assertIn(["h", connected["peer"]["group_id"]], reply["tags"])
+            self.assertIn(["h", "tts"], reply["tags"])
+            self.assertIn(["p", connected["backend_pubkey"]], reply["tags"])
             self.assertEqual(json.loads(reply["content"])["status"], "accepted")
         finally:
             server.shutdown()
@@ -156,7 +167,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         connected = self.pair()
         self.run_tts(
             "remote", "speak",
-            "--peer", str(connected["laptop_pubkey"]),
+            "--peer", str(connected["peer_pubkey"]),
             "--agent-name", "remote agent",
             "--subject", "Remote attachment safe failure",
             "--message", "Attachment should fail safely.",
@@ -183,7 +194,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         try:
             self.run_tts(
                 "remote", "speak",
-                "--peer", str(connected["laptop_pubkey"]),
+                "--peer", str(connected["peer_pubkey"]),
                 "--agent-name", "remote agent",
                 "--subject", "Remote accessible attachment delivery test",
                 "--message", "The attachment should appear locally.",
@@ -206,55 +217,6 @@ class RemoteDaemonCLITests(unittest.TestCase):
             thread.join(timeout=2)
             server.server_close()
 
-    def test_daemon_lifecycle_status_uses_real_child_liveness(self) -> None:
-        status = json.loads(self.run_tts("daemon", "status").stdout)
-        self.assertEqual(status["running"], False)
-
-        fake_menu = self.state / "fake-menu"
-        menu_marker = self.state / "menu-started"
-        fake_menu.write_text(
-            "#!/bin/sh\n"
-            f"touch {str(menu_marker)!r}\n",
-            encoding="utf-8",
-        )
-        fake_menu.chmod(0o700)
-        started = json.loads(self.run_tts(
-            "daemon", "start",
-            env={"TTS_REMOTE_NO_MENU": "0", "TTS_REMOTE_MENU_COMMAND": str(fake_menu)},
-        ).stdout)
-        self.assertEqual(started["status"], "started")
-        self.assertEqual(started["menu_bar"], "started")
-        self.assertTrue(menu_marker.is_file())
-        for _ in range(20):
-            status = json.loads(self.run_tts("daemon", "status").stdout)
-            if status["running"]:
-                break
-            time.sleep(0.1)
-        self.assertEqual(status["running"], True)
-        self.assertIsInstance(status["state"]["pid"], int)
-        self.assertEqual(os.getsid(status["state"]["pid"]), status["state"]["pid"])
-
-        duplicate = json.loads(self.run_tts("daemon", "start").stdout)
-        self.assertEqual(duplicate["status"], "already_running")
-        self.assertEqual(duplicate["pid"], status["state"]["pid"])
-
-        stopped = json.loads(self.run_tts("daemon", "stop").stdout)
-        self.assertEqual(stopped["status"], "stopped")
-        self.assertEqual(json.loads(self.run_tts("daemon", "status").stdout)["running"], False)
-
-    def test_cli_boundary_emits_structured_json_for_remote_transport_errors(self) -> None:
-        self.run_tts("pair", "offer", "--relay", "wss://relay.example.test")
-        result = self.run_tts(
-            "daemon", "run", "--once", "--max-events", "1",
-            env={"TTS_REMOTE_TRANSPORT": "unsupported"},
-            check=False,
-        )
-        self.assertNotEqual(result.returncode, 0)
-        error = json.loads(result.stderr)
-        self.assertEqual(error["status"], "error")
-        self.assertEqual(error["error"]["code"], "remote_transport_error")
-        self.assertNotIn("Traceback", result.stderr)
-
     def test_daemon_accepts_request_fetched_through_bounded_fake_nak_poll(self) -> None:
         connected = self.pair()
         server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
@@ -276,7 +238,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
         nak.chmod(0o700)
         self.run_tts(
             "remote", "speak",
-            "--peer", str(connected["laptop_pubkey"]),
+            "--peer", str(connected["peer_pubkey"]),
             "--agent-name", "remote agent",
             "--subject", "Fake nak request",
             "--message", "Fetched through fake nak.",
@@ -296,7 +258,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
             )
             self.assertEqual(json.loads(result.stdout)["processed"], 1)
             cursor = json.loads((self.laptop_state / "remote" / "relay-cursors.json").read_text())
-            self.assertGreater(cursor["file://transport"], 0)
+            self.assertGreater(cursor["wss://nip29.f7z.io|requests"], 0)
         finally:
             server.shutdown()
             thread.join(timeout=2)

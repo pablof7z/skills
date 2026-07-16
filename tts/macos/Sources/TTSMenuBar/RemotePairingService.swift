@@ -1,6 +1,6 @@
 import Foundation
 
-protocol RemoteCommandRunning: AnyObject {
+protocol RemoteCommandRunning: AnyObject, Sendable {
     func run(arguments: [String], stateDirectory: URL) throws -> Data
 }
 
@@ -25,29 +25,50 @@ struct RemotePairingOffer: Equatable {
     let code: String
 }
 
+struct RemotePairingConfiguration: Decodable, Equatable {
+    var relay: String
+    var channel: String
+
+    init(relay: String = "wss://relay.primal.net", channel: String = "wss://nip29.f7z.io/tts") {
+        self.relay = relay
+        self.channel = channel
+    }
+
+    private enum CodingKeys: String, CodingKey { case relay, channel }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        relay = try values.decodeIfPresent(String.self, forKey: .relay) ?? "wss://relay.primal.net"
+        channel = try values.decodeIfPresent(String.self, forKey: .channel) ?? "wss://nip29.f7z.io/tts"
+    }
+}
+
 struct RemotePairingService {
     let stateDirectory: URL
     let commandRunner: any RemoteCommandRunning
 
-    func createOffer(relay: String) throws -> RemotePairingOffer {
+    func configuration() -> RemotePairingConfiguration {
+        let url = stateDirectory
+            .appendingPathComponent("remote", isDirectory: true)
+            .appendingPathComponent("config.json")
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONDecoder().decode(RemotePairingConfiguration.self, from: data)
+        else { return RemotePairingConfiguration() }
+        return value
+    }
+
+    func createOffer(relay: String, channel: String) throws -> RemotePairingOffer {
         let response = try commandRunner.run(
-            arguments: ["pair", "offer", "--relay", relay],
+            arguments: ["pair", "offer", "--relay", relay, "--channel", channel],
             stateDirectory: stateDirectory
         )
         guard let object = try JSONSerialization.jsonObject(with: response) as? [String: Any],
-              let pairCode = object["pair_code"],
-              JSONSerialization.isValidJSONObject(pairCode) else {
-            throw RemotePairingError.invalidResponse
-        }
-        let encoded = try JSONSerialization.data(
-            withJSONObject: pairCode,
-            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        )
-        guard let code = String(data: encoded, encoding: .utf8) else {
+              let pairCode = object["pair_code"] as? String,
+              !pairCode.isEmpty else {
             throw RemotePairingError.invalidResponse
         }
         try ensureListenerRunning()
-        return RemotePairingOffer(code: code)
+        return RemotePairingOffer(code: pairCode)
     }
 
     private func ensureListenerRunning() throws {
@@ -69,7 +90,7 @@ private struct DaemonStatus: Decodable {
     let running: Bool
 }
 
-final class ShellTTSRemoteCommandRunner: RemoteCommandRunning {
+final class ShellTTSRemoteCommandRunner: RemoteCommandRunning, @unchecked Sendable {
     private let executableURL: URL?
 
     init(
@@ -97,11 +118,20 @@ final class ShellTTSRemoteCommandRunner: RemoteCommandRunning {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationStatus == 0 else {
             let errorData = failure.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: errorData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw RemotePairingError.commandFailed(message ?? "TTS command failed.")
+            throw RemotePairingError.commandFailed(Self.failureMessage(errorData))
         }
         return data
+    }
+
+    static func failureMessage(_ data: Data) -> String {
+        if let response = try? JSONDecoder().decode(CommandFailure.self, from: data) {
+            return [response.error.message, response.error.guidance]
+                .compactMap { $0 }
+                .joined(separator: " ")
+        }
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? "TTS command failed."
     }
 
     private static func locateCommand(
@@ -130,4 +160,16 @@ final class ShellTTSRemoteCommandRunner: RemoteCommandRunning {
         }
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
+}
+
+private struct CommandFailure: Decodable {
+    struct Detail: Decodable {
+        let message: String
+        let guidance: String?
+    }
+    let error: Detail
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

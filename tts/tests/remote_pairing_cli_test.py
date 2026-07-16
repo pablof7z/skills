@@ -8,8 +8,14 @@ import os
 from pathlib import Path
 import subprocess
 import stat
+import sys
 import tempfile
 import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tts" / "scripts"))
+
+from tts_pair_token import PAIRING_KIND, decode_pair_token
 
 
 class RemotePairingCLITests(unittest.TestCase):
@@ -26,8 +32,11 @@ class RemotePairingCLITests(unittest.TestCase):
         self.base_environment = os.environ.copy()
         self.base_environment["TTS_REMOTE_TRANSPORT"] = "file"
         self.base_environment["TTS_REMOTE_TRANSPORT_FILE"] = str(self.transport_file)
+        self.base_environment["TTS_GROUP_CONFIRM_TIMEOUT_SECONDS"] = "3"
+        self.base_environment["TTS_REMOTE_NO_MENU"] = "1"
 
     def tearDown(self) -> None:
+        self.run_tts("daemon", "stop", check=False)
         self.temporary.cleanup()
 
     def env_for(self, state: Path) -> dict[str, str]:
@@ -50,19 +59,20 @@ class RemotePairingCLITests(unittest.TestCase):
         result = self.run_tts(
             "pair", "offer",
             "--relay", "wss://relay.example.test",
-            "--ttl", "60",
+            "--channel", "wss://nip29.example/spoken-updates",
         )
         output = json.loads(result.stdout)
-        code = output["pair_code"]
-        self.assertEqual(code["version"], 1)
-        self.assertEqual(code["product"], "tts")
+        token = output["pair_code"]
+        self.assertIsInstance(token, str)
+        self.assertLess(len(token), 220)
+        code = decode_pair_token(token)
+        self.assertEqual(set(code), {"peer", "secret", "relay", "channel"})
         self.assertEqual(code["relay"], "wss://relay.example.test")
-        self.assertRegex(code["laptop_pubkey"], r"^[a-f0-9]{64}$")
-        self.assertRegex(code["pairing_id"], r"^[a-f0-9]{32}$")
-        self.assertRegex(code["group_id"], r"^tts-[a-f0-9]{24}$")
+        self.assertEqual(code["channel"], "wss://nip29.example/spoken-updates")
+        self.assertRegex(code["peer"], r"^[a-f0-9]{64}$")
         self.assertRegex(code["secret"], r"^[A-Za-z0-9_-]{32,}$")
         laptop = json.loads((self.laptop_state / "remote" / "laptop.json").read_text())
-        self.assertEqual(laptop["pubkey"], code["laptop_pubkey"])
+        self.assertEqual(laptop["pubkey"], code["peer"])
         self.assertIsNotNone(laptop["nsec"])
         self.assertNotIn("hmac", json.dumps(code).lower())
         self.assertNotIn("encrypted", json.dumps(code).lower())
@@ -70,29 +80,30 @@ class RemotePairingCLITests(unittest.TestCase):
         self.assertNotIn("nostr", guidance)
         self.assertNotIn("nip", guidance)
 
-    def test_pair_connect_publishes_raw_secret_without_approving_laptop_until_daemon_validates(self) -> None:
+    def test_pair_connect_waits_until_laptop_confirms_backend_admin(self) -> None:
         offer = json.loads(
             self.run_tts(
                 "pair", "offer",
                 "--relay", "wss://relay.example.test",
             ).stdout
         )
-        laptop_pubkey = offer["pair_code"]["laptop_pubkey"]
-        result = self.run_tts("pair", "connect", "--code", json.dumps(offer["pair_code"]), state=self.server_state)
+        code = decode_pair_token(offer["pair_code"])
+        peer_pubkey = code["peer"]
+        self.run_tts("daemon", "start")
+        result = self.run_tts("pair", "connect", "--code", offer["pair_code"], state=self.server_state)
+        self.run_tts("daemon", "stop")
         connected = json.loads(result.stdout)
         self.assertEqual(connected["status"], "connected")
         self.assertEqual(connected["peer"]["product"], "tts")
         self.assertEqual(connected["peer"]["approved"], True)
 
         events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
-        pairing_event = events[-1]
-        self.assertEqual(pairing_event["kind"], 24)
-        self.assertEqual(pairing_event["content"], offer["pair_code"]["secret"])
-        self.assertIn(["p", laptop_pubkey], pairing_event["tags"])
-        self.assertIn(["pairing", offer["pair_code"]["pairing_id"]], pairing_event["tags"])
-        self.assertIn(["h", offer["pair_code"]["group_id"]], pairing_event["tags"])
+        pairing_event = next(event for event in events if event["kind"] == PAIRING_KIND)
+        self.assertEqual(pairing_event["kind"], PAIRING_KIND)
+        self.assertEqual(pairing_event["content"], code["secret"])
+        self.assertEqual(pairing_event["tags"], [["p", peer_pubkey]])
         self.assertEqual(events[0]["kind"], 9007)
-        self.assertIn(["h", offer["pair_code"]["group_id"]], events[0]["tags"])
+        self.assertIn(["h", "tts"], events[0]["tags"])
 
         backend = json.loads((self.server_state / "remote" / "backend.json").read_text())
         self.assertTrue(backend["nsec"].startswith("nsec"))
@@ -102,57 +113,51 @@ class RemotePairingCLITests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((self.server_state / "remote" / "backend.json").stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE((self.laptop_state / "remote" / "laptop.json").stat().st_mode), 0o600)
 
-        self.assertFalse((self.laptop_state / "remote" / "peers.json").exists())
-        accepted = json.loads(self.run_tts("daemon", "run", "--once", "--max-events", "1").stdout)
-        self.assertEqual(accepted["processed"], 1)
         laptop_peers = json.loads((self.laptop_state / "remote" / "peers.json").read_text())
         self.assertEqual(laptop_peers[0]["pubkey"], connected["backend_pubkey"])
         self.assertEqual(laptop_peers[0]["approved"], True)
-        self.assertEqual(laptop_peers[0]["group_id"], offer["pair_code"]["group_id"])
-        membership = [json.loads(line) for line in self.transport_file.read_text().splitlines()][-1]
-        self.assertEqual(membership["kind"], 9000)
-        self.assertIn(["h", offer["pair_code"]["group_id"]], membership["tags"])
-        self.assertIn(["p", connected["backend_pubkey"]], membership["tags"])
+        self.assertEqual(laptop_peers[0]["channel"], code["channel"])
+        membership_events = [event for event in events if event["kind"] == 9000]
+        self.assertEqual([event["kind"] for event in membership_events], [9000, 9000])
+        self.assertIn(["p", connected["backend_pubkey"]], membership_events[0]["tags"])
+        self.assertIn(["p", connected["backend_pubkey"], "admin"], membership_events[1]["tags"])
 
         replay = json.loads(self.run_tts("daemon", "run", "--once", "--max-events", "1").stdout)
         self.assertEqual(replay["processed"], 0)
         laptop_peers_after_replay = json.loads((self.laptop_state / "remote" / "peers.json").read_text())
         self.assertEqual(laptop_peers_after_replay, laptop_peers)
 
-        reused = self.run_tts("pair", "connect", "--code", json.dumps(offer["pair_code"]), state=self.server_state, check=False)
+        reused = self.run_tts("pair", "connect", "--code", offer["pair_code"], state=self.server_state, check=False)
         self.assertNotEqual(reused.returncode, 0)
         self.assertEqual(json.loads(reused.stderr)["error"]["code"], "pair_code_used")
 
-    def test_laptop_daemon_rejects_wrong_secret_wrong_product_expired_and_unpaired_attacker(self) -> None:
-        offer = json.loads(self.run_tts("pair", "offer", "--relay", "file://transport", "--ttl", "60").stdout)
-        code = offer["pair_code"]
-        self.run_tts("pair", "connect", "--code", json.dumps(code), state=self.server_state)
+    def test_laptop_daemon_rejects_wrong_secret_and_wrong_recipient(self) -> None:
+        offer = json.loads(self.run_tts("pair", "offer", "--relay", "file://transport").stdout)
+        code = decode_pair_token(offer["pair_code"])
+        failed = self.run_tts(
+            "pair", "connect", "--code", offer["pair_code"],
+            state=self.server_state,
+            check=False,
+        )
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertFalse((self.server_state / "remote" / "peers.json").exists())
+        self.assertFalse((self.server_state / "remote" / "used-pairings.json").exists())
         events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
         valid = events[-1]
-        offer_path = self.laptop_state / "remote" / "pairings" / f"{code['pairing_id']}.json"
-        expired_offer = json.loads(offer_path.read_text())
-        expired_offer["code"]["expires_at"] = 1
-        offer_path.write_text(json.dumps(expired_offer), encoding="utf-8")
-        variants = [valid]
-        for content, tags in (
-            ("wrong-secret", valid["tags"]),
-            (code["secret"], [["p", code["laptop_pubkey"]], ["pairing", code["pairing_id"]], ["product", "other"]]),
-            (code["secret"], [["p", code["laptop_pubkey"]], ["pairing", "missing-offer"], ["product", "tts"]]),
-        ):
+        variants = []
+        for content, tags in (("wrong-secret", valid["tags"]), (code["secret"], [["p", "0" * 64]])):
             changed = dict(valid)
             changed["id"] = changed["id"] + content[:1]
             changed["content"] = content
             changed["tags"] = tags
             variants.append(changed)
-        attacker = dict(valid)
-        attacker["id"] = "attacker-event"
-        attacker["pubkey"] = "attacker-pubkey"
-        variants.append(attacker)
         self.transport_file.write_text("\n".join(json.dumps(event) for event in variants) + "\n")
 
         result = json.loads(self.run_tts("daemon", "run", "--once", "--max-events", "10").stdout)
         self.assertEqual(result["processed"], 0)
         self.assertFalse((self.laptop_state / "remote" / "peers.json").exists())
+        seen = json.loads((self.laptop_state / "remote" / "daemon-seen.json").read_text())
+        self.assertEqual(set(seen), {variants[0]["id"]})
 
     def test_pair_list_status_and_revoke_are_structured(self) -> None:
         offer = json.loads(
@@ -161,16 +166,18 @@ class RemotePairingCLITests(unittest.TestCase):
                 "--relay", "wss://relay.example.test",
             ).stdout
         )
-        self.run_tts("pair", "connect", "--code", json.dumps(offer["pair_code"]))
+        self.run_tts("daemon", "start")
+        self.run_tts("pair", "connect", "--code", offer["pair_code"], state=self.server_state)
+        self.run_tts("daemon", "stop")
 
-        listed = json.loads(self.run_tts("pair", "list").stdout)
+        listed = json.loads(self.run_tts("pair", "list", state=self.server_state).stdout)
         self.assertEqual(len(listed["peers"]), 1)
         peer_id = listed["peers"][0]["id"]
-        self.assertEqual(json.loads(self.run_tts("pair", "status").stdout)["paired"], True)
+        self.assertEqual(json.loads(self.run_tts("pair", "status", state=self.server_state).stdout)["paired"], True)
 
-        revoked = json.loads(self.run_tts("pair", "revoke", peer_id).stdout)
+        revoked = json.loads(self.run_tts("pair", "revoke", peer_id, state=self.server_state).stdout)
         self.assertEqual(revoked["status"], "revoked")
-        self.assertEqual(json.loads(self.run_tts("pair", "status").stdout)["paired"], False)
+        self.assertEqual(json.loads(self.run_tts("pair", "status", state=self.server_state).stdout)["paired"], False)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
-import fcntl
 from pathlib import Path
 import secrets
 import subprocess
@@ -14,9 +14,29 @@ import time
 import uuid
 
 from tts_remote_daemon import process_events
-from tts_remote_groups import request_group_creation
+from tts_pair_token import (
+    PAIRING_KIND,
+    PairTokenError,
+    decode_pair_token,
+    encode_pair_token,
+    pairing_key,
+)
+from tts_remote_channel import channel_parts
+from tts_remote_config import remote_config, save_remote_config
+from tts_remote_groups import ensure_group_member, request_group_creation, wait_for_group_admin
 from tts_remote_signing import public_key, signed_event
-from tts_remote_state import active_peer, ensure_backend, ensure_laptop_identity, error, peers, remote_dir, save_peers, upsert_peer, write_json, read_json
+from tts_remote_state import (
+    active_peer,
+    ensure_backend,
+    ensure_laptop_identity,
+    error,
+    peers,
+    read_json,
+    remote_dir,
+    save_peers,
+    upsert_peer,
+    write_json,
+)
 from tts_remote_transport import transport
 
 
@@ -35,27 +55,28 @@ def fail(code: str, message: str, guidance: str | None = None, exit_code: int = 
 
 def pair_offer(args) -> int:
     laptop = ensure_laptop_identity()
-    pairing_id = secrets.token_hex(16)
-    group_id = f"tts-{secrets.token_hex(12)}"
-    expires_at = int(time.time()) + args.ttl
+    current = remote_config()
+    relay = str(args.relay or current["relay"])
+    channel = str(args.channel or current["channel"])
+    save_remote_config(relay, channel)
     code = {
-        "version": 1,
-        "product": "tts",
-        "relay": args.relay,
-        "laptop_pubkey": laptop["pubkey"],
-        "pairing_id": pairing_id,
-        "group_id": group_id,
-        "expires_at": expires_at,
+        "peer": laptop["pubkey"],
         "secret": secrets.token_urlsafe(32),
+        "relay": relay,
+        "channel": channel,
     }
-    nip29 = request_group_creation(args.relay, group_id, str(laptop["nsec"]))
+    token = encode_pair_token(code)
+    offer_id = pairing_key(code["secret"])
+    channel_relay, group_id = channel_parts(channel)
+    nip29 = request_group_creation(channel_relay, group_id, str(laptop["nsec"]))
+    wait_for_group_admin(channel_relay, group_id, str(laptop["pubkey"]))
     write_json(
-        remote_dir() / "pairings" / f"{pairing_id}.json",
+        remote_dir() / "pairings" / f"{offer_id}.json",
         {"code": code, "status": "offered", "nip29_group": nip29},
     )
     return emit({
         "status": "offered",
-        "pair_code": code,
+        "pair_code": token,
         "next_steps": [
             "Send this pairing code to the agent host.",
             "On the agent host, run the TTS pair connect command with the code.",
@@ -65,48 +86,45 @@ def pair_offer(args) -> int:
 
 def pair_connect(args) -> int:
     try:
-        code = json.loads(args.code)
-    except ValueError:
-        return fail("invalid_pair_code", "pair code must be JSON")
-    required = {"version", "product", "relay", "laptop_pubkey", "pairing_id", "group_id", "expires_at", "secret"}
-    if not isinstance(code, dict) or required - set(code) or code.get("product") != "tts":
-        return fail("invalid_pair_code", "pair code is not a TTS pairing code")
-    if int(code["expires_at"]) < int(time.time()):
-        return fail("expired_pair_code", "pair code has expired", "Ask the laptop user for a fresh pairing code.")
+        code = decode_pair_token(args.code)
+    except PairTokenError as error:
+        return fail("invalid_pair_code", str(error), "Ask the receiving device for a fresh pairing code.")
+    code_id = pairing_key(code["secret"])
     used_path = remote_dir() / "used-pairings.json"
     used = read_json(used_path, [])
     used_ids = set(used if isinstance(used, list) else [])
-    if str(code["pairing_id"]) in used_ids:
-        return fail("pair_code_used", "pair code has already been used", "Ask the laptop user for a fresh pairing code.")
+    if code_id in used_ids:
+        return fail("pair_code_used", "pair code has already been used", "Ask the receiving device for a fresh pairing code.")
     backend = ensure_backend()
     tx = transport(str(code["relay"]))
-    profile = signed_event(
-        kind=0,
-        content=json.dumps({"name": f"{backend['hostname']} tts daemon", "product": "tts"}),
-        tags=[["product", "tts"]],
-        nsec=str(backend["nsec"]),
-        relay=str(code["relay"]),
+    def publish_pairing_event() -> None:
+        event = signed_event(
+            kind=PAIRING_KIND,
+            content=str(code["secret"]),
+            tags=[["p", str(code["peer"])]],
+            nsec=str(backend["nsec"]),
+            relay=str(code["relay"]),
+        )
+        tx.publish(event)
+
+    publish_pairing_event()
+    channel_relay, group_id = channel_parts(str(code["channel"]))
+    wait_for_group_admin(
+        channel_relay,
+        group_id,
+        str(backend["pubkey"]),
+        on_wait=publish_pairing_event,
     )
-    tx.publish(profile)
-    event = signed_event(
-        kind=24,
-        content=str(code["secret"]),
-        tags=[["p", str(code["laptop_pubkey"])], ["h", str(code["group_id"])], ["pairing", str(code["pairing_id"])], ["product", "tts"], ["version", "1"], ["expires", str(code["expires_at"])]],
-        nsec=str(backend["nsec"]),
-        relay=str(code["relay"]),
-    )
-    tx.publish(event)
     peer = upsert_peer({
-        "id": str(code["laptop_pubkey"]),
-        "pubkey": str(code["laptop_pubkey"]),
+        "id": str(code["peer"]),
+        "pubkey": str(code["peer"]),
         "relay": str(code["relay"]),
-        "pairing_id": str(code["pairing_id"]),
-        "group_id": str(code["group_id"]),
+        "channel": str(code["channel"]),
         "product": "tts",
         "approved": True,
         "created_at": int(time.time()),
     })
-    used_ids.add(str(code["pairing_id"]))
+    used_ids.add(code_id)
     write_json(used_path, sorted(used_ids))
     return emit({"status": "connected", "peer": peer, "backend_pubkey": backend["pubkey"]})
 
@@ -144,9 +162,14 @@ def remote_speak(args) -> int:
     signer_nsec = os.environ.get("AGENT_NSEC") or str(backend["nsec"])
     signer_source = "AGENT_NSEC" if os.environ.get("AGENT_NSEC") else "backend"
     signer_pubkey = public_key(signer_nsec)
+    pairing_relay = str(peer.get("relay") or "")
+    channel = str(peer.get("channel") or peer.get("group_id") or "")
+    relay, group_id = channel_parts(channel, pairing_relay)
+    if signer_source == "AGENT_NSEC":
+        ensure_group_member(relay, group_id, str(backend["nsec"]), signer_pubkey)
     attachments = [{"label": label, "path": path} for label, path in zip(args.attach[0::2], args.attach[1::2])]
     request_id = str(uuid.uuid4())
-    inner_content = {
+    content = {
         "version": 1,
         "product": "tts",
         "request_id": request_id,
@@ -156,27 +179,15 @@ def remote_speak(args) -> int:
         "attachments": attachments,
         "backend": {"pubkey": backend["pubkey"]},
     }
-    inner_event = signed_event(
-        kind=9,
-        content=json.dumps(inner_content, ensure_ascii=False, sort_keys=True),
-        tags=[["p", str(peer["pubkey"])], ["h", str(peer["group_id"])], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
-        nsec=signer_nsec,
-        relay=str(peer.get("relay") or ""),
-    )
-    outer_content = {
-        **inner_content,
-        "inner_event": inner_event,
-        "signer": {"source": signer_source, "pubkey": signer_pubkey},
-    }
     event = signed_event(
         kind=9,
-        content=json.dumps(outer_content, ensure_ascii=False, sort_keys=True),
-        tags=[["p", str(peer["pubkey"])], ["h", str(peer["group_id"])], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
-        nsec=str(backend["nsec"]),
-        relay=str(peer.get("relay") or ""),
+        content=json.dumps(content, ensure_ascii=False, sort_keys=True),
+        tags=[["p", str(peer["pubkey"])], ["h", group_id], ["product", "tts"], ["request", request_id], ["reply", str(backend["pubkey"])]],
+        nsec=signer_nsec,
+        relay=relay,
     )
-    transport(str(peer.get("relay") or "")).publish(event)
-    return emit({"status": "sent", "request_id": request_id, "event_id": event["id"], "peer": peer["pubkey"]})
+    transport(relay).publish(event)
+    return emit({"status": "sent", "request_id": request_id, "event_id": event["id"], "author_pubkey": signer_pubkey, "peer": peer["pubkey"]})
 
 
 def daemon_status(_args) -> int:

@@ -10,9 +10,11 @@ import subprocess
 import time
 import uuid
 
-from tts_remote_signing import signed_event, verify_event
-from tts_remote_groups import request_group_membership
+from tts_pair_token import PAIRING_KIND, pairing_key
+from tts_remote_channel import channel_parts
+from tts_remote_groups import request_group_admin, request_group_membership
 from tts_remote_polling import events_for_laptop
+from tts_remote_signing import signed_event, verify_event
 from tts_remote_state import active_peer, read_json, remote_dir, tts_state_dir, upsert_peer, write_json
 from tts_remote_transport import transport
 
@@ -39,14 +41,17 @@ def process_events(args, backend: dict[str, object]) -> int:
     seen = read_json(seen_path, [])
     seen_ids = set(seen if isinstance(seen, list) else [])
     count = 0
-    events = sorted(events_for_laptop(str(backend["pubkey"])), key=lambda event: 0 if event.get("kind") == 24 else 1)
+    events = sorted(
+        events_for_laptop(str(backend["pubkey"])),
+        key=lambda event: 0 if event.get("kind") == PAIRING_KIND else 1,
+    )
     for event in events:
         event_id = str(event.get("id") or "")
         if not event_id or event_id in seen_ids:
             continue
         handled = handle_pairing_event(event) or handle_request_event(event, backend)
+        seen_ids.add(event_id)
         if handled:
-            seen_ids.add(event_id)
             count += 1
         if count >= args.max_events:
             break
@@ -55,12 +60,12 @@ def process_events(args, backend: dict[str, object]) -> int:
 
 
 def handle_pairing_event(event: dict[str, object]) -> bool:
-    if event.get("kind") != 24 or not verify_event(event):
+    if event.get("kind") != PAIRING_KIND or not verify_event(event):
         return False
-    pairing_id = tag_value(event.get("tags"), "pairing")
-    if not pairing_id or not tags_include(event.get("tags"), "product", "tts"):
+    secret = str(event.get("content") or "")
+    if not secret:
         return False
-    offer_path = remote_dir() / "pairings" / f"{pairing_id}.json"
+    offer_path = remote_dir() / "pairings" / f"{pairing_key(secret)}.json"
     offer = read_json(offer_path, {})
     if not isinstance(offer, dict) or offer.get("status") != "offered":
         return False
@@ -73,16 +78,23 @@ def handle_pairing_event(event: dict[str, object]) -> bool:
         "id": str(event.get("pubkey")),
         "pubkey": str(event.get("pubkey")),
         "relay": str(code.get("relay") or event.get("relay") or ""),
-        "pairing_id": str(pairing_id),
-        "group_id": str(code.get("group_id")),
+        "channel": str(code.get("channel")),
         "product": "tts",
         "approved": True,
         "created_at": int(time.time()),
     }
+    nsec = ensure_laptop_nsec()
+    channel_relay, group_id = channel_parts(str(peer["channel"]), str(peer["relay"]))
     peer["nip29_membership"] = request_group_membership(
-        str(peer["relay"]),
-        str(peer["group_id"]),
-        str(ensure_laptop_nsec()),
+        channel_relay,
+        group_id,
+        nsec,
+        str(peer["pubkey"]),
+    )
+    peer["nip29_admin"] = request_group_admin(
+        channel_relay,
+        group_id,
+        nsec,
         str(peer["pubkey"]),
     )
     upsert_peer(peer)
@@ -94,30 +106,32 @@ def handle_pairing_event(event: dict[str, object]) -> bool:
 
 
 def valid_pairing_event(event: dict[str, object], code: dict[str, object]) -> bool:
-    if int(code.get("expires_at", 0)) < int(time.time()):
-        return False
     return (
         event.get("content") == code.get("secret")
-        and tags_include(event.get("tags"), "p", str(code.get("laptop_pubkey")))
-        and tags_include(event.get("tags"), "pairing", str(code.get("pairing_id")))
-        and tags_include(event.get("tags"), "h", str(code.get("group_id")))
-        and tags_include(event.get("tags"), "product", "tts")
-        and tags_include(event.get("tags"), "version", str(code.get("version")))
-        and tags_include(event.get("tags"), "expires", str(code.get("expires_at")))
+        and event.get("tags") == [["p", str(code.get("peer"))]]
+        and (not event.get("relay") or event.get("relay") == code.get("relay"))
     )
 
 
 def handle_request_event(event: dict[str, object], backend: dict[str, object]) -> bool:
     if event.get("kind") != 9 or not verify_event(event):
         return False
-    peer = active_peer(str(event.get("pubkey")))
+    peer = active_peer(str(tag_value(event.get("tags"), "reply") or ""))
     if not peer or not valid_request_tags(event, backend, peer):
+        return False
+    channel = str(peer.get("channel") or peer.get("group_id") or "")
+    relay, group_id = channel_parts(channel, str(peer.get("relay") or ""))
+    try:
+        members = transport(relay).group_members(group_id)
+    except RuntimeError:
+        return False
+    if str(event.get("pubkey") or "") not in members:
         return False
     content = request_content(event)
     if not content:
         publish_reply(event, backend, {"status": "rejected", "error": {"code": "invalid_request", "message": "request content is not JSON"}})
         return True
-    if not valid_inner_request(content, event):
+    if not valid_direct_request(content, event, peer):
         return False
     attachments = normalized_attachments(content.get("attachments"))
     if attachments is None:
@@ -145,8 +159,16 @@ def valid_request_tags(
     request_id = content.get("request_id") if isinstance(content, dict) else None
     return (
         tags_include(event.get("tags"), "p", str(backend["pubkey"]))
-        and tags_include(event.get("tags"), "h", str(peer.get("group_id")))
+        and tags_include(
+            event.get("tags"),
+            "h",
+            channel_parts(
+                str(peer.get("channel") or peer.get("group_id") or ""),
+                str(peer.get("relay") or ""),
+            )[1],
+        )
         and tags_include(event.get("tags"), "product", "tts")
+        and tags_include(event.get("tags"), "reply", str(peer.get("pubkey")))
         and bool(request_id)
         and tags_include(event.get("tags"), "request", str(request_id))
     )
@@ -154,46 +176,25 @@ def valid_request_tags(
 
 def request_content(event: dict[str, object]) -> dict[str, object]:
     try:
-        outer = json.loads(str(event.get("content") or "{}"))
+        content = json.loads(str(event.get("content") or "{}"))
     except ValueError:
         return {}
-    inner = outer.get("inner_event") if isinstance(outer, dict) else None
-    if not isinstance(inner, dict):
-        return outer if isinstance(outer, dict) else {}
-    try:
-        content = json.loads(str(inner.get("content") or "{}"))
-    except ValueError:
-        return {}
-    if isinstance(content, dict):
-        content["inner_event"] = inner
-        content["signer"] = outer.get("signer")
     return content if isinstance(content, dict) else {}
 
 
-def valid_inner_request(content: dict[str, object], outer: dict[str, object]) -> bool:
-    inner = content.get("inner_event")
-    if not isinstance(inner, dict) or inner.get("kind") != 9 or not verify_event(inner):
-        return False
-    signer = content.get("signer")
-    if not isinstance(signer, dict) or inner.get("pubkey") != signer.get("pubkey"):
-        return False
+def valid_direct_request(
+    content: dict[str, object],
+    event: dict[str, object],
+    peer: dict[str, object],
+) -> bool:
     backend = content.get("backend")
     request_id = content.get("request_id")
     if not isinstance(backend, dict) or not request_id:
         return False
-    outer_tags = outer.get("tags")
-    inner_tags = inner.get("tags")
-    outer_author = str(outer.get("pubkey") or "")
-    target = tag_value(outer_tags, "p")
     return (
-        backend.get("pubkey") == outer_author
-        and tags_include(inner_tags, "reply", outer_author)
-        and bool(target)
-        and tags_include(inner_tags, "p", target)
-        and tags_include(inner_tags, "h", str(tag_value(outer_tags, "h")))
-        and tags_include(inner_tags, "product", str(tag_value(outer_tags, "product")))
-        and tags_include(inner_tags, "request", str(request_id))
-        and tags_include(outer_tags, "request", str(request_id))
+        content.get("product") == "tts"
+        and backend.get("pubkey") == peer.get("pubkey")
+        and tags_include(event.get("tags"), "request", str(request_id))
     )
 
 
@@ -261,10 +262,11 @@ def materialize_request(content: dict[str, object], event: dict[str, object]) ->
 
 def publish_reply(event: dict[str, object], backend: dict[str, object], content: dict[str, object]) -> None:
     relay = str(event.get("relay") or "")
+    reply_target = str(tag_value(event.get("tags"), "reply") or event.get("pubkey") or "")
     reply = signed_event(
         kind=9,
         content=json.dumps(content, ensure_ascii=False, sort_keys=True),
-        tags=[["e", str(event.get("id"))], ["p", str(event.get("pubkey"))], ["h", str(tag_value(event.get("tags"), "h"))], ["product", "tts"]],
+        tags=[["e", str(event.get("id"))], ["p", reply_target], ["h", str(tag_value(event.get("tags"), "h"))], ["product", "tts"]],
         nsec=str(backend["nsec"]),
         relay=relay,
     )

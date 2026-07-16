@@ -68,8 +68,8 @@ struct RemoteMenuBarTests {
     @Test
     func pairingOfferStartsListenerWhenNeeded() throws {
         let runner = RecordingRemoteCommandRunner(responses: [
-            ["pair", "offer", "--relay", "wss://relay.example"]: Data(
-                #"{"status":"offered","pair_code":{"version":1,"product":"tts","secret":"once"}}"#.utf8
+            ["pair", "offer", "--relay", "wss://relay.example", "--channel", "wss://nip29.example/tts"]: Data(
+                #"{"status":"offered","pair_code":"ttspair1_opaque"}"#.utf8
             ),
             ["daemon", "status"]: Data(#"{"running":false}"#.utf8),
             ["daemon", "start"]: Data(#"{"status":"started","pid":10}"#.utf8),
@@ -79,14 +79,90 @@ struct RemoteMenuBarTests {
             commandRunner: runner
         )
 
-        let offer = try service.createOffer(relay: "wss://relay.example")
+        let offer = try service.createOffer(
+            relay: "wss://relay.example",
+            channel: "wss://nip29.example/tts"
+        )
 
-        #expect(offer.code.contains(#""secret" : "once""#))
+        #expect(offer.code == "ttspair1_opaque")
         #expect(runner.commands == [
-            ["pair", "offer", "--relay", "wss://relay.example"],
+            ["pair", "offer", "--relay", "wss://relay.example", "--channel", "wss://nip29.example/tts"],
             ["daemon", "status"],
             ["daemon", "start"],
         ])
+    }
+
+    @Test
+    func pairingConfigurationLoadsSavedRelayAndChannel() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let remote = directory.appendingPathComponent("remote", isDirectory: true)
+        try FileManager.default.createDirectory(at: remote, withIntermediateDirectories: true)
+        try Data(#"{"relay":"wss://relay.example","channel":"wss://nip29.example/spoken"}"#.utf8).write(
+            to: remote.appendingPathComponent("config.json")
+        )
+        let runner = RecordingRemoteCommandRunner(responses: [:])
+        let service = RemotePairingService(stateDirectory: directory, commandRunner: runner)
+
+        #expect(service.configuration() == RemotePairingConfiguration(
+            relay: "wss://relay.example",
+            channel: "wss://nip29.example/spoken"
+        ))
+    }
+
+    @Test
+    func pairingConfigurationDefaultsMissingChannelWithoutDiscardingRelay() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let remote = directory.appendingPathComponent("remote", isDirectory: true)
+        try FileManager.default.createDirectory(at: remote, withIntermediateDirectories: true)
+        try Data(#"{"relay":"wss://relay.example"}"#.utf8).write(
+            to: remote.appendingPathComponent("config.json")
+        )
+
+        let service = RemotePairingService(
+            stateDirectory: directory,
+            commandRunner: RecordingRemoteCommandRunner(responses: [:])
+        )
+
+        #expect(service.configuration().relay == "wss://relay.example")
+        #expect(service.configuration().channel == "wss://nip29.f7z.io/tts")
+    }
+
+    @Test
+    func commandFailureShowsMessageAndGuidanceWithoutRawJSON() {
+        let data = Data(
+            #"{"status":"error","error":{"message":"Relay URL is invalid.","guidance":"Use wss://."}}"#.utf8
+        )
+
+        #expect(
+            ShellTTSRemoteCommandRunner.failureMessage(data)
+                == "Relay URL is invalid. Use wss://."
+        )
+    }
+
+    @Test @MainActor
+    func pairingViewModelRemainsResponsiveWhileOfferCommandWaits() async throws {
+        let runner = BlockingRemoteCommandRunner()
+        let service = RemotePairingService(
+            stateDirectory: URL(fileURLWithPath: "/tmp/tts-test"),
+            commandRunner: runner
+        )
+        let model = RemotePairingViewModel(service: service, didCreateOffer: {})
+        model.relay = "wss://relay.example"
+        model.channel = "wss://nip29.example/tts"
+
+        model.createOffer()
+        await Task.yield()
+
+        #expect(model.isWorking)
+        #expect(model.pairingCode == nil)
+        runner.release.signal()
+        for _ in 0..<100 where model.pairingCode == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.pairingCode == "ttspair1_opaque")
+        #expect(!model.isWorking)
     }
 
     @Test @MainActor
@@ -96,9 +172,9 @@ struct RemoteMenuBarTests {
 
     @Test
     func pairingOfferKeepsExistingListener() throws {
-        let offer = Data(#"{"pair_code":{"version":1,"product":"tts","secret":"once"}}"#.utf8)
+        let offer = Data(#"{"pair_code":"ttspair1_opaque"}"#.utf8)
         let runner = RecordingRemoteCommandRunner(responses: [
-            ["pair", "offer", "--relay", "wss://relay.example"]: offer,
+            ["pair", "offer", "--relay", "wss://relay.example", "--channel", "wss://nip29.example/tts"]: offer,
             ["daemon", "status"]: Data(#"{"running":true}"#.utf8),
         ])
         let service = RemotePairingService(
@@ -106,7 +182,10 @@ struct RemoteMenuBarTests {
             commandRunner: runner
         )
 
-        _ = try service.createOffer(relay: "wss://relay.example")
+        _ = try service.createOffer(
+            relay: "wss://relay.example",
+            channel: "wss://nip29.example/tts"
+        )
 
         #expect(runner.commands.count == 2)
     }
@@ -151,5 +230,20 @@ private final class RecordingRemoteCommandRunner: RemoteCommandRunning, @uncheck
             throw RemotePairingError.commandFailed("unexpected command")
         }
         return response
+    }
+}
+
+private final class BlockingRemoteCommandRunner: RemoteCommandRunning, @unchecked Sendable {
+    let release = DispatchSemaphore(value: 0)
+
+    func run(arguments: [String], stateDirectory _: URL) throws -> Data {
+        if arguments.first == "pair" {
+            release.wait()
+            return Data(#"{"pair_code":"ttspair1_opaque"}"#.utf8)
+        }
+        if arguments == ["daemon", "status"] {
+            return Data(#"{"running":true}"#.utf8)
+        }
+        throw RemotePairingError.commandFailed("unexpected command")
     }
 }
