@@ -10,7 +10,7 @@ import subprocess
 import time
 
 from tts_remote_state import fake_nostr_enabled, pubkey_for_nsec, public_key_for_secret
-from tts_remote_transport import NOSTR_EVENT_FIELDS
+from tts_remote_event import NOSTR_EVENT_FIELDS
 
 
 def canonical(event: dict[str, object]) -> str:
@@ -88,7 +88,7 @@ def verify_event(event: dict[str, object]) -> bool:
             check=False,
             timeout=command_timeout(),
         )
-    except subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return process.returncode == 0
 

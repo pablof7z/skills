@@ -12,6 +12,7 @@ from tts_remote_ask import prepare_ask, wait_for_answer
 from tts_remote_channel import channel_parts
 from tts_remote_groups import ensure_group_member
 from tts_remote_protocol import request_tags
+from tts_remote_profile import publish_backend_profile
 from tts_remote_signing import public_key, signed_event
 from tts_remote_state import active_peer, ensure_backend, error
 from tts_remote_transport import transport
@@ -32,6 +33,7 @@ def remote_speak(args) -> int:
     pairing_relay = str(peer.get("relay") or "")
     channel = str(peer.get("channel") or peer.get("group_id") or "")
     relay, group_id = channel_parts(channel, pairing_relay)
+    publish_backend_profile(backend, pairing_relay)
     if os.environ.get("AGENT_NSEC"):
         ensure_group_member(relay, group_id, str(backend["nsec"]), signer_pubkey)
     attachments = [

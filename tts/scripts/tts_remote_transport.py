@@ -8,8 +8,14 @@ import os
 from pathlib import Path
 import subprocess
 
-
-NOSTR_EVENT_FIELDS = frozenset({"id", "pubkey", "created_at", "kind", "tags", "content", "sig"})
+from tts_remote_event import (
+    NOSTR_EVENT_FIELDS,
+    matches,
+    parse_events,
+    role_tag_values,
+    tag_values,
+    with_source_relay,
+)
 
 
 class Transport:
@@ -20,6 +26,7 @@ class Transport:
         self,
         *,
         target_pubkey: str | None = None,
+        author_pubkeys: list[str] | None = None,
         group_ids: list[str] | None = None,
         since: int | None = None,
         kinds: list[int] | None = None,
@@ -50,6 +57,7 @@ class FileTransport(Transport):
         self,
         *,
         target_pubkey: str | None = None,
+        author_pubkeys: list[str] | None = None,
         group_ids: list[str] | None = None,
         since: int | None = None,
         kinds: list[int] | None = None,
@@ -62,7 +70,7 @@ class FileTransport(Transport):
                 loaded = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(loaded, dict) and matches(loaded, target_pubkey, group_ids, since, kinds):
+            if isinstance(loaded, dict) and matches(loaded, target_pubkey, author_pubkeys, group_ids, since, kinds):
                 result.append(loaded)
         return result
 
@@ -118,6 +126,7 @@ class NakTransport(Transport):
         self,
         *,
         target_pubkey: str | None = None,
+        author_pubkeys: list[str] | None = None,
         group_ids: list[str] | None = None,
         since: int | None = None,
         kinds: list[int] | None = None,
@@ -131,6 +140,8 @@ class NakTransport(Transport):
             command.extend(["-k", str(kind)])
         if target_pubkey:
             command.extend(["-p", target_pubkey])
+        for author in sorted(set(author_pubkeys or [])):
+            command.extend(["-a", author])
         for group_id in sorted(set(group_ids or [])):
             command.extend(["-h", group_id])
         if since is not None and not live:
@@ -147,11 +158,11 @@ class NakTransport(Transport):
             )
         except subprocess.TimeoutExpired as error:
             events = with_source_relay(parse_events(normalize_timeout_output(error.stdout)), self.relay)
-            return [event for event in events if matches(event, target_pubkey, group_ids, since, kinds)]
+            return [event for event in events if matches(event, target_pubkey, author_pubkeys, group_ids, since, kinds)]
         if process.returncode != 0:
             raise RuntimeError(process.stderr.strip() or "nak fetch failed")
         events = with_source_relay(parse_events(process.stdout), self.relay)
-        return [event for event in events if matches(event, target_pubkey, group_ids, since, kinds)]
+        return [event for event in events if matches(event, target_pubkey, author_pubkeys, group_ids, since, kinds)]
 
     def group_members(self, channel: str) -> set[str]:
         return self._group_state(channel, [39001, 39002])
@@ -233,67 +244,3 @@ def normalize_timeout_output(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return value
-
-
-def parse_events(raw: str) -> list[dict[str, object]]:
-    stripped = raw.strip()
-    if not stripped:
-        return []
-    try:
-        loaded = json.loads(stripped)
-    except ValueError:
-        loaded = None
-    candidates = loaded if isinstance(loaded, list) else [loaded] if isinstance(loaded, dict) else []
-    if not candidates:
-        for line in stripped.splitlines():
-            try:
-                item = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(item, dict):
-                candidates.append(item)
-    return [item for item in candidates if isinstance(item, dict)]
-
-
-def tag_values(event: dict[str, object], name: str) -> set[str]:
-    tags = event.get("tags")
-    if not isinstance(tags, list):
-        return set()
-    return {
-        str(tag[1])
-        for tag in tags
-        if isinstance(tag, list) and len(tag) >= 2 and tag[0] == name
-    }
-
-
-def role_tag_values(event: dict[str, object], name: str, role: str) -> set[str]:
-    tags = event.get("tags")
-    if not isinstance(tags, list):
-        return set()
-    return {
-        str(tag[1])
-        for tag in tags
-        if isinstance(tag, list) and len(tag) >= 3 and tag[0] == name and tag[2] == role
-    }
-
-
-def matches(
-    event: dict[str, object],
-    target_pubkey: str | None,
-    group_ids: list[str] | None,
-    since: int | None,
-    kinds: list[int] | None,
-) -> bool:
-    if kinds and int(event.get("kind") or -1) not in kinds:
-        return False
-    if target_pubkey and target_pubkey not in tag_values(event, "p"):
-        return False
-    if group_ids and not tag_values(event, "h").intersection(group_ids):
-        return False
-    return since is None or int(event.get("created_at") or 0) >= since
-
-
-def with_source_relay(events: list[dict[str, object]], relay: str) -> list[dict[str, object]]:
-    for event in events:
-        event["relay"] = relay
-    return events
