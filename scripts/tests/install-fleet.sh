@@ -161,7 +161,13 @@ cat >"${DARWIN_HOME}/.agents/skills/tts/scripts/tts-menu" <<'EOF'
 set -euo pipefail
 printf 'tts-menu %s\n' "$*" >>"${FLEET_TEST_LOG}"
 case "${1:-}" in
-  status) printf '%s\n' '{"current":null,"queued":[],"menu_pid":42}' ;;
+  status)
+    if [[ -n "${FLEET_TEST_STATUS:-}" ]]; then
+      printf '%s\n' "${FLEET_TEST_STATUS}"
+    else
+      printf '%s\n' '{"current":null,"queued":[{"id":"parked","status":"queued"}],"menu_pid":42}'
+    fi
+    ;;
   restart) ;;
   *) exit 2 ;;
 esac
@@ -185,3 +191,14 @@ grep -Fq 'swift build -c release --package-path' "${LOG}" \
 grep -Fq 'tts-menu restart' "${LOG}" \
   || fail 'idle Darwin TTS app was not restarted'
 echo 'ok: Darwin TTS app built and restarted'
+
+if HOME="${DARWIN_HOME}" PATH="${FAKE_BIN}:${PATH}" FLEET_TEST_LOG="${LOG}" \
+  FLEET_TEST_STATUS='{"current":{"id":"active","status":"playing"},"queued":[],"menu_pid":42}' \
+  bash "${SCRIPT}" --activate-host test-commit >"${TMP}/darwin-busy-output" 2>&1; then
+  fail 'Darwin activation interrupted active playback'
+fi
+grep -Fq 'has active TTS playback' "${TMP}/darwin-busy-output" \
+  || fail 'active playback refusal was not explained'
+[[ "$(grep -Fc 'tts-menu restart' "${LOG}")" -eq 1 ]] \
+  || fail 'active playback restarted the TTS app'
+echo 'ok: Darwin TTS app preserves active playback'
