@@ -22,10 +22,11 @@ for name in os.listdir(items_dir):
         continue
     if item.get("status") not in ("playing", "paused"):
         continue
-    item["status"] = "queued" if os.path.isfile(item.get("output_file", "")) else "failed"
-    item["started_at"] = None
-    item["completed_at"] = None if item["status"] == "queued" else int(time.time())
-    item["error"] = None if item["status"] == "queued" else "Audio file is no longer available."
+    item["status"] = "interrupted" if os.path.isfile(item.get("output_file", "")) else "failed"
+    item["completed_at"] = int(time.time())
+    item["error"] = None if item["status"] == "interrupted" else "Audio file is no longer available."
+    if item["status"] == "interrupted" and not item.get("parent_item_id"):
+        item["is_unheard"] = True
     fd, temporary = tempfile.mkstemp(prefix=".tts-item-", dir=items_dir)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

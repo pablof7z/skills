@@ -152,13 +152,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         playbackStartTask = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
-        if var item = currentItem {
-            player?.stop()
-            item.status = .queued
-            item.startedAt = nil
-            item.completedAt = nil
-            try? store.save(item)
-        }
+        parkCurrentForShutdown()
         player = nil
         isAudioPlaying = false
         currentItemID = nil
