@@ -9,6 +9,7 @@ cleanup() {
     mark_macos_generation_failed
   fi
   rm -f "$TMP_ERR" "$CAPTION_RESPONSE_FILE"
+  release_generation_slot
   release_speech_gate
   exit "$exit_code"
 }
@@ -135,6 +136,8 @@ elif [ -n "${KOKORO_API_USERNAME:-}" ] && [ -n "${KOKORO_API_PASSWORD:-}" ]; the
   AUTH_OPTS+=( -u "$KOKORO_API_USERNAME:$KOKORO_API_PASSWORD" )
 fi
 
+acquire_generation_slot
+
 set +e
 HTTP_CODE=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
   ${AUTH_OPTS[@]+"${AUTH_OPTS[@]}"} "$CAPTIONED_API_URL" -w "%{http_code}" -o "$CAPTION_RESPONSE_FILE" 2>"$TMP_ERR")
@@ -242,6 +245,8 @@ if [ ! -s "$OUTPUT_FILE" ]; then
   rm -f "$OUTPUT_FILE"
   exit 1
 fi
+
+release_generation_slot
 
 if [ "$NO_PLAY" -eq 1 ]; then
   if ! truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
