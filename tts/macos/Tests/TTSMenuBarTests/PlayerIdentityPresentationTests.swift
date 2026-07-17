@@ -13,7 +13,7 @@ struct PlayerIdentityPresentationTests {
 
         #expect(first == second)
         #expect(first.map(\.role) == [.project, .agent])
-        #expect(first.map(\.text) == ["example-project", "river-codex · thread-123"])
+        #expect(first.map(\.text) == ["example-project", "river-codex"])
         #expect(
             first[0].paletteIndex
                 == WorkspaceAccent.paletteIndex(forWorkspacePath: item.workspacePath)
@@ -43,11 +43,23 @@ struct PlayerIdentityPresentationTests {
         let segment = try #require(PlayerIdentityPresentation.segments(for: item).only)
 
         #expect(segment.role == .agent)
-        #expect(segment.text == "river-codex · thread-123")
+        #expect(segment.text == "river-codex")
         #expect(
             segment.paletteIndex
                 == WorkspaceAccent.paletteIndex(forAgentName: "river-codex")
         )
+    }
+
+    @Test
+    func qualifiesOnlyMCPAgentIdentityWithCallerSession() throws {
+        var item = item(id: "mcp-session")
+        item.agentName = "ChatGPT"
+        item.harness = "mcp"
+        item.sessionID = "v1/3ZsbJ-first-o2UX"
+
+        let segment = try #require(PlayerIdentityPresentation.segments(for: item).only)
+
+        #expect(segment.text == "ChatGPT · 3ZsbJ…o2UX")
     }
 
     private func item(id: String) -> TTSItem {
