@@ -5,6 +5,7 @@ import Foundation
 extension PlaybackController {
     func replay(_ item: TTSItem, startingAt time: TimeInterval? = nil) {
         guard FileManager.default.fileExists(atPath: item.outputFile) else { return }
+        manualQueuePauseBarrier = nil
         do {
             let offset = time.map { max(0, $0) }
             try store.save(item.requeuedForReplay(startingAt: offset))
@@ -22,6 +23,7 @@ extension PlaybackController {
             return
         }
         guard clearGlobalPauseForExplicitPlayback() else { return }
+        manualQueuePauseBarrier = nil
 
         if currentItem?.id == item.id, let player {
             if isPlaybackBlocked {

@@ -59,8 +59,9 @@ extension PlaybackController {
             }
         }
 
-        let hasQueuedItem = (try? store.loadItems().contains { $0.status == .queued }) ?? false
-        if hasQueuedItem {
+        let persisted = try? store.loadItems()
+        let hasAutomaticCandidate = persisted.flatMap { automaticPlaybackCandidate(in: $0) } != nil
+        if hasAutomaticCandidate {
             refresh()
         } else {
             mediaController.scheduleResume(after: mediaController.mediaResumeDelay) { [weak self] in
@@ -72,13 +73,16 @@ extension PlaybackController {
     private func mediaResumeAllowed() -> Bool {
         guard player == nil else { return false }
         guard let persisted = try? store.loadItems() else { return false }
-        return !persisted.contains { item in
-            item.status == .playing
-                || (item.status == .queued && visibleAskQueueHoldID == nil)
-        }
+        guard !persisted.contains(where: { $0.status == .playing }) else { return false }
+        return automaticPlaybackCandidate(in: persisted) == nil
     }
 
-    func parkPausedCurrentForQueueAdvance() {
+    func beginManualQueuePauseBarrier() {
+        let persisted = (try? store.loadItems()) ?? items
+        manualQueuePauseBarrier = ManualQueuePauseBarrier(itemsAtPause: persisted)
+    }
+
+    func parkPausedCurrentForIncomingPlayback() {
         guard var item = currentItem, item.status == .paused, let player else { return }
         playbackStartTask?.cancel()
         playbackStartTask = nil
