@@ -23,6 +23,7 @@ def request_tags(
     ask: dict[str, object] | None = None,
     wait: str | None = None,
     session_id: str | None = None,
+    harness: str | None = None,
 ) -> list[list[str]]:
     title, summary = normalized_request_copy(title, summary)
     tags = [
@@ -34,6 +35,8 @@ def request_tags(
     ]
     if session_id:
         tags.append(["session", session_id])
+    if harness:
+        tags.append(["harness", harness])
     tags.extend(["attachment", item["path"], item["label"]] for item in attachments)
     if not ask:
         return tags
@@ -138,6 +141,11 @@ def request_payload(event: dict[str, object]) -> dict[str, object] | None:
         return None
     if session_rows:
         result["session_id"] = session_rows[0][1]
+    harness_rows = tag_rows(event, "harness")
+    if len(harness_rows) > 1 or any(len(row) != 2 or not row[1] for row in harness_rows):
+        return None
+    if harness_rows:
+        result["harness"] = harness_rows[0][1]
     if not questions:
         return result
     try:

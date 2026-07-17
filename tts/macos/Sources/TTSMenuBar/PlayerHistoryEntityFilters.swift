@@ -38,6 +38,10 @@ struct HistoryEntityFilters: Equatable {
 
 extension TTSItem {
     var historyAgentFilter: HistoryAgentFilter {
-        HistoryAgentFilter(agentName: displayAgent, sessionID: sessionLabel)
+        HistoryAgentFilter(
+            agentName: displayAgent,
+            sessionID: harness?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "mcp" ? sessionLabel : nil
+        )
     }
 }

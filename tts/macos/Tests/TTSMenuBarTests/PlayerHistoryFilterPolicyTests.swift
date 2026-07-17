@@ -95,6 +95,7 @@ struct PlayerHistoryFilterPolicyTests {
             createdAt: now,
             workspace: "/tmp/other",
             agentName: "ChatGPT",
+            harness: "mcp",
             sessionID: "v1/river-session"
         )
         let hidden = item(id: "hidden", createdAt: now, workspace: "/tmp/hidden")
@@ -123,12 +124,14 @@ struct PlayerHistoryFilterPolicyTests {
             id: "first",
             createdAt: now,
             agentName: "ChatGPT",
+            harness: "mcp",
             sessionID: "v1/3ZsbJ-first-o2UX"
         )
         let second = item(
             id: "second",
             createdAt: now,
             agentName: "ChatGPT",
+            harness: "mcp",
             sessionID: "v1/9Kabc-second-r7PQ"
         )
 
@@ -144,6 +147,28 @@ struct PlayerHistoryFilterPolicyTests {
         #expect(Set(agents) == [first.historyAgentFilter, second.historyAgentFilter])
         #expect(Set(agents.map(\.displayName)).count == 2)
         #expect(first.historyAgentFilter.displayName == "ChatGPT · 3ZsbJ…o2UX")
+    }
+
+    @Test
+    func keepsOrdinaryAgentsUnifiedWhenTheirLocalSessionsDiffer() {
+        let first = item(
+            id: "first",
+            createdAt: now,
+            agentName: "Codex",
+            harness: "codex",
+            sessionID: "local-thread-one"
+        )
+        let second = item(
+            id: "second",
+            createdAt: now,
+            agentName: "Codex",
+            harness: "codex",
+            sessionID: "local-thread-two"
+        )
+
+        #expect(first.historyAgentFilter == second.historyAgentFilter)
+        #expect(first.historyAgentFilter.displayName == "Codex")
+        #expect(first.historyAgentFilter.sessionID == nil)
     }
 
     @Test
@@ -167,6 +192,7 @@ struct PlayerHistoryFilterPolicyTests {
         createdAt: Date,
         workspace: String = "/tmp/current",
         agentName: String = "Codex",
+        harness: String = "codex",
         sessionID: String? = nil
     ) -> TTSItem {
         TTSItem(
@@ -174,7 +200,7 @@ struct PlayerHistoryFilterPolicyTests {
             text: id,
             subject: nil,
             agentName: agentName,
-            harness: "codex",
+            harness: harness,
             sessionID: sessionID,
             workspace: workspace,
             voice: "af_bella",
