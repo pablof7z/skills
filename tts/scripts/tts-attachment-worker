@@ -6,11 +6,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
 import time
+
+from tts_attachment_text import narrated_attachment_speech
 
 
 def atomic_write_json(path: Path, value: dict) -> None:
@@ -50,22 +51,6 @@ def update_attachment(item_path: Path, attachment_id: str, **changes: object) ->
     atomic_write_json(item_path, item)
 
 
-def markdown_for_speech(value: str) -> str:
-    value = re.sub(r"```([^\n`]*)\n.*?```", _replace_lang_block_for_speech, value, flags=re.DOTALL)
-    value = re.sub(r"!\[([^]]*)\]\([^)]+\)", r"\1", value)
-    value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
-    value = re.sub(r"^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+", "", value, flags=re.MULTILINE)
-    value = re.sub(r"[`*_~]", "", value)
-    return re.sub(r"\s+", " ", value).strip()
-
-
-def _replace_lang_block_for_speech(match: re.Match) -> str:
-    fence = match.group(1).strip()
-    if not fence:
-        return match.group(0)
-    return " "
-
-
 def prepare(item_path: Path, attachment: dict, voice: str, tts_command: Path) -> None:
     attachment_id = str(attachment["id"])
     source = Path(str(attachment["source_file"]))
@@ -74,10 +59,7 @@ def prepare(item_path: Path, attachment: dict, voice: str, tts_command: Path) ->
     label = str(attachment.get("label") or attachment_id)
     print(f"Preparing narrated attachment: {label}", flush=True)
     try:
-        text = source.read_text(encoding="utf-8")
-        speech = markdown_for_speech(text)
-        if not speech:
-            raise ValueError("The attachment did not contain narratable text.")
+        speech = narrated_attachment_speech(label, source)
         update_attachment(item_path, attachment_id, status="preparing", error=None)
         environment = os.environ.copy()
         environment.update(

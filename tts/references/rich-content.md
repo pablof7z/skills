@@ -26,6 +26,11 @@ before the command returns. Images and SVGs preview inline, Mermaid (`.mmd`)
 files render as diagrams with source fallback, existing audio is playable, and
 other files open in their default application.
 
+Each narrated Markdown or text attachment has a hard limit of 2,000 words after
+formatting-only content is removed. Summarize or split longer narration into
+focused attachments. Raw logs, process samples, and similar evidence should use
+a non-text extension so they remain available as files without being narrated.
+
 Treat attachments as optional branches. Do not attach routine logs, duplicate
 the primary message, or create supplemental files merely to make an update look
 substantial.
