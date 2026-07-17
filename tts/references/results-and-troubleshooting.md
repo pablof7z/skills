@@ -48,5 +48,10 @@ state accurately rather than claiming the update was heard.
 - Queue or playback failure: inspect `tts-menu status` and the item by ID.
 - State inspection: queue records and logs normally live under
   `~/.local/state/tts/`.
+- Music or Spotify handoff failure: inspect
+  `~/.local/state/tts/media-interventions.jsonl` and its single rotated file,
+  `media-interventions.jsonl.1`. Filter by `itemID` or `leaseID` to reconstruct
+  the observed session, pause and resume verification, cancellation reason,
+  and terminal ownership decision.
 - Durable brief inspection: generated audio, timings, and copied attachments
   live under `~/.agents/skills/tts/sessions/<session-id>/briefs/<item-id>/`.

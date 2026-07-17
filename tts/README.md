@@ -33,6 +33,7 @@ The workflow owns more than text generation:
 - Preferences contain the local media-handoff settings, and `Command`+`,` opens them whenever the TTS app is active.
 - Muted macOS system output automatically pauses TTS without losing its position. Playback resumes after unmute only when mute caused the pause, and the generator tells the agent that the queued speech was not audible.
 - Media keeps playing during generation. Users can explicitly opt in to app-specific Music and Spotify handoff. TTS verifies the exact track before resuming it, restores an owned interruption during normal shutdown, and never changes volume, mute, or audio output routing.
+- Media handoffs append structured diagnostics to `~/.local/state/tts/media-interventions.jsonl`, rotated once to `.jsonl.1`. Records correlate the TTS item, interruption lease, backend, target process and content identifier, observed playback state, verification result, and terminal ownership decision without storing track titles, artists, or albums.
 
 The result is ambient awareness with provenance: you can hear that something changed, know which agent changed it, and revisit the exact words later.
 
@@ -84,6 +85,6 @@ local diagnostic log with credentials and token material redacted. See
 
 ## What it touches
 
-`tts` sends the supplied message and narratable text attachments to the endpoint you configure. `tts_generate` also sends its generated MP3 to the configured Blossom server, which defaults to `blossom.primal.net`. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state under `~/.local/state/tts`. On macOS, the player can pause and resume Music or Spotify according to an explicit local opt-in. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
+`tts` sends the supplied message and narratable text attachments to the endpoint you configure. `tts_generate` also sends its generated MP3 to the configured Blossom server, which defaults to `blossom.primal.net`. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state and bounded media-intervention diagnostics under `~/.local/state/tts`. On macOS, the player can pause and resume Music or Spotify according to an explicit local opt-in. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
 
 See [setup](references/setup.md) for endpoint configuration and [SKILL.md](SKILL.md) for the exact agent-facing writing and invocation rules.
