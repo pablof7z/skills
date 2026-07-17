@@ -37,8 +37,10 @@ MP3 uploads. Optional overrides are:
 - `TTS_BLOSSOM_MAX_BYTES` for the maximum generated MP3 size
 - `TTS_BLOSSOM_AUTH_SECONDS` for the short-lived upload authorization window
 
-HTTP MCP mode requires a bearer token in `TTS_MCP_TOKEN` by default. Read
-[mcp.md](mcp.md) for route and transport configuration.
+Public HTTP MCP mode uses pairing-code OAuth when `--public-url` identifies its
+external HTTPS origin. Without `--public-url`, local HTTP retains the static
+bearer token in `TTS_MCP_TOKEN`. Read [mcp.md](mcp.md) for route, OAuth, ngrok,
+and header-monitoring configuration.
 
 ## Suggested local env file
 
