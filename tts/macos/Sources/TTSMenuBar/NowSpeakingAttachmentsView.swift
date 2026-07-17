@@ -124,39 +124,7 @@ extension NowSpeakingHUDView {
         let selected = presentation.selectedAttachmentID == attachment.id
             || item.attachmentID == attachment.id
         return Button {
-            switch attachment.kind {
-            case .image:
-                presentation.selectAttachment(
-                    selected ? nil : attachment.id,
-                    image: selected ? nil : NSImage(contentsOfFile: attachment.sourceFile)
-                )
-            case .diagram:
-                presentation.selectAttachment(
-                    selected ? nil : attachment.id,
-                    text: selected ? nil : (attachment.displayText ?? attachment.text)
-                )
-            case .narratedText, .audio:
-                if attachment.isPlayable {
-                    if item.isAttachmentPlayback,
-                       item.attachmentID == attachment.id
-                    {
-                        presentation.selectAttachment(nil)
-                    } else {
-                        presentation.selectAttachment(
-                            attachment.id,
-                            text: attachment.displayText
-                        )
-                        controller.playAttachment(attachment, from: item)
-                    }
-                } else {
-                    presentation.selectAttachment(
-                        attachment.id,
-                        text: attachment.displayText
-                    )
-                }
-            case .file:
-                controller.openAttachment(attachment)
-            }
+            activateAttachment(attachment, item: item)
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: attachmentSymbol(attachment))
@@ -193,6 +161,36 @@ extension NowSpeakingHUDView {
         .help(attachmentHelp(attachment))
         .accessibilityLabel(attachment.label)
         .accessibilityValue(attachment.status.rawValue)
+    }
+
+    func activateAttachment(_ attachment: TTSAttachment, item: TTSItem) {
+        let selected = presentation.selectedAttachmentID == attachment.id
+            || item.attachmentID == attachment.id
+        switch attachment.kind {
+        case .image:
+            presentation.selectAttachment(
+                selected ? nil : attachment.id,
+                image: selected ? nil : NSImage(contentsOfFile: attachment.sourceFile)
+            )
+        case .diagram:
+            presentation.selectAttachment(
+                selected ? nil : attachment.id,
+                text: selected ? nil : (attachment.displayText ?? attachment.text)
+            )
+        case .narratedText, .audio:
+            if attachment.isPlayable {
+                if item.isAttachmentPlayback, item.attachmentID == attachment.id {
+                    presentation.selectAttachment(nil)
+                } else {
+                    presentation.selectAttachment(attachment.id, text: attachment.displayText)
+                    controller.playAttachment(attachment, from: item)
+                }
+            } else {
+                presentation.selectAttachment(attachment.id, text: attachment.displayText)
+            }
+        case .file:
+            controller.openAttachment(attachment)
+        }
     }
 
     @ViewBuilder

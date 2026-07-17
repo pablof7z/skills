@@ -49,14 +49,16 @@ detailed findings, or decision context—attach it. Attachments let the user
 expand a concise update in different directions: inspect visuals, open an
 auxiliary artifact, or hear expanded Markdown or text as a deeper narrated
 branch. Treat supporting material as a normal part of a substantive update, not
-an exception:
+an exception. Link directly to an attachment from the primary message with
+`[Attachment label](attachment:)`; the visible label must exactly match one
+`--attach` label:
 
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
   --subject "<2-to-5-word title>" \
   --summary "<one-line player preview>" \
-  --message "<spoken update>" \
+  --message "Open the [Supporting context](attachment:)." \
   --attach "Supporting context" <path>
 ```
 

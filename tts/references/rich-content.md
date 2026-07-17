@@ -21,6 +21,19 @@ Use repeatable `--attach "Label" path` pairs and pass the primary body with
 Prefer short human labels such as `Mockup`, `Architectural proposal`, or
 `Detailed findings`. Do not expose raw filenames when a clearer label exists.
 
+To open an attachment directly from the primary message, use a Markdown link
+whose visible text exactly matches the attachment label and whose destination
+is `attachment:`:
+
+```markdown
+The decision and tradeoffs are in the [Architectural proposal](attachment:).
+```
+
+Pair that message with `--attach "Architectural proposal" ./proposal.md`.
+Keep the label in the visible link text; do not put a path or label after
+`attachment:`. The player only activates a unique exact label match, so a
+missing or duplicated label stays inert rather than opening the wrong file.
+
 Markdown and text attachments are copied into durable storage and narrated
 before the command returns. Images and SVGs preview inline, Mermaid (`.mmd`)
 files render as diagrams with source fallback, existing audio is playable, and

@@ -15,6 +15,8 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
     let onSeek: (TimeInterval) -> Void
     var onContentHeightChange: ((CGFloat) -> Void)? = nil
     var allowsVerticalScrolling = true
+    var attachments: [TTSAttachment] = []
+    var onOpenAttachment: ((TTSAttachment) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -52,7 +54,9 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
             currentTime: currentTime,
             duration: duration,
             accent: NSColor(accent),
-            onSeek: onSeek
+            onSeek: onSeek,
+            attachments: attachments,
+            onOpenAttachment: onOpenAttachment
         )
         scrollView.hasVerticalScroller = allowsVerticalScrolling
         scrollView.verticalScrollElasticity = allowsVerticalScrolling ? .automatic : .none
@@ -95,6 +99,8 @@ final class InteractiveTranscriptTextView: NSTextView {
     private var accent = NSColor.controlAccentColor
     private var duration: TimeInterval = 0
     private var onSeek: ((TimeInterval) -> Void)?
+    private var attachments: [TTSAttachment] = []
+    private var onOpenAttachment: ((TTSAttachment) -> Void)?
     private var pointerTrackingArea: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -117,13 +123,17 @@ final class InteractiveTranscriptTextView: NSTextView {
         currentTime: TimeInterval,
         duration: TimeInterval,
         accent: NSColor,
-        onSeek: @escaping (TimeInterval) -> Void
+        onSeek: @escaping (TimeInterval) -> Void,
+        attachments: [TTSAttachment] = [],
+        onOpenAttachment: ((TTSAttachment) -> Void)? = nil
     ) {
         let contentChanged = sourceText != text || self.timings != timings || self.duration != duration
         self.timings = timings
         self.duration = duration
         self.accent = accent
         self.onSeek = onSeek
+        self.attachments = attachments
+        self.onOpenAttachment = onOpenAttachment
 
         if contentChanged {
             sourceText = text
@@ -161,6 +171,10 @@ final class InteractiveTranscriptTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if let attachment = attachment(at: point), let onOpenAttachment {
+            onOpenAttachment(attachment)
+            return
+        }
         guard let index = wordIndex(at: point) else {
             super.mouseDown(with: event)
             return
@@ -221,6 +235,31 @@ final class InteractiveTranscriptTextView: NSTextView {
     }
 
     private func wordIndex(at point: NSPoint) -> Int? {
+        guard let characterIndex = characterIndex(at: point) else { return nil }
+        return document.wordIndex(at: characterIndex)
+    }
+
+    private func attachment(at point: NSPoint) -> TTSAttachment? {
+        guard let characterIndex = characterIndex(at: point) else { return nil }
+        return attachment(atCharacterIndex: characterIndex)
+    }
+
+    func attachment(atCharacterIndex characterIndex: Int) -> TTSAttachment? {
+        guard let textStorage,
+              characterIndex >= 0,
+              characterIndex < textStorage.length else { return nil }
+        var range = NSRange(location: NSNotFound, length: 0)
+        let link = textStorage.attribute(.link, at: characterIndex, effectiveRange: &range)
+        guard range.location != NSNotFound else { return nil }
+        let visibleLabel = (textStorage.string as NSString).substring(with: range)
+        return TranscriptAttachmentLink.resolve(
+            link: link,
+            visibleLabel: visibleLabel,
+            attachments: attachments
+        )
+    }
+
+    private func characterIndex(at point: NSPoint) -> Int? {
         guard let layoutManager, let textContainer else { return nil }
         let containerPoint = NSPoint(
             x: point.x - textContainerOrigin.x,
@@ -233,7 +272,6 @@ final class InteractiveTranscriptTextView: NSTextView {
             in: textContainer
         )
         guard glyphRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else { return nil }
-        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
-        return document.wordIndex(at: characterIndex)
+        return layoutManager.characterIndexForGlyph(at: glyphIndex)
     }
 }
