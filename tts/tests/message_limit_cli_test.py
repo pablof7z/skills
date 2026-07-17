@@ -83,7 +83,7 @@ class MessageLimitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         with KokoroHandler.received_inputs_lock:
             self.assertEqual(len(KokoroHandler.received_inputs), 1)
-            self.assertTrue(KokoroHandler.received_inputs[0].endswith("word659"))
+            self.assertTrue(KokoroHandler.received_inputs[0].endswith("word659."))
 
     def test_rejects_661_primary_words_before_synthesis_or_state_creation(self) -> None:
         result = self.run_primary(self.words(661))

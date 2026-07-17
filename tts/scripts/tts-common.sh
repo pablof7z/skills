@@ -193,25 +193,8 @@ sys.stdout.write(text)
 PY
 }
 
-strip_spoken_code_blocks() {
-  python3 - "$1" <<'PY'
-import re
-import sys
-
-text = sys.argv[1]
-pattern = re.compile(r"```([^\n`]*)\n.*?```", re.DOTALL)
-
-def replace(match):
-    fence = match.group(1).strip()
-    if not fence:
-        return match.group(0)
-    return " "
-
-result = pattern.sub(replace, text)
-result = re.sub(r"[ \t]+", " ", result)
-result = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", result)
-sys.stdout.write(result.strip())
-PY
+speech_text_for_markdown() {
+  python3 "$SCRIPT_DIR/tts_speech_text.py" "$1"
 }
 
 safe_path_component() {

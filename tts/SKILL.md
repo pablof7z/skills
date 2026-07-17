@@ -87,7 +87,7 @@ request identifier and delivery status without exposing files on the laptop.
   agent-chosen bounded blocking interval.
   Submitted answers, selected-suggestion details, and answer-attachment paths
   return in the TTS tool output.
-- **Attachments or formatted code**: Read
+- **Attachments, Markdown structure, or formatted code**: Read
   [rich-content.md](references/rich-content.md).
 - **No-play generation, status inspection, or failures**: Read
   [results-and-troubleshooting.md](references/results-and-troubleshooting.md).

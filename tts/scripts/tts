@@ -394,8 +394,7 @@ else
 fi
 DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
 PRIMARY_MESSAGE=$(normalize_literal_newlines "$PRIMARY_MESSAGE")
-TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
-TEXT=$(normalize_space "$TEXT")
+TEXT=$(speech_text_for_markdown "$DISPLAY_TEXT")
 PRIMARY_MESSAGE_LIMIT_TEXT=$(primary_message_word_limit_text "${MESSAGE:-${POSITIONAL[0]:-}}")
 SUBJECT=$(normalize_space "$SUBJECT")
 SUMMARY=$(normalize_space "$SUMMARY")

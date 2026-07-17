@@ -48,6 +48,14 @@ Treat attachments as optional branches. Do not attach routine logs, duplicate
 the primary message, or create supplemental files merely to make an update look
 substantial.
 
+## Spoken Markdown
+
+Use short Markdown headings and lists when they make the visible transcript
+easier to scan. Phrase headings as natural spoken labels. They do not need
+manual terminal punctuation: the runtime keeps the original Markdown visible
+while removing formatting markers and preserving audible pauses between
+headings, paragraphs, and list items.
+
 ## Formatted code
 
 Use a language-tagged fenced block for code that should remain visible but not

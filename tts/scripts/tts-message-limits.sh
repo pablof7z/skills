@@ -11,8 +11,7 @@ primary_message_word_limit_text() {
   local text="$1"
 
   text="$(normalize_literal_newlines "$text")"
-  text="$(strip_spoken_code_blocks "$text")"
-  normalize_space "$text"
+  speech_text_for_markdown "$text"
 }
 
 validate_primary_message_word_limit() {
