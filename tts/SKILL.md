@@ -47,11 +47,12 @@ Use the environment's execution handle and completion-wait mechanism; do not
 detach the command with shell process-management syntax.
 
 The ordinary command selects local synthesis or an approved paired laptop
-automatically; agents do not choose a playback transport. Local synthesis
-returns the TTS `id`, output path, and `queued` status after generation and
-attachment preparation; `--no-play` returns `generated`. Paired delivery
-returns its request identifier and delivery status without exposing files on
-the laptop.
+automatically; agents do not choose a playback transport. A `--no-play`
+request always uses a configured local Kokoro endpoint: it never traverses a
+paired connection or appears in the player. Local synthesis returns the TTS
+`id`, output path, and `queued` status after generation and attachment
+preparation; `--no-play` returns `generated`. Paired delivery returns its
+request identifier and delivery status without exposing files on the laptop.
 
 ## Conditional guidance
 

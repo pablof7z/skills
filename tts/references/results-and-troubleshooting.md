@@ -16,7 +16,9 @@ Use `--no-play` to generate an MP3 without queueing playback:
 ```
 
 The command returns only after the file exists. Its tool output includes the
-stable item ID and output path. `--no-play` cannot be combined with `--ask`.
+stable item ID and output path. With a configured local Kokoro endpoint, it
+generates on the invoking computer and neither sends a paired Nostr request nor
+queues player playback. `--no-play` cannot be combined with `--ask`.
 
 ## Inspect status when needed
 

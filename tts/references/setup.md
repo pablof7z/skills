@@ -11,6 +11,8 @@ For local synthesis, set this environment variable before running
 
 It is not required on a host with an approved paired laptop. Ordinary speech
 uses that laptop automatically when no local endpoint is configured.
+`--no-play` is intentionally different: it requires a local endpoint and never
+uses a paired laptop, because it creates an MP3 without any player side effect.
 
 ## Optional
 
