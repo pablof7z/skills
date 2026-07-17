@@ -4,3 +4,4 @@ __pycache__/
 .claude/worktrees/
 docs/wiki/_citations.log
 tts/macos/.visual-state/
+tts/mcp/.venv/

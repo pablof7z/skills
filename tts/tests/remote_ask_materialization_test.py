@@ -16,7 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tts" / "scripts"))
 
-from tts_remote_daemon import (
+from tts_remote_materialize import (
     environment_enabled,
     materialization_guidance,
     materialize_request,

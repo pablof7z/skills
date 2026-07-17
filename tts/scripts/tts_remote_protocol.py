@@ -101,11 +101,18 @@ def request_payload(event: dict[str, object]) -> dict[str, object] | None:
     wait = unique_tag_value(event, "wait")
     if questions is None or bool(questions) != bool(wait):
         return None
+    action_rows = tag_rows(event, "action")
+    action = action_rows[0][1] if len(action_rows) == 1 and len(action_rows[0]) == 2 else None
+    if action_rows and action != "generate":
+        return None
+    if action == "generate" and questions:
+        return None
     result: dict[str, object] = {
         "message": content,
         "subject": title,
         "agent_name": agent_name,
         "attachments": attachments,
+        "action": action or "speak",
     }
     if not questions:
         return result

@@ -1,6 +1,6 @@
 ---
 name: tts
-description: Generate spoken updates and answerable spoken questions through available local synthesis or paired-laptop playback. Use when the user requests narration, voice updates, spoken progress, audio playback, or TTS questions with suggestions or attachments.
+description: Generate spoken updates, hosted MP3 files, and answerable spoken questions through local or paired playback and MCP. Use when the user requests narration, voice updates, generated audio, spoken progress, audio playback, or TTS questions with suggestions or attachments.
 ---
 
 # TTS
@@ -71,3 +71,6 @@ request identifier and delivery status without exposing files on the laptop.
 - **No-play generation, status inspection, or failures**: Read
   [results-and-troubleshooting.md](references/results-and-troubleshooting.md).
 - **Endpoint configuration**: Read [setup.md](references/setup.md).
+- **MCP clients or HTTP deployment**: Read [mcp.md](references/mcp.md). The MCP
+  wrapper supports stdio, authenticated loopback Streamable HTTP, explicit
+  paired routing, and generation-only MP3 results hosted on Blossom.

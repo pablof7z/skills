@@ -8,6 +8,7 @@ import json
 import sys
 
 from tts_remote_state import error
+from tts_remote_generation import remote_generate
 from tts_remote_commands import (
     daemon_run,
     daemon_start,
@@ -52,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     speak.add_argument("--ask")
     speak.add_argument("--wait")
     speak.set_defaults(func=remote_speak, attach_flat=True)
+    generate = remote_commands.add_parser("generate")
+    generate.add_argument("--peer")
+    generate.add_argument("--agent-name", required=True)
+    generate.add_argument("--subject", required=True)
+    generate.add_argument("--message", required=True)
+    generate.add_argument("--wait", default="5m")
+    generate.set_defaults(func=remote_generate)
 
     daemon = commands.add_parser("daemon")
     daemon_commands = daemon.add_subparsers(dest="daemon_command", required=True)

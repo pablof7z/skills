@@ -20,6 +20,23 @@ uses a paired laptop, because it creates an MP3 without any player side effect.
 - `KOKORO_CAPTIONED_API_ENDPOINT` to override the inferred
   `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
 - Swift from Xcode or the Command Line Tools for the macOS app
+- `uv` for the MCP wrapper; its locked project installs the stable MCP Python
+  SDK below version 2
+- `nak` for real Nostr signing and paired transport, including the short-lived
+  Blossom authorization event used by `tts_generate`
+
+## MCP and Blossom
+
+The MCP wrapper defaults to `https://blossom.primal.net` for generation-only
+MP3 uploads. Optional overrides are:
+
+- `TTS_BLOSSOM_SERVER` for another HTTPS Blossom origin
+- `TTS_BLOSSOM_TIMEOUT_SECONDS` for the upload timeout
+- `TTS_BLOSSOM_MAX_BYTES` for the maximum generated MP3 size
+- `TTS_BLOSSOM_AUTH_SECONDS` for the short-lived upload authorization window
+
+HTTP MCP mode requires a bearer token in `TTS_MCP_TOKEN` by default. Read
+[mcp.md](mcp.md) for route and transport configuration.
 
 ## Suggested local env file
 
