@@ -13,7 +13,7 @@ struct PlayerIdentityPresentationTests {
 
         #expect(first == second)
         #expect(first.map(\.role) == [.project, .agent])
-        #expect(first.map(\.text) == ["example-project", "river-codex"])
+        #expect(first.map(\.text) == ["example-project", "river-codex · thread-123"])
         #expect(
             first[0].paletteIndex
                 == WorkspaceAccent.paletteIndex(forWorkspacePath: item.workspacePath)
@@ -43,7 +43,7 @@ struct PlayerIdentityPresentationTests {
         let segment = try #require(PlayerIdentityPresentation.segments(for: item).only)
 
         #expect(segment.role == .agent)
-        #expect(segment.text == "river-codex")
+        #expect(segment.text == "river-codex · thread-123")
         #expect(
             segment.paletteIndex
                 == WorkspaceAccent.paletteIndex(forAgentName: "river-codex")

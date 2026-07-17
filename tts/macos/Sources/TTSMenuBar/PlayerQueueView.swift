@@ -9,7 +9,7 @@ struct PlayerQueueView: View {
     let historyRevision: Int
     let generationProgressNow: Date
     let isViewingArchive: Bool
-    let historyProjectFilter: String?
+    let historyEntityFilters: HistoryEntityFilters
     let historySearchQuery: String
     let historyAgeFilter: HistoryAgeFilter
     let hasInteractedWithHistory: Bool
@@ -22,7 +22,7 @@ struct PlayerQueueView: View {
             historyRevision: historyRevision,
             generationProgressNow: generationProgressNow,
             isViewingArchive: isViewingArchive,
-            historyProjectFilter: historyProjectFilter,
+            historyEntityFilters: historyEntityFilters,
             historySearchQuery: historySearchQuery,
             historyAgeFilter: historyAgeFilter,
             hasInteractedWithHistory: hasInteractedWithHistory
@@ -61,7 +61,7 @@ extension PlayerQueueView: @MainActor Equatable {
             && lhs.historyRevision == rhs.historyRevision
             && lhs.generationProgressNow == rhs.generationProgressNow
             && lhs.isViewingArchive == rhs.isViewingArchive
-            && lhs.historyProjectFilter == rhs.historyProjectFilter
+            && lhs.historyEntityFilters == rhs.historyEntityFilters
             && lhs.historySearchQuery == rhs.historySearchQuery
             && lhs.historyAgeFilter == rhs.historyAgeFilter
             && lhs.hasInteractedWithHistory == rhs.hasInteractedWithHistory

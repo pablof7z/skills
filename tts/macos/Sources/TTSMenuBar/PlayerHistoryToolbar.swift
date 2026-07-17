@@ -47,9 +47,17 @@ extension NowSpeakingPanelController {
             searchQuery: presentation.historySearchQuery,
             now: playbackController.historyTimestampClock.now
         )
-        if let selected = presentation.historyProjectFilter, !projects.contains(selected) {
-            presentation.historyProjectFilter = nil
-        }
+        let agents = PlayerHistoryFilterPolicy.availableAgents(
+            in: historyItems,
+            ageFilter: presentation.historyAgeFilter,
+            hasInteractedWithHistory: presentation.hasInteractedWithHistory,
+            searchQuery: presentation.historySearchQuery,
+            now: playbackController.historyTimestampClock.now
+        )
+        presentation.retainAvailableHistoryFilters(
+            projects: Set(projects),
+            agents: Set(agents)
+        )
 
         let menu = NSMenu(title: "Filter History")
         let recentItems = NSMenuItem(
@@ -77,11 +85,17 @@ extension NowSpeakingPanelController {
 
         menu.addItem(historyAgeFilterMenuItem)
         menu.addItem(projectFilterMenuItem(projects: projects))
+        menu.addItem(agentFilterMenuItem(agents: agents))
         item.menu = menu
+
+        let activeCount = presentation.historyEntityFilters.activeCount
+            + (presentation.historyAgeFilter == .default ? 0 : 1)
+        item.image = PlayerHistoryFilterIcon.image(activeCount: activeCount)
+        item.label = activeCount == 0 ? "Filter" : "Filter \(activeCount)"
         let scope = presentation.isViewingArchive ? "Archived" : "Recent"
-        item.toolTip = presentation.historyProjectFilter.map {
-            "\(scope) history in \($0)"
-        } ?? "\(scope) history in all projects"
+        item.toolTip = activeCount == 0
+            ? "\(scope) history with no active filters"
+            : "\(scope) history with \(activeCount) active filter\(activeCount == 1 ? "" : "s")"
     }
 
     private var historyAgeFilterMenuItem: NSMenuItem {
@@ -110,7 +124,7 @@ extension NowSpeakingPanelController {
             keyEquivalent: ""
         )
         allProjects.target = self
-        allProjects.state = presentation.historyProjectFilter == nil ? .on : .off
+        allProjects.state = presentation.historyEntityFilters.projects.isEmpty ? .on : .off
         submenu.addItem(allProjects)
         if !projects.isEmpty {
             submenu.addItem(.separator())
@@ -123,7 +137,7 @@ extension NowSpeakingPanelController {
             )
             projectItem.target = self
             projectItem.representedObject = project
-            projectItem.state = presentation.historyProjectFilter == project ? .on : .off
+            projectItem.state = presentation.historyEntityFilters.projects.contains(project) ? .on : .off
             submenu.addItem(projectItem)
         }
         let item = NSMenuItem(title: "Projects", action: nil, keyEquivalent: "")
@@ -131,9 +145,50 @@ extension NowSpeakingPanelController {
         return item
     }
 
+    private func agentFilterMenuItem(agents: [HistoryAgentFilter]) -> NSMenuItem {
+        let submenu = NSMenu(title: "Agents")
+        let allAgents = NSMenuItem(
+            title: "All Agents",
+            action: #selector(selectHistoryAgent(_:)),
+            keyEquivalent: ""
+        )
+        allAgents.target = self
+        allAgents.state = presentation.historyEntityFilters.agents.isEmpty ? .on : .off
+        submenu.addItem(allAgents)
+        if !agents.isEmpty { submenu.addItem(.separator()) }
+        for agent in agents {
+            let agentItem = NSMenuItem(
+                title: agent.displayName,
+                action: #selector(selectHistoryAgent(_:)),
+                keyEquivalent: ""
+            )
+            agentItem.target = self
+            agentItem.representedObject = agent
+            agentItem.state = presentation.historyEntityFilters.agents.contains(agent) ? .on : .off
+            submenu.addItem(agentItem)
+        }
+        let item = NSMenuItem(title: "Agents", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+
     @objc func selectHistoryProject(_ sender: NSMenuItem) {
         presentation.registerHistoryInteraction()
-        presentation.historyProjectFilter = sender.representedObject as? String
+        if let project = sender.representedObject as? String {
+            presentation.toggleHistoryProject(project)
+        } else {
+            presentation.historyEntityFilters.projects.removeAll()
+        }
+        updateHistoryFilterMenu()
+    }
+
+    @objc func selectHistoryAgent(_ sender: NSMenuItem) {
+        presentation.registerHistoryInteraction()
+        if let agent = sender.representedObject as? HistoryAgentFilter {
+            presentation.toggleHistoryAgent(agent)
+        } else {
+            presentation.historyEntityFilters.agents.removeAll()
+        }
         updateHistoryFilterMenu()
     }
 

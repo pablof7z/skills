@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -23,6 +24,9 @@ SENSITIVE_NAMES = {
 }
 MAX_LOG_BYTES = 2 * 1024 * 1024
 MAX_HEADER_VALUE = 512
+_REQUEST_HEADERS: ContextVar[dict[str, str] | None] = ContextVar(
+    "tts_mcp_request_headers", default=None
+)
 
 
 class HeaderTrafficStore:
@@ -75,6 +79,8 @@ class HeaderAuditMiddleware:
             return
         started = time.time()
         status = 500
+        request_headers = decoded_headers(scope.get("headers", []))
+        context_token = _REQUEST_HEADERS.set(request_headers)
 
         async def capture(message) -> None:
             nonlocal status
@@ -85,25 +91,47 @@ class HeaderAuditMiddleware:
         try:
             await self.app(scope, receive, capture)
         finally:
-            self.store.append(
-                {
-                    "timestamp": int(started),
-                    "duration_ms": round((time.time() - started) * 1000, 2),
-                    "method": scope.get("method"),
-                    "path": scope.get("path"),
-                    "query_keys": sorted(
-                        {
-                            key
-                            for key, _value in parse_qsl(
-                                scope.get("query_string", b"").decode("utf-8", "ignore")
-                            )
-                        }
-                    ),
-                    "client": client_value(scope.get("client")),
-                    "status": status,
-                    "headers": sanitized_headers(scope.get("headers", [])),
-                }
-            )
+            try:
+                self.store.append(
+                    {
+                        "timestamp": int(started),
+                        "duration_ms": round((time.time() - started) * 1000, 2),
+                        "method": scope.get("method"),
+                        "path": scope.get("path"),
+                        "query_keys": sorted(
+                            {
+                                key
+                                for key, _value in parse_qsl(
+                                    scope.get("query_string", b"").decode("utf-8", "ignore")
+                                )
+                            }
+                        ),
+                        "client": client_value(scope.get("client")),
+                        "status": status,
+                        "headers": sanitized_headers(scope.get("headers", [])),
+                    }
+                )
+            finally:
+                _REQUEST_HEADERS.reset(context_token)
+
+
+def current_request_header(name: str) -> str | None:
+    headers = _REQUEST_HEADERS.get()
+    value = headers.get(name.lower()) if headers else None
+    return value if value and len(value) <= MAX_HEADER_VALUE else None
+
+
+def in_http_request() -> bool:
+    return _REQUEST_HEADERS.get() is not None
+
+
+def decoded_headers(rows: list[tuple[bytes, bytes]]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for raw_name, raw_value in rows:
+        name = raw_name.decode("latin-1").lower()
+        value = raw_value.decode("latin-1", errors="replace")
+        result[name] = f"{result[name]}, {value}" if name in result else value
+    return result
 
 
 def sanitized_headers(rows: list[tuple[bytes, bytes]]) -> dict[str, str]:

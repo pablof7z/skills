@@ -190,6 +190,13 @@ Authorization, cookies, API keys, client certificates, and any header whose
 name contains `token`, `secret`, `cookie`, or `key` are replaced with a short
 one-way fingerprint. The active file rotates at 2 MiB.
 
+When a caller supplies `x-openai-session`, HTTP speech requests retain that
+opaque value as the item's session identifier. The player shortens it only for
+display, while filtering uses the full value so separate ChatGPT conversations
+remain independently selectable. Paired delivery forwards the same identifier
+to the computer that owns playback. Callers that omit the header continue to
+appear under their ordinary agent name.
+
 ## Resources and privacy
 
 The server exposes `tts://status`, `tts://health`, item records, generated audio,

@@ -41,6 +41,8 @@ def materialize_request(
     environment["TTS_ITEM_ID"] = item_id
     environment["TTS_FORCE_LOCAL"] = "1"
     environment["TTS_REMOTE_MATERIALIZATION"] = "1"
+    if content.get("session_id"):
+        environment["TTS_SESSION_ID"] = str(content["session_id"])
     completed = subprocess.run(
         command,
         env=environment,

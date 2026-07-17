@@ -11,6 +11,7 @@ from typing import Iterable
 
 from tts_blossom import upload_mp3
 from tts_mcp_config import MCPConfig
+from tts_mcp_http_log import current_request_header, in_http_request
 from tts_mcp_models import AttachmentInput, ItemFilters, QuestionBundleInput
 from tts_mcp_state import sanitize_item, sanitize_value
 from tts_remote_state import active_peer, ensure_backend
@@ -227,6 +228,11 @@ class TTSAdapter:
         force_local: bool = False,
     ) -> dict[str, object]:
         environment = os.environ.copy()
+        if in_http_request():
+            environment["TTS_HARNESS"] = "mcp"
+        session_id = current_request_header("x-openai-session")
+        if session_id:
+            environment["TTS_SESSION_ID"] = session_id
         if force_local:
             environment["TTS_FORCE_LOCAL"] = "1"
         process = await asyncio.create_subprocess_exec(

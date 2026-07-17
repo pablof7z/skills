@@ -78,6 +78,7 @@ class RemoteAskProtocolTests(unittest.TestCase):
             attachments=[],
             ask=ask,
             wait="30s",
+            session_id="v1/chat-a",
         )
         return fake_signed_event(
             kind=9,
@@ -116,6 +117,8 @@ class RemoteAskProtocolTests(unittest.TestCase):
         payload = request_payload(request)
         self.assertIsNotNone(payload)
         self.assertEqual(payload["summary"], "The release is ready and needs a deployment decision.")
+        self.assertEqual(payload["session_id"], "v1/chat-a")
+        self.assertIn(["session", "v1/chat-a"], request["tags"])
         bundle = json.loads(str(payload["ask"]))
         self.assertEqual(bundle["questions"][0]["short_title"], "Regions")
         self.assertEqual(bundle["questions"][0]["type"], "multiple_choice")

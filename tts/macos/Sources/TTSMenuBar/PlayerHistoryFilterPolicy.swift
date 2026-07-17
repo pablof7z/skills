@@ -30,7 +30,7 @@ enum HistoryAgeFilter: CaseIterable, Equatable {
 enum PlayerHistoryFilterPolicy {
     static func filteredItems(
         in items: [TTSItem],
-        project: String?,
+        entityFilters: HistoryEntityFilters,
         ageFilter: HistoryAgeFilter,
         hasInteractedWithHistory: Bool,
         searchQuery: String,
@@ -45,7 +45,7 @@ enum PlayerHistoryFilterPolicy {
                 now: now,
                 calendar: calendar
             )
-                && (project == nil || $0.workspaceName == project)
+                && entityFilters.matches($0)
                 && matchesSearch($0, query: searchQuery)
         }
     }
@@ -60,13 +60,32 @@ enum PlayerHistoryFilterPolicy {
     ) -> [String] {
         Array(Set(filteredItems(
             in: items,
-            project: nil,
+            entityFilters: HistoryEntityFilters(),
             ageFilter: ageFilter,
             hasInteractedWithHistory: hasInteractedWithHistory,
             searchQuery: searchQuery,
             now: now,
             calendar: calendar
         ).compactMap(\.workspaceName))).sorted()
+    }
+
+    static func availableAgents(
+        in items: [TTSItem],
+        ageFilter: HistoryAgeFilter,
+        hasInteractedWithHistory: Bool,
+        searchQuery: String,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> [HistoryAgentFilter] {
+        Array(Set(filteredItems(
+            in: items,
+            entityFilters: HistoryEntityFilters(),
+            ageFilter: ageFilter,
+            hasInteractedWithHistory: hasInteractedWithHistory,
+            searchQuery: searchQuery,
+            now: now,
+            calendar: calendar
+        ).map(\.historyAgentFilter))).sorted { $0.displayName < $1.displayName }
     }
 
     private static func includes(
@@ -99,6 +118,7 @@ enum PlayerHistoryFilterPolicy {
             item.previewSummary,
             item.text,
             item.displayAgent,
+            item.historyAgentFilter.displayName,
             item.workspaceName,
         ]
             .compactMap(\.self)

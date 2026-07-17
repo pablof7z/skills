@@ -22,6 +22,7 @@ def request_tags(
     attachments: list[dict[str, str]],
     ask: dict[str, object] | None = None,
     wait: str | None = None,
+    session_id: str | None = None,
 ) -> list[list[str]]:
     title, summary = normalized_request_copy(title, summary)
     tags = [
@@ -31,6 +32,8 @@ def request_tags(
         ["summary", summary],
         ["agent", agent_name],
     ]
+    if session_id:
+        tags.append(["session", session_id])
     tags.extend(["attachment", item["path"], item["label"]] for item in attachments)
     if not ask:
         return tags
@@ -130,6 +133,11 @@ def request_payload(event: dict[str, object]) -> dict[str, object] | None:
         "attachments": attachments,
         "action": action or "speak",
     }
+    session_rows = tag_rows(event, "session")
+    if len(session_rows) > 1 or any(len(row) != 2 or not row[1] for row in session_rows):
+        return None
+    if session_rows:
+        result["session_id"] = session_rows[0][1]
     if not questions:
         return result
     try:

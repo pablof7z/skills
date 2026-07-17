@@ -11,7 +11,7 @@ final class NowSpeakingPresentation: ObservableObject {
     @Published var selectedAttachmentID: String?
     @Published private(set) var selectedAttachmentText: String?
     @Published private(set) var selectedAttachmentImage: NSImage?
-    @Published var historyProjectFilter: String?
+    @Published var historyEntityFilters = HistoryEntityFilters()
     @Published var historySearchQuery = ""
     @Published var historyAgeFilter: HistoryAgeFilter = .default
     @Published private(set) var hasInteractedWithHistory = false
@@ -77,6 +77,26 @@ final class NowSpeakingPresentation: ObservableObject {
 
     func registerHistoryInteraction() {
         hasInteractedWithHistory = true
+    }
+
+    func toggleHistoryProject(_ project: String) {
+        registerHistoryInteraction()
+        historyEntityFilters.toggle(project: project)
+    }
+
+    func toggleHistoryAgent(_ agent: HistoryAgentFilter) {
+        registerHistoryInteraction()
+        historyEntityFilters.toggle(agent: agent)
+    }
+
+    func retainAvailableHistoryFilters(
+        projects: Set<String>,
+        agents: Set<HistoryAgentFilter>
+    ) {
+        var retained = historyEntityFilters
+        retained.projects.formIntersection(projects)
+        retained.agents.formIntersection(agents)
+        if retained != historyEntityFilters { historyEntityFilters = retained }
     }
 
     func showHistorySearch() {

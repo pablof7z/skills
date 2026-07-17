@@ -89,7 +89,7 @@ struct NowSpeakingHUDView: View {
                 historyRevision: controller.historyRevision,
                 generationProgressNow: controller.isGenerating ? controller.generationProgressNow : .distantPast,
                 isViewingArchive: presentation.isViewingArchive,
-                historyProjectFilter: presentation.historyProjectFilter,
+                historyEntityFilters: presentation.historyEntityFilters,
                 historySearchQuery: presentation.historySearchQuery,
                 historyAgeFilter: presentation.historyAgeFilter,
                 hasInteractedWithHistory: presentation.hasInteractedWithHistory
