@@ -8,7 +8,11 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import ThreadingHTTPServer
+
+from tts.tests.tts_test_support import KokoroHandler
 
 
 class AutomaticTransportCLITests(unittest.TestCase):
@@ -94,6 +98,48 @@ class AutomaticTransportCLITests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no TTS playback destination is available", result.stderr)
+
+    def test_no_play_with_local_endpoint_stays_off_the_paired_transport(self) -> None:
+        self.pair()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            transport_before = self.transport_file.read_bytes()
+            environment = self.environment(self.server_state)
+            environment.update({
+                "KOKORO_API_ENDPOINT": (
+                    f"http://127.0.0.1:{server.server_port}/v1/audio/speech"
+                ),
+                "TTS_SESSIONS_ROOT": str(self.server_state / "sessions"),
+            })
+            result = subprocess.run(
+                [
+                    str(self.tts),
+                    "--agent-name", "local no-play",
+                    "--subject", "Local no-play remains private and unplayed",
+                    "--no-play",
+                    "--message", "Generate this only on the originating host.",
+                ],
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+
+            output = json.loads(result.stdout)
+            item = json.loads(
+                (self.server_state / "items" / f"{output['id']}.json").read_text()
+            )
+            self.assertEqual(output["status"], "generated")
+            self.assertTrue(Path(output["output_file"]).is_file())
+            self.assertEqual(item["status"], "generated")
+            self.assertEqual(self.transport_file.read_bytes(), transport_before)
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
 
     def test_laptop_daemon_recreates_lost_group_and_peer_permissions(self) -> None:
         self.pair()
