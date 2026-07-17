@@ -202,7 +202,9 @@ def emit_session_context(payload: dict[str, Any]) -> int:
         context = (
             "WorktreeGuard is active for this protected base checkout:\n"
             f"{base_path}\n\n"
-            "Do mutating work from a Git worktree, not this protected base checkout."
+            "Do durable repository work from a Git worktree, not this protected "
+            "base checkout. Build products and other Git-ignored generated "
+            "artifacts may be created here."
         )
     else:
         try:

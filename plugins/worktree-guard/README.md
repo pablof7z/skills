@@ -11,7 +11,8 @@ when it exists, then fall back to the hook bundled in the installed plugin
 cache. The bundled hook uses the bundled WorktreeGuard-lite command by
 default; set `WTG_BIN` to delegate hook events to another WorktreeGuard
 command. Git main worktrees are protected by default; linked Git worktrees are
-allowed mutation targets, and non-Git directories are ignored.
+allowed mutation targets, Git-ignored build and generated artifacts are
+allowed in protected bases, and non-Git directories are ignored.
 
 ```bash
 <plugin-root>/bin/wtg status --repo <repo>
@@ -44,8 +45,9 @@ entry, honors simple shell `cd <path> && git ...` cwd changes, and shows a
 macOS approval prompt for temporary base checkout access. Denied actions are
 appended to `~/worktreeguard-denied-actions.jsonl`.
 Agent write tools are path-based: known targets outside protected main
-worktrees are allowed even when the session cwd is protected, while known
-targets inside a protected main worktree are denied.
+worktrees are allowed even when the session cwd is protected. Targets inside
+a protected main worktree are denied when tracked or unignored and allowed
+when `git check-ignore` identifies them as generated artifacts.
 
 When the local approval dialog is unavailable, WorktreeGuard can ask a paired
 attended laptop instead. On the laptop, run `wtg pair offer --relay <relay>`
@@ -156,8 +158,9 @@ loaded.
 
 ## Hook Coverage
 
-- `SessionStart`: tells the agent whether the current repo is protected and
-  reminds it to do mutating work from a Git worktree.
+- `SessionStart`: tells the agent whether the current repo is protected,
+  routes durable repository work to a worktree, and permits Git-ignored build
+  and generated artifacts in the base checkout.
 - `PreToolUse`: checks Bash, shell, patch, write, edit, and MCP tool attempts.
 - `PermissionRequest`: allows a valid local grant or denies protected-base
   mutations with Git-native worktree guidance.

@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WTG = ROOT / "bin" / "wtg"
 HOOKS = ROOT / "hooks" / "hooks.json"
 DENIAL_GUIDANCE = (
+    "Git-ignored build and generated artifacts are allowed",
     "WorktreeGuard bug",
     "tenex-edge fabric",
     "skills.worktree-guard",
@@ -49,6 +50,7 @@ def main() -> int:
 
         failures = hook_routing_failures(temp) + shim_routing_failures(temp)
         paths = make_repo_fixture(temp)
+        failures += session_context_failures(paths["base"], env)
         cases = build_cases(paths)
         for index, case in enumerate(cases, start=1):
             payload = dict(case.payload)
@@ -175,6 +177,36 @@ def denial_guidance_failures(
     ]
 
 
+def session_context_failures(
+    base: Path, env: dict[str, str]
+) -> list[tuple[Case, str, str, str]]:
+    result = subprocess.run(
+        [str(WTG), "hook", "codex", "session-start"],
+        input=json.dumps({"cwd": str(base), "session_id": "probe-context"}).encode(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    stdout = result.stdout.decode()
+    required = (
+        "durable repository work",
+        "Git-ignored generated artifacts may be created here",
+    )
+    missing = [snippet for snippet in required if snippet not in stdout]
+    if result.returncode == 0 and not missing and "Do mutating work" not in stdout:
+        print("ALLOW protected-base session context permits ignored artifacts")
+        return []
+    return [
+        (
+            Case("protected-base session context permits ignored artifacts", "updated guidance", {}),
+            f"missing: {', '.join(missing)}",
+            stdout,
+            result.stderr.decode(),
+        )
+    ]
+
+
 def shim_routing_failures(temp: Path) -> list[tuple[Case, str, str, str]]:
     fake_wtg = temp / "fake-wtg"
     fake_wtg.write_text('#!/bin/sh\nprintf "%s\\n" "$*"\n', encoding="utf-8")
@@ -229,7 +261,11 @@ def make_repo_fixture(temp: Path) -> dict[str, Path]:
     run(["git", "-C", str(base), "config", "user.email", "probe@example.com"])
     run(["git", "-C", str(base), "config", "user.name", "Probe"])
     (base / "README.md").write_text("hello\n", encoding="utf-8")
-    run(["git", "-C", str(base), "add", "README.md"])
+    (base / ".gitignore").write_text("build/\n*.xcodeproj/\n", encoding="utf-8")
+    run(["git", "-C", str(base), "add", "README.md", ".gitignore"])
+    (base / "build").mkdir()
+    (base / "build" / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    run(["git", "-C", str(base), "add", "--force", "build/tracked.txt"])
     run(["git", "-C", str(base), "commit", "-q", "-m", "init"])
     run(["git", "-C", str(base), "branch", "-M", "main"])
     run(["git", "-C", str(base), "worktree", "add", "-q", "-b", "task-out", str(outside_worktree)])
@@ -359,6 +395,10 @@ def build_cases(paths: dict[str, Path]) -> list[Case]:
         patch_case("deny apply_patch base add", "deny", base, patch("Add File", base / "NEW.md")),
         patch_case("deny apply_patch base delete", "deny", base, patch("Delete File", base / "README.md")),
         patch_case("deny apply_patch relative base update", "deny", base, patch("Update File", Path("README.md"))),
+        patch_case("allow apply_patch ignored build artifact", "allow", base, patch("Add File", base / "build" / "generated.json")),
+        patch_case("allow apply_patch ignored project file", "allow", base, patch("Add File", base / "RockingLife.xcodeproj" / "project.pbxproj")),
+        patch_case("deny tracked file under ignored directory", "deny", base, patch("Update File", base / "build" / "tracked.txt")),
+        patch_case("deny mixed ignored and durable base targets", "deny", base, patch("Add File", base / "build" / "generated.json") + patch("Update File", base / "README.md")),
         patch_case("allow apply_patch external absolute", "allow", base, patch("Update File", external_file)),
         patch_case(
             "allow apply_patch external relative workdir",
@@ -398,6 +438,7 @@ def build_cases(paths: dict[str, Path]) -> list[Case]:
         write_tool("deny Edit base file path", "deny", base, "Edit", {"file_path": str(base / "README.md")}),
         write_tool("allow Write worktree path", "allow", base, "Write", {"path": str(outside / "created.txt")}),
         write_tool("deny Write base path", "deny", base, "Write", {"path": str(base / "created.txt")}),
+        write_tool("allow Write ignored base path", "allow", base, "Write", {"path": str(base / "build" / "output.bin")}),
         write_tool("allow unknown Write outside cwd", "allow", external_dir, "Write", {}),
         write_tool("deny unknown Write protected cwd", "deny", base, "Write", {}),
         tool("allow MCP read shape", "allow", base, "mcp__server__read_file", {}),
