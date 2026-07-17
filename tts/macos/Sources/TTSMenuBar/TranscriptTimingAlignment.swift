@@ -6,8 +6,13 @@ struct TranscriptAlignedTiming: Equatable {
 }
 
 enum TranscriptTimingAlignment {
+    private struct SourceToken {
+        let canonical: String
+        let isNumeric: Bool
+    }
+
     private struct ProviderToken {
-        let normalized: String
+        let canonical: String
         var timing: TranscriptAlignedTiming
     }
 
@@ -17,13 +22,15 @@ enum TranscriptTimingAlignment {
     }
 
     private static let maximumCompoundLength = 8
+    // A bad token must not jump across a sentence to a later repeated word.
+    private static let maximumProviderLookahead = 12
 
     static func align(
         sourceTokens: [String],
         timings: [TTSWordTiming]?
     ) -> [TranscriptAlignedTiming?] {
         guard !sourceTokens.isEmpty else { return [] }
-        let source = sourceTokens.map(normalize)
+        let source = sourceTokens.map(sourceToken)
         let provider = providerTokens(from: timings)
         guard !provider.isEmpty else {
             return Array(repeating: nil, count: source.count)
@@ -69,8 +76,8 @@ enum TranscriptTimingAlignment {
         guard let timings else { return [] }
         var result: [ProviderToken] = []
         for timing in timings where timing.startTime.isFinite && timing.endTime.isFinite {
-            let normalized = normalize(timing.word)
-            if normalized.isEmpty {
+            let canonical = providerCanonical(timing.word)
+            if canonical.isEmpty {
                 if let last = result.indices.last {
                     result[last].timing = TranscriptAlignedTiming(
                         startTime: result[last].timing.startTime,
@@ -80,7 +87,7 @@ enum TranscriptTimingAlignment {
                 continue
             }
             result.append(ProviderToken(
-                normalized: normalized,
+                canonical: canonical,
                 timing: TranscriptAlignedTiming(
                     startTime: max(0, timing.startTime),
                     endTime: max(timing.startTime, timing.endTime)
@@ -91,7 +98,7 @@ enum TranscriptTimingAlignment {
     }
 
     private static func alignmentScore(
-        source: [String],
+        source: [SourceToken],
         provider: [ProviderToken],
         startingAt providerStart: Int
     ) -> Int {
@@ -116,12 +123,13 @@ enum TranscriptTimingAlignment {
     }
 
     private static func nextMatch(
-        source: [String],
+        source: [SourceToken],
         at sourceIndex: Int,
         provider: [ProviderToken],
         startingAt providerIndex: Int
     ) -> (index: Int, match: Match)? {
-        for index in providerIndex..<provider.count {
+        let upperBound = min(provider.count, providerIndex + maximumProviderLookahead)
+        for index in providerIndex..<upperBound {
             if let match = match(source: source, at: sourceIndex, provider: provider, at: index) {
                 return (index, match)
             }
@@ -130,37 +138,38 @@ enum TranscriptTimingAlignment {
     }
 
     private static func match(
-        source: [String],
+        source: [SourceToken],
         at sourceIndex: Int,
         provider: [ProviderToken],
         at providerIndex: Int
     ) -> Match? {
+        if source[sourceIndex].canonical == provider[providerIndex].canonical {
+            return Match(sourceCount: 1, providerCount: 1)
+        }
+
         let maximumSourceCount = min(maximumCompoundLength, source.count - sourceIndex)
-        if maximumSourceCount >= 2 {
-            var merged = source[sourceIndex]
-            for count in 2...maximumSourceCount {
-                merged += source[sourceIndex + count - 1]
-                if merged == provider[providerIndex].normalized {
-                    return Match(sourceCount: count, providerCount: 1)
-                }
-            }
-        }
-
         let maximumProviderCount = min(maximumCompoundLength, provider.count - providerIndex)
-        if maximumProviderCount >= 2 {
-            var merged = provider[providerIndex].normalized
-            for count in 2...maximumProviderCount {
-                merged += provider[providerIndex + count - 1].normalized
-                if source[sourceIndex] == merged {
-                    return Match(sourceCount: 1, providerCount: count)
+        var best: Match?
+        for sourceCount in 1...maximumSourceCount {
+            let sourceSlice = source[sourceIndex..<(sourceIndex + sourceCount)]
+            let sourceCanonical = sourceSlice.map(\.canonical).joined()
+            let ignoresNumberConnector = sourceSlice.contains { $0.isNumeric }
+            for providerCount in 1...maximumProviderCount {
+                guard sourceCount > 1 || providerCount > 1 else { continue }
+                let providerCanonical = provider[providerIndex..<(providerIndex + providerCount)]
+                    .lazy
+                    .map(\.canonical)
+                    .filter { !ignoresNumberConnector || $0 != "and" }
+                    .reduce(into: "") { $0 += $1 }
+                guard sourceCanonical == providerCanonical else { continue }
+                let candidate = Match(sourceCount: sourceCount, providerCount: providerCount)
+                if let best, best.sourceCount + best.providerCount <= sourceCount + providerCount {
+                    continue
                 }
+                best = candidate
             }
         }
-
-        guard tokensCorrespond(source[sourceIndex], provider[providerIndex].normalized) else {
-            return nil
-        }
-        return Match(sourceCount: 1, providerCount: 1)
+        return best
     }
 
     private static func apply(
@@ -188,10 +197,28 @@ enum TranscriptTimingAlignment {
             .joined()
     }
 
-    private static func tokensCorrespond(_ source: String, _ provider: String) -> Bool {
-        guard !source.isEmpty, !provider.isEmpty else { return false }
-        if source == provider { return true }
-        guard min(source.count, provider.count) >= 3 else { return false }
-        return source.contains(provider) || provider.contains(source)
+    private static func sourceToken(_ token: String) -> SourceToken {
+        let normalized = normalize(token)
+        let isNumeric = !normalized.isEmpty && normalized.unicodeScalars.allSatisfy {
+            CharacterSet.decimalDigits.contains($0)
+        }
+        guard isNumeric, let value = Int64(normalized) else {
+            return SourceToken(canonical: normalized, isNumeric: false)
+        }
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .spellOut
+        let spoken = formatter.string(from: NSNumber(value: value)).map(normalize) ?? normalized
+        return SourceToken(canonical: spoken, isNumeric: true)
+    }
+
+    private static func providerCanonical(_ token: String) -> String {
+        var canonical = normalize(token)
+        // Kokoro can attach the spoken hyphen marker to a technical compound,
+        // for example `all-kind-1` becomes `all-kindminus`, `one`.
+        if canonical != "minus", canonical.hasSuffix("minus") {
+            canonical.removeLast("minus".count)
+        }
+        return canonical
     }
 }
