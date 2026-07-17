@@ -56,7 +56,8 @@ auxiliary artifact, or hear expanded Markdown or text as a deeper narrated
 branch. Treat supporting material as a normal part of a substantive update, not
 an exception. Link directly to an attachment from the primary message with
 `[Attachment label](attachment:)`; the visible label must exactly match one
-`--attach` label:
+`--attach` label. The player presents that full label as one inline attachment
+action rather than a transcript seek target:
 
 ```bash
 <skill-dir>/scripts/tts \
