@@ -66,7 +66,7 @@ the environment variable above takes precedence when present.
 The script first requests captioned speech with word timestamps. If that route
 is unavailable or returns an invalid response, it warns and falls back to the
 standard audio endpoint so speech generation still succeeds; legacy items then
-show phrase progress without claiming exact word timing.
+show phrase progress without claiming exact timing within the focused phrase.
 
 Media handoff is disabled by default. Users can opt in from Preferences to let
 TTS pause Music and Spotify through their app-specific automation interfaces.

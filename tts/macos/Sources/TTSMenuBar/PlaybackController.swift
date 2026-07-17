@@ -132,11 +132,13 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             NSLog("TTS queue initialization failed: %@", error.localizedDescription)
         }
         refresh()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refresh()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
     }
 
     func shutdown() {
