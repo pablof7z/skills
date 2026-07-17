@@ -22,6 +22,7 @@ extension NowSpeakingPanelController {
     func presentationDidChange() {
         updateQuestionInputAvailability()
         updateHistoryNavigation()
+        updateHistorySearchToolbar()
         synchronizeVisibleAskQueueHold()
         let isHovered = presentation.isHovered
         guard isHovered != observedHover else { return }

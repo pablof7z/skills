@@ -10,6 +10,8 @@ struct PlayerHistoryView: View {
     let isViewingArchive: Bool
     let historyProjectFilter: String?
     let historySearchQuery: String
+    let historyAgeFilter: HistoryAgeFilter
+    let hasInteractedWithHistory: Bool
 
     var body: some View {
         Group {
@@ -30,6 +32,7 @@ struct PlayerHistoryView: View {
                     PlayerHistoryRow(
                         item: item,
                         action: {
+                            presentation.registerHistoryInteraction()
                             presentation.revealForDirectSelection(itemID: item.id)
                             if item.status == .generating || item.isPendingQuestion {
                                 presentation.previewPendingItem(item)
@@ -41,7 +44,10 @@ struct PlayerHistoryView: View {
                         isRetrying: controller.isRetrying(item),
                         generationProgress: generationProgress,
                         timestampNow: historyClock.now,
-                        onArchive: { controller.setArchived(!item.archived, for: item) }
+                        onArchive: {
+                            presentation.registerHistoryInteraction()
+                            controller.setArchived(!item.archived, for: item)
+                        }
                     )
                         .listRowInsets(EdgeInsets(
                             top: 8,
@@ -67,10 +73,14 @@ struct PlayerHistoryView: View {
     }
 
     private var filteredItems: [TTSItem] {
-        historyItems.filter { item in
-            let matchesProject = historyProjectFilter.map { item.workspaceName == $0 } ?? true
-            return matchesProject && matchesSearch(item)
-        }
+        PlayerHistoryFilterPolicy.filteredItems(
+            in: historyItems,
+            project: historyProjectFilter,
+            ageFilter: historyAgeFilter,
+            hasInteractedWithHistory: hasInteractedWithHistory,
+            searchQuery: historySearchQuery,
+            now: historyClock.now
+        )
     }
 
     private var emptyStateTitle: String {
@@ -83,13 +93,6 @@ struct PlayerHistoryView: View {
         return historyProjectFilter == nil ? "No recent speech" : "No speech for this project"
     }
 
-    private func matchesSearch(_ item: TTSItem) -> Bool {
-        let query = historySearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return true }
-        return [item.nowSpeakingTitle, item.text, item.displayAgent, item.workspaceName]
-            .compactMap(\.self)
-            .contains { $0.localizedCaseInsensitiveContains(query) }
-    }
 }
 
 extension PlayerHistoryView: @MainActor Equatable {
@@ -102,6 +105,8 @@ extension PlayerHistoryView: @MainActor Equatable {
             && lhs.isViewingArchive == rhs.isViewingArchive
             && lhs.historyProjectFilter == rhs.historyProjectFilter
             && lhs.historySearchQuery == rhs.historySearchQuery
+            && lhs.historyAgeFilter == rhs.historyAgeFilter
+            && lhs.hasInteractedWithHistory == rhs.hasInteractedWithHistory
     }
 }
 
