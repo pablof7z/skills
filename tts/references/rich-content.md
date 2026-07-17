@@ -33,6 +33,8 @@ Pair that message with `--attach "Architectural proposal" ./proposal.md`.
 Keep the label in the visible link text; do not put a path or label after
 `attachment:`. The player only activates a unique exact label match, so a
 missing or duplicated label stays inert rather than opening the wrong file.
+A resolved label is shown as one inline attachment action; hovering it does not
+apply the transcript's per-word seek treatment.
 
 Markdown and text attachments are copied into durable storage and narrated
 before the command returns. Images and SVGs preview inline, Mermaid (`.mmd`)

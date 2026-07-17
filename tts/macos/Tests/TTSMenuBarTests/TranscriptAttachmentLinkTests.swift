@@ -85,5 +85,20 @@ extension QueueStoreTests {
 
         #expect(textView.attachment(atCharacterIndex: labelRange.location) == expected)
         #expect(textView.attachment(atCharacterIndex: 0) == nil)
+        #expect(textView.hoverTarget(atCharacterIndex: labelRange.location) == .attachment(labelRange))
+        #expect(textView.hoverTarget(atCharacterIndex: labelRange.location + 8) == .attachment(labelRange))
+        #expect(textView.hoverTarget(atCharacterIndex: 0) == .word(0))
+
+        textView.update(
+            text: "Open [Why this matters](attachment:).",
+            timings: nil,
+            currentTime: 0,
+            duration: 0,
+            accent: .systemPink,
+            onSeek: { _ in },
+            attachments: [],
+            onOpenAttachment: nil
+        )
+        #expect(textView.hoverTarget(atCharacterIndex: labelRange.location) == .word(1))
     }
 }
