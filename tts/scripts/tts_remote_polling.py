@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+
 from tts_pair_token import PAIRING_KIND
 from tts_remote_channel import channel_parts
 from tts_remote_config import remote_config
@@ -70,7 +72,21 @@ def polling_coordinates() -> tuple[set[str], dict[str, set[str]]]:
 
 
 def cursor_value(value: object) -> int | None:
-    return max(0, int(value)) if isinstance(value, int) else None
+    if not isinstance(value, int):
+        return None
+    # Relay cursors are advanced as soon as a batch is fetched, while an
+    # individual request may still be awaiting local authorization or
+    # materialization. Re-read a short overlap on the next poll so a brief
+    # connectivity loss cannot turn that request into a permanent gap. The
+    # daemon-seen ledger keeps the overlap idempotent.
+    return max(0, int(value) - cursor_overlap_seconds())
+
+
+def cursor_overlap_seconds() -> int:
+    try:
+        return max(1, min(300, int(os.environ.get("TTS_REMOTE_CURSOR_OVERLAP_SECONDS", "60"))))
+    except ValueError:
+        return 60
 
 
 def newest_timestamp(events: list[dict[str, object]], since: int | None) -> int:
