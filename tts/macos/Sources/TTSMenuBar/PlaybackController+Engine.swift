@@ -88,7 +88,8 @@ extension PlaybackController {
         _ queuedItem: TTSItem,
         initiator: TTSPlaybackInitiator = .automatic
     ) {
-        guard !isPlaybackBlocked else { return }
+        let opensPaused = isPlaybackBlocked && initiator == .direct
+        guard !isPlaybackBlocked || opensPaused else { return }
         guard FileManager.default.fileExists(atPath: queuedItem.outputFile) else {
             fail(queuedItem, message: "Audio file is no longer available.")
             return
@@ -107,7 +108,7 @@ extension PlaybackController {
             }
 
             var item = queuedItem
-            item.status = .playing
+            item.status = opensPaused ? .paused : .playing
             item.startedAt = Int64(Date().timeIntervalSince1970)
             item.completedAt = nil
             item.duration = audioPlayer.duration
@@ -132,7 +133,11 @@ extension PlaybackController {
             currentTime = audioPlayer.currentTime
             playbackRate = preferredRate
             replaceItem(item)
-            beginPlayback(audioPlayer, for: item)
+            if opensPaused {
+                automaticallyPausedItemID = item.id
+            } else {
+                beginPlayback(audioPlayer, for: item)
+            }
         } catch {
             fail(queuedItem, message: error.localizedDescription)
         }
