@@ -11,6 +11,8 @@ struct PlayerQueueView: View {
     let isViewingArchive: Bool
     let historyProjectFilter: String?
     let historySearchQuery: String
+    let historyAgeFilter: HistoryAgeFilter
+    let hasInteractedWithHistory: Bool
 
     var body: some View {
         PlayerHistoryView(
@@ -21,7 +23,9 @@ struct PlayerQueueView: View {
             generationProgressNow: generationProgressNow,
             isViewingArchive: isViewingArchive,
             historyProjectFilter: historyProjectFilter,
-            historySearchQuery: historySearchQuery
+            historySearchQuery: historySearchQuery,
+            historyAgeFilter: historyAgeFilter,
+            hasInteractedWithHistory: hasInteractedWithHistory
         )
         .equatable()
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -59,6 +63,8 @@ extension PlayerQueueView: @MainActor Equatable {
             && lhs.isViewingArchive == rhs.isViewingArchive
             && lhs.historyProjectFilter == rhs.historyProjectFilter
             && lhs.historySearchQuery == rhs.historySearchQuery
+            && lhs.historyAgeFilter == rhs.historyAgeFilter
+            && lhs.hasInteractedWithHistory == rhs.hasInteractedWithHistory
     }
 }
 

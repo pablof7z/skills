@@ -29,7 +29,19 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
             item.isNavigational = true
             historyBackToolbarItem = item
             return item
-        case PlayerHistoryToolbarPolicy.searchItemIdentifier:
+        case PlayerHistoryToolbarPolicy.searchButtonItemIdentifier:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Search"
+            item.paletteLabel = "Search History"
+            item.image = NSImage(
+                systemSymbolName: "magnifyingglass",
+                accessibilityDescription: "Search speech history"
+            )
+            item.target = self
+            item.action = #selector(showHistorySearch)
+            item.toolTip = "Search speech"
+            return item
+        case PlayerHistoryToolbarPolicy.searchFieldItemIdentifier:
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
             item.label = "Search"
             item.paletteLabel = "Search History"
@@ -38,7 +50,9 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
             item.searchField.action = #selector(historySearchChanged(_:))
             item.searchField.sendsSearchStringImmediately = true
             item.searchField.stringValue = presentation.historySearchQuery
+            item.searchField.delegate = self
             item.searchField.setAccessibilityLabel("Search speech history")
+            historySearchToolbarItem = item
             return item
         case PlayerHistoryToolbarPolicy.filterItemIdentifier:
             let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)

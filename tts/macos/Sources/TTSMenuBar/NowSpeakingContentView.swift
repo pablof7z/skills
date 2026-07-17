@@ -89,7 +89,9 @@ struct NowSpeakingHUDView: View {
                 generationProgressNow: controller.isGenerating ? controller.generationProgressNow : .distantPast,
                 isViewingArchive: presentation.isViewingArchive,
                 historyProjectFilter: presentation.historyProjectFilter,
-                historySearchQuery: presentation.historySearchQuery
+                historySearchQuery: presentation.historySearchQuery,
+                historyAgeFilter: presentation.historyAgeFilter,
+                hasInteractedWithHistory: presentation.hasInteractedWithHistory
             )
                 .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

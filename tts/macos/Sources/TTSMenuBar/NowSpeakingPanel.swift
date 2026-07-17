@@ -30,6 +30,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     var lastDuration: TimeInterval = 0
     var observedHover = false
     var historyFilterToolbarItem: NSMenuToolbarItem?
+    var historySearchToolbarItem: NSSearchToolbarItem?
     var historyBackToolbarItem: NSToolbarItem?
 
     init(

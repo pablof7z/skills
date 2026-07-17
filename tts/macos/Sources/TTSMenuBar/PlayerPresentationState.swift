@@ -13,6 +13,9 @@ final class NowSpeakingPresentation: ObservableObject {
     @Published private(set) var selectedAttachmentImage: NSImage?
     @Published var historyProjectFilter: String?
     @Published var historySearchQuery = ""
+    @Published var historyAgeFilter: HistoryAgeFilter = .default
+    @Published private(set) var hasInteractedWithHistory = false
+    @Published var isHistorySearchVisible = false
     @Published var isViewingArchive = false
     @Published private(set) var pendingPreviewItem: TTSItem?
     @Published private(set) var hiddenItemID: String?
@@ -72,6 +75,20 @@ final class NowSpeakingPresentation: ObservableObject {
         selectAttachment(nil)
     }
 
+    func registerHistoryInteraction() {
+        hasInteractedWithHistory = true
+    }
+
+    func showHistorySearch() {
+        isHistorySearchVisible = true
+        registerHistoryInteraction()
+    }
+
+    func hideHistorySearch() {
+        historySearchQuery = ""
+        isHistorySearchVisible = false
+    }
+
     func updatePendingPreview(with item: TTSItem?) {
         guard let preview = pendingPreviewItem else { return }
         guard let item, item.id == preview.id else {
@@ -128,18 +145,20 @@ enum PlayerHistoryToolbarPolicy {
     static let toolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
     static let backItemIdentifier = NSToolbarItem.Identifier("TTSHistoryBack")
     static let filterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
-    static let searchItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearch")
+    static let searchButtonItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearchButton")
+    static let searchFieldItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearchField")
 
     static let rootItemIdentifiers: [NSToolbarItem.Identifier] = [
         .flexibleSpace,
-        searchItemIdentifier,
+        searchButtonItemIdentifier,
         filterItemIdentifier,
     ]
 
     static let allowedItemIdentifiers: [NSToolbarItem.Identifier] = [
         backItemIdentifier,
         .flexibleSpace,
-        searchItemIdentifier,
+        searchButtonItemIdentifier,
+        searchFieldItemIdentifier,
         filterItemIdentifier,
     ]
 }
