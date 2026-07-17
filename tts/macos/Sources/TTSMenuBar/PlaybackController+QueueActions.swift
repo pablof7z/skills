@@ -24,6 +24,10 @@ extension PlaybackController {
         guard clearGlobalPauseForExplicitPlayback() else { return }
 
         if currentItem?.id == item.id, let player {
+            if isPlaybackBlocked {
+                automaticallyPausedItemID = item.id
+                return
+            }
             resumeCurrentItem(player)
             return
         }

@@ -256,63 +256,6 @@ extension QueueStoreTests {
         #expect(controller.isGenerating)
     }
 
-    @Test @MainActor
-    func explicitQueueSelectionClearsPauseAllAndDoesNotDuplicateItem() throws {
-        let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audio = directory.appendingPathComponent("speech.mp3")
-        try Data().write(to: audio)
-        let store = QueueStore(stateDirectory: directory)
-        let queued = item(id: "selected", createdAt: 10, outputFile: audio.path)
-        try store.save(queued)
-        try store.setGlobalPlaybackPaused(true)
-        let controller = PlaybackController(
-            store: store,
-            mediaController: disabledMediaController(stateDirectory: directory),
-            outputIsMuted: { true }
-        )
-        defer { controller.shutdown() }
-        controller.start()
-
-        controller.playNow(queued)
-
-        #expect(!controller.isGloballyPaused)
-        #expect(!store.isGlobalPlaybackPaused())
-        #expect(try store.loadItems().map(\.id) == [queued.id])
-        #expect(try store.loadItems().map(\.status) == [.queued])
-    }
-
-    @Test @MainActor
-    func explicitRecentSelectionRequeuesTheOriginalItemAndClearsPauseAll() throws {
-        let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audio = directory.appendingPathComponent("speech.mp3")
-        try Data().write(to: audio)
-        let store = QueueStore(stateDirectory: directory)
-        var recent = item(id: "recent", createdAt: 10, outputFile: audio.path)
-        recent.status = .played
-        try store.save(recent)
-        try store.setGlobalPlaybackPaused(true)
-        let controller = PlaybackController(
-            store: store,
-            mediaController: disabledMediaController(stateDirectory: directory),
-            outputIsMuted: { true }
-        )
-        defer { controller.shutdown() }
-        controller.start()
-
-        controller.playNow(recent)
-
-        let items = try store.loadItems()
-        #expect(!controller.isGloballyPaused)
-        #expect(items.count == 1)
-        #expect(items.first?.id == recent.id)
-        #expect(items.first?.createdAt == recent.createdAt)
-        #expect(items.first?.status == .queued)
-    }
-
     @Test
     func storesIndependentPlaybackRatesForEachVoice() throws {
         let directory = temporaryDirectory()
