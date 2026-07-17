@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 
-TTS_PRIMARY_MESSAGE_TARGET_WORDS=300
-TTS_PRIMARY_MESSAGE_HARD_LIMIT_WORDS=330
+TTS_PRIMARY_MESSAGE_TARGET_WORDS=600
+TTS_PRIMARY_MESSAGE_HARD_LIMIT_WORDS=660
 
 word_count() {
   printf '%s\n' "$1" | awk '{ count += NF } END { print count + 0 }'
