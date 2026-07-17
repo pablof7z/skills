@@ -8,7 +8,7 @@ struct PlayerHistoryView: View {
     let historyRevision: Int
     let generationProgressNow: Date
     let isViewingArchive: Bool
-    let historyProjectFilter: String?
+    let historyEntityFilters: HistoryEntityFilters
     let historySearchQuery: String
     let historyAgeFilter: HistoryAgeFilter
     let hasInteractedWithHistory: Bool
@@ -31,6 +31,7 @@ struct PlayerHistoryView: View {
                         : 0
                     PlayerHistoryRow(
                         item: item,
+                        entityFilters: historyEntityFilters,
                         action: {
                             presentation.registerHistoryInteraction()
                             presentation.revealForDirectSelection(itemID: item.id)
@@ -42,11 +43,20 @@ struct PlayerHistoryView: View {
                         },
                         onRetry: { controller.retryGeneration(item) },
                         isRetrying: controller.isRetrying(item),
-                        generationProgress: generationProgress,
                         timestampNow: historyClock.now,
                         onArchive: {
                             presentation.registerHistoryInteraction()
                             controller.setArchived(!item.archived, for: item)
+                        },
+                        onIdentityFilter: { role in
+                            switch role {
+                            case .project:
+                                if let project = item.workspaceName {
+                                    presentation.toggleHistoryProject(project)
+                                }
+                            case .agent:
+                                presentation.toggleHistoryAgent(item.historyAgentFilter)
+                            }
                         }
                     )
                         .listRowInsets(EdgeInsets(
@@ -75,7 +85,7 @@ struct PlayerHistoryView: View {
     private var filteredItems: [TTSItem] {
         PlayerHistoryFilterPolicy.filteredItems(
             in: historyItems,
-            project: historyProjectFilter,
+            entityFilters: historyEntityFilters,
             ageFilter: historyAgeFilter,
             hasInteractedWithHistory: hasInteractedWithHistory,
             searchQuery: historySearchQuery,
@@ -88,9 +98,9 @@ struct PlayerHistoryView: View {
             return "No matching speech"
         }
         if isViewingArchive {
-            return historyProjectFilter == nil ? "No archived speech" : "No archived speech for this project"
+            return historyEntityFilters.isEmpty ? "No archived speech" : "No archived speech for these filters"
         }
-        return historyProjectFilter == nil ? "No recent speech" : "No speech for this project"
+        return historyEntityFilters.isEmpty ? "No recent speech" : "No speech for these filters"
     }
 
 }
@@ -103,136 +113,10 @@ extension PlayerHistoryView: @MainActor Equatable {
             && lhs.historyRevision == rhs.historyRevision
             && lhs.generationProgressNow == rhs.generationProgressNow
             && lhs.isViewingArchive == rhs.isViewingArchive
-            && lhs.historyProjectFilter == rhs.historyProjectFilter
+            && lhs.historyEntityFilters == rhs.historyEntityFilters
             && lhs.historySearchQuery == rhs.historySearchQuery
             && lhs.historyAgeFilter == rhs.historyAgeFilter
             && lhs.hasInteractedWithHistory == rhs.hasInteractedWithHistory
-    }
-}
-
-private struct PlayerHistoryRow: View {
-    let item: TTSItem
-    let action: () -> Void
-    let onRetry: () -> Void
-    let isRetrying: Bool
-    let generationProgress: Double
-    let timestampNow: Date
-    let onArchive: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            queueItemIndicator
-            Button(action: action) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(item.nowSpeakingTitle)
-                            .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
-                            .foregroundStyle(summaryColor)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        if !item.briefAttachments.isEmpty {
-                            Label("\(item.briefAttachments.count)", systemImage: "paperclip")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .accessibilityLabel("\(item.briefAttachments.count) attachments")
-                        }
-                        Text(item.timestampLabel(now: timestampNow))
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                    }
-                    if let previewSummary = item.previewSummary {
-                        Text(previewSummary)
-                            .font(.system(size: 14, weight: item.unheard ? .medium : .regular))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    HStack(spacing: 0) {
-                        let segments = PlayerIdentityPresentation.segments(for: item)
-                        ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
-                            if index > 0 {
-                                Text(" - ")
-                                    .foregroundStyle(.tertiary)
-                            }
-                            Text(segment.text)
-                                .foregroundStyle(segment.color)
-                        }
-                    }
-                    .font(.system(size: 15, weight: item.unheard ? .semibold : .regular))
-                    .lineLimit(1)
-                }
-
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(item.status == .failed || (item.status != .generating && !FileManager.default.fileExists(atPath: item.outputFile)))
-            .opacity(item.status == .generating ? 0.78 : 1)
-            .help(item.status == .generating ? "Open update while audio is generated" : "Play now")
-            .accessibilityLabel(accessibilityLabel)
-
-            if item.status == .generating {
-                ProgressView()
-                    .controlSize(.small)
-                    .accessibilityLabel("Generating audio")
-            } else {
-                VStack(alignment: .trailing, spacing: 7) {
-                    if item.status == .failed {
-                        Button(action: onRetry) {
-                            if isRetrying {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 18, height: 18)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                    .frame(width: 18, height: 18)
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(isRetrying)
-                        .help(isRetrying ? "Retrying synthesis" : "Retry synthesis")
-                        .accessibilityLabel(isRetrying ? "Retrying synthesis" : "Retry synthesis")
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 5)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if item.status != .generating {
-                Button(role: item.archived ? nil : .destructive, action: onArchive) {
-                    Label(
-                        item.archived ? "Restore" : "Archive",
-                        systemImage: item.archived ? "tray.and.arrow.up" : "archivebox"
-                    )
-                }
-                .tint(item.archived ? .accentColor : .red)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var queueItemIndicator: some View {
-        if item.isQuestion {
-            QuestionIndicatorView(item: item, accent: .purple, size: .row)
-        } else {
-            Circle()
-                .fill(item.unheard ? Color.accentColor : .clear)
-                .frame(width: 7, height: 7)
-                .frame(width: 28, height: 28)
-        }
-    }
-
-    private var summaryColor: Color {
-        item.status == .failed ? .secondary : .primary.opacity(0.84)
-    }
-
-    private var accessibilityLabel: String {
-        let title = item.subjectLabel ?? item.text
-        if item.isPendingQuestion { return "Answer needed for \(title)" }
-        if item.questionStatus == .answered { return "Answered question \(title)" }
-        if item.isQuestion { return "Question item \(title)" }
-        if item.status == .generating { return "Open pending update \(title)" }
-        if item.status == .failed { return "Failed synthesis for \(title)" }
-        return "Play now \(title)"
     }
 }
 

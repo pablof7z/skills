@@ -15,7 +15,7 @@ struct PlayerHistoryFilterPolicyTests {
 
         let beforeInteraction = PlayerHistoryFilterPolicy.filteredItems(
             in: [recent, stale, yesterday],
-            project: nil,
+            entityFilters: HistoryEntityFilters(),
             ageFilter: .today,
             hasInteractedWithHistory: false,
             searchQuery: "",
@@ -26,7 +26,7 @@ struct PlayerHistoryFilterPolicyTests {
 
         let afterInteraction = PlayerHistoryFilterPolicy.filteredItems(
             in: [recent, stale, yesterday],
-            project: nil,
+            entityFilters: HistoryEntityFilters(),
             ageFilter: .today,
             hasInteractedWithHistory: true,
             searchQuery: "",
@@ -75,7 +75,7 @@ struct PlayerHistoryFilterPolicyTests {
 
         let results = PlayerHistoryFilterPolicy.filteredItems(
             in: [matching, hidden],
-            project: nil,
+            entityFilters: HistoryEntityFilters(),
             ageFilter: .today,
             hasInteractedWithHistory: false,
             searchQuery: "hosted audio",
@@ -86,14 +86,96 @@ struct PlayerHistoryFilterPolicyTests {
         #expect(results.map(\.id) == ["matching"])
     }
 
-    private func item(id: String, createdAt: Date, workspace: String = "/tmp/current") -> TTSItem {
+    @Test
+    func combinesSelectedProjectsAndAgentsAsOneInclusiveUnion() {
+        let alpha = item(id: "alpha", createdAt: now, workspace: "/tmp/alpha")
+        let beta = item(id: "beta", createdAt: now, workspace: "/tmp/beta")
+        let river = item(
+            id: "river",
+            createdAt: now,
+            workspace: "/tmp/other",
+            agentName: "ChatGPT",
+            sessionID: "v1/river-session"
+        )
+        let hidden = item(id: "hidden", createdAt: now, workspace: "/tmp/hidden")
+        let filters = HistoryEntityFilters(
+            projects: ["alpha", "beta"],
+            agents: [river.historyAgentFilter]
+        )
+
+        let results = PlayerHistoryFilterPolicy.filteredItems(
+            in: [alpha, beta, river, hidden],
+            entityFilters: filters,
+            ageFilter: .today,
+            hasInteractedWithHistory: false,
+            searchQuery: "",
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(results.map(\.id) == ["alpha", "beta", "river"])
+        #expect(filters.activeCount == 3)
+    }
+
+    @Test
+    func exposesChatGPTSessionsAsDistinctAgentChoices() {
+        let first = item(
+            id: "first",
+            createdAt: now,
+            agentName: "ChatGPT",
+            sessionID: "v1/3ZsbJ-first-o2UX"
+        )
+        let second = item(
+            id: "second",
+            createdAt: now,
+            agentName: "ChatGPT",
+            sessionID: "v1/9Kabc-second-r7PQ"
+        )
+
+        let agents = PlayerHistoryFilterPolicy.availableAgents(
+            in: [first, second],
+            ageFilter: .today,
+            hasInteractedWithHistory: false,
+            searchQuery: "",
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(Set(agents) == [first.historyAgentFilter, second.historyAgentFilter])
+        #expect(Set(agents.map(\.displayName)).count == 2)
+        #expect(first.historyAgentFilter.displayName == "ChatGPT · 3ZsbJ…o2UX")
+    }
+
+    @Test
+    func togglesEntityFiltersWithoutReplacingOtherSelections() {
+        let agent = HistoryAgentFilter(agentName: "ChatGPT", sessionID: "v1/session-one")
+        var filters = HistoryEntityFilters()
+
+        filters.toggle(project: "alpha")
+        filters.toggle(project: "beta")
+        filters.toggle(agent: agent)
+        #expect(filters.projects == ["alpha", "beta"])
+        #expect(filters.agents == [agent])
+
+        filters.toggle(project: "alpha")
+        #expect(filters.projects == ["beta"])
+        #expect(filters.agents == [agent])
+    }
+
+    private func item(
+        id: String,
+        createdAt: Date,
+        workspace: String = "/tmp/current",
+        agentName: String = "Codex",
+        sessionID: String? = nil
+    ) -> TTSItem {
         TTSItem(
             id: id,
             text: id,
             subject: nil,
-            agentName: "Codex",
+            agentName: agentName,
             harness: "codex",
-            sessionID: nil,
+            sessionID: sessionID,
             workspace: workspace,
             voice: "af_bella",
             outputFile: "/tmp/\(id).mp3",

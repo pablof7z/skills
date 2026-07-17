@@ -49,6 +49,7 @@ def remote_speak(args) -> int:
         attachments=attachments,
         ask=ask,
         wait=args.wait,
+        session_id=os.environ.get("TTS_SESSION_ID"),
     )
     content = render_request_content(tags) if ask else args.message
     event = signed_event(

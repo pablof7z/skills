@@ -117,6 +117,8 @@ class RemoteGenerationRoundTripTests(unittest.TestCase):
 
     def test_generate_runs_on_paired_computer_and_returns_blossom_mp3(self) -> None:
         peer = self.pair()
+        server_environment = self.environment(self.server)
+        server_environment["TTS_SESSION_ID"] = "v1/chat-a"
         remote = subprocess.Popen(
             [
                 str(self.tts), "remote", "generate", "--peer", peer,
@@ -126,7 +128,7 @@ class RemoteGenerationRoundTripTests(unittest.TestCase):
                 "--message", "This MP3 is generated on the paired computer.",
                 "--wait", "10s",
             ],
-            env=self.environment(self.server),
+            env=server_environment,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -157,8 +159,10 @@ class RemoteGenerationRoundTripTests(unittest.TestCase):
             self.assertIn(["t", "upload"], event["tags"])
             self.assertIn(["x", result["sha256"]], event["tags"])
             self.assertIn(["action", "generate"], request["tags"])
+            self.assertIn(["session", "v1/chat-a"], request["tags"])
             item = json.loads((self.laptop / "items" / f"{request['id']}.json").read_text())
             self.assertEqual(item["status"], "generated")
+            self.assertEqual(item["session_id"], "v1/chat-a")
             self.assertEqual(
                 item["summary"],
                 "The paired computer should generate and host this audio.",

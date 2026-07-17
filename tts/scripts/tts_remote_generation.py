@@ -44,6 +44,7 @@ def remote_generate(args) -> int:
         agent_name=args.agent_name,
         message=args.message,
         attachments=[],
+        session_id=os.environ.get("TTS_SESSION_ID"),
     )
     tags.append(["action", "generate"])
     event = signed_event(

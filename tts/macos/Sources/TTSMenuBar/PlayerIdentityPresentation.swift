@@ -4,6 +4,13 @@ struct PlayerIdentitySegment: Equatable, Identifiable {
     enum Role: Equatable {
         case project
         case agent
+
+        var title: String {
+            switch self {
+            case .project: "Project"
+            case .agent: "Agent"
+            }
+        }
     }
 
     let role: Role
@@ -28,7 +35,7 @@ enum PlayerIdentityPresentation {
         }
         let agent = PlayerIdentitySegment(
             role: .agent,
-            text: item.displayAgent,
+            text: item.historyAgentFilter.displayName,
             paletteIndex: WorkspaceAccent.paletteIndex(forAgentName: item.displayAgent)
         )
         return [project, agent].compactMap { $0 }
