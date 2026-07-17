@@ -77,21 +77,21 @@ class MessageLimitTests(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
 
-    def test_accepts_exactly_330_primary_words_without_counting_subject(self) -> None:
-        result = self.run_primary(self.words(330))
+    def test_accepts_exactly_660_primary_words_without_counting_subject(self) -> None:
+        result = self.run_primary(self.words(660))
 
         self.assertEqual(result.returncode, 0, result.stderr)
         with KokoroHandler.received_inputs_lock:
             self.assertEqual(len(KokoroHandler.received_inputs), 1)
-            self.assertTrue(KokoroHandler.received_inputs[0].endswith("word329"))
+            self.assertTrue(KokoroHandler.received_inputs[0].endswith("word659"))
 
-    def test_rejects_331_primary_words_before_synthesis_or_state_creation(self) -> None:
-        result = self.run_primary(self.words(331))
+    def test_rejects_661_primary_words_before_synthesis_or_state_creation(self) -> None:
+        result = self.run_primary(self.words(661))
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("contains 331 words", result.stderr)
-        self.assertIn("enforced limit is 330 words", result.stderr)
-        self.assertIn("under 300 words", result.stderr)
+        self.assertIn("contains 661 words", result.stderr)
+        self.assertIn("enforced limit is 660 words", result.stderr)
+        self.assertIn("under 600 words", result.stderr)
         self.assertIn("chapter attachments", result.stderr)
         self.assertIn("--attach", result.stderr)
         with KokoroHandler.received_inputs_lock:
@@ -108,7 +108,7 @@ class MessageLimitTests(unittest.TestCase):
         }
 
         result = subprocess.run(
-            [str(self.tts_command), "--no-play", "--message", self.words(500)],
+            [str(self.tts_command), "--no-play", "--message", self.words(800)],
             env=environment,
             text=True,
             stdout=subprocess.PIPE,
@@ -123,10 +123,10 @@ class MessageLimitTests(unittest.TestCase):
     def test_does_not_exempt_retry_generation(self) -> None:
         environment = self.environment | {"TTS_INTERNAL_RETRY": "1"}
 
-        result = self.run_primary(self.words(331), environment)
+        result = self.run_primary(self.words(661), environment)
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("contains 331 words", result.stderr)
+        self.assertIn("contains 661 words", result.stderr)
         with KokoroHandler.received_inputs_lock:
             self.assertEqual(KokoroHandler.received_inputs, [])
 
@@ -143,7 +143,7 @@ class MessageLimitTests(unittest.TestCase):
                 "--summary",
                 "Remote TTS messages stay within the safe playback boundary.",
                 "--message",
-                self.words(331),
+                self.words(661),
             ],
             env=self.environment,
             text=True,
@@ -152,7 +152,7 @@ class MessageLimitTests(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("contains 331 words", result.stderr)
+        self.assertIn("contains 661 words", result.stderr)
         self.assertNotIn("remote_transport_error", result.stderr)
 
 
