@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
-import os
-
 from tts_pair_token import PAIRING_KIND
 from tts_remote_channel import channel_parts
 from tts_remote_config import remote_config
+from tts_remote_inbox import pending_events, stage_events
 from tts_remote_state import peers, read_json, remote_dir, write_json
 from tts_remote_transport import transport
 
@@ -17,7 +16,6 @@ def events_for_laptop(laptop_pubkey: str) -> list[dict[str, object]]:
     cursor_path = remote_dir() / "relay-cursors.json"
     loaded = read_json(cursor_path, {})
     cursors = loaded if isinstance(loaded, dict) else {}
-    events: list[dict[str, object]] = []
     changed = False
     for relay in sorted(pairing_relays):
         tx = transport(relay)
@@ -28,7 +26,8 @@ def events_for_laptop(laptop_pubkey: str) -> list[dict[str, object]]:
             since=pairing_since,
             kinds=[PAIRING_KIND],
         )
-        events.extend(pairing_events)
+        # The relay cursor may move only after every fetched event is durable.
+        stage_events(pairing_events)
         newest_pairing = newest_timestamp(pairing_events, pairing_since)
         if newest_pairing and newest_pairing != pairing_since:
             cursors[pairing_key] = newest_pairing
@@ -42,14 +41,14 @@ def events_for_laptop(laptop_pubkey: str) -> list[dict[str, object]]:
             since=request_since,
             kinds=[9],
         )
-        events.extend(request_events)
+        stage_events(request_events)
         newest_request = newest_timestamp(request_events, request_since)
         if newest_request and newest_request != request_since:
             cursors[request_key] = newest_request
             changed = True
     if changed:
         write_json(cursor_path, cursors)
-    return events
+    return pending_events()
 
 
 def polling_coordinates() -> tuple[set[str], dict[str, set[str]]]:
@@ -72,21 +71,7 @@ def polling_coordinates() -> tuple[set[str], dict[str, set[str]]]:
 
 
 def cursor_value(value: object) -> int | None:
-    if not isinstance(value, int):
-        return None
-    # Relay cursors are advanced as soon as a batch is fetched, while an
-    # individual request may still be awaiting local authorization or
-    # materialization. Re-read a short overlap on the next poll so a brief
-    # connectivity loss cannot turn that request into a permanent gap. The
-    # daemon-seen ledger keeps the overlap idempotent.
-    return max(0, int(value) - cursor_overlap_seconds())
-
-
-def cursor_overlap_seconds() -> int:
-    try:
-        return max(1, min(300, int(os.environ.get("TTS_REMOTE_CURSOR_OVERLAP_SECONDS", "60"))))
-    except ValueError:
-        return 60
+    return max(0, int(value)) if isinstance(value, int) else None
 
 
 def newest_timestamp(events: list[dict[str, object]], since: int | None) -> int:

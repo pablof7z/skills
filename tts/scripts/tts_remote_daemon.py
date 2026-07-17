@@ -14,6 +14,7 @@ from tts_remote_groups import request_group_admin, request_group_membership
 from tts_remote_ask import answers_from_result
 from tts_blossom import BlossomUploadError, upload_mp3
 from tts_remote_generation import publish_generation_reply
+from tts_remote_inbox import acknowledge_event
 from tts_remote_materialize import (
     materialization_guidance,
     materialize_request,
@@ -43,15 +44,19 @@ def process_events(args, backend: dict[str, object]) -> int:
     )
     for event in events:
         event_id = str(event.get("id") or "")
-        if not event_id or event_id in seen_ids:
+        if not event_id:
+            continue
+        if event_id in seen_ids:
+            acknowledge_event(event_id)
             continue
         handled = handle_pairing_event(event) or handle_request_event(event, backend)
         seen_ids.add(event_id)
+        write_json(seen_path, sorted(seen_ids))
+        acknowledge_event(event_id)
         if handled:
             count += 1
         if count >= args.max_events:
             break
-    write_json(seen_path, sorted(seen_ids))
     return count
 
 
@@ -123,10 +128,7 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
         return False
     channel = str(peer.get("channel") or peer.get("group_id") or "")
     relay, group_id = channel_parts(channel, str(peer.get("relay") or ""))
-    try:
-        members = transport(relay).group_members(group_id)
-    except RuntimeError:
-        return False
+    members = transport(relay).group_members(group_id)
     if str(event.get("pubkey") or "") not in members:
         return False
     content = request_payload(event)
