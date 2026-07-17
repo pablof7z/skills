@@ -193,7 +193,7 @@ extension PlaybackController {
         playbackStartTask?.cancel()
         playbackStartTask = Task { @MainActor [weak self, weak audioPlayer] in
             guard let self, let audioPlayer, self.player === audioPlayer else { return }
-            let pausedMedia = await self.mediaController.prepareForSpeech()
+            let pausedMedia = await self.mediaController.prepareForSpeech(itemID: item.id)
             if pausedMedia {
                 let delay = self.mediaController.mediaHandoffDelay
                 try? await Task.sleep(for: .seconds(max(0, delay)))

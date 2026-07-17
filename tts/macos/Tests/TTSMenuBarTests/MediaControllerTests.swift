@@ -24,7 +24,8 @@ struct MediaControllerTests {
     @Test
     func pendingResumeCannotOverrideNewSpeech() async throws {
         let backend = TestMediaControlBackend(session: session(playing: true))
-        let controller = makeController(backend: backend)
+        let logger = TestMediaInterventionLogger()
+        let controller = makeController(backend: backend, logger: logger)
         #expect(await controller.prepareForSpeech())
 
         controller.scheduleResume(after: 0.05, resumeAllowed: { true })
@@ -35,17 +36,21 @@ struct MediaControllerTests {
         #expect(backend.playCalls == 0)
         #expect(backend.session?.isPlaying == false)
         #expect(controller.hasActiveLease)
+        #expect(logger.records.contains { $0.event == "resume_cancelled" && $0.reason == "new_speech" })
     }
 
     @Test
     func queuedSpeechAtResumeBoundaryKeepsTheLeasePaused() async throws {
         let backend = TestMediaControlBackend(session: session(playing: true))
-        let controller = makeController(backend: backend)
+        let logger = TestMediaInterventionLogger()
+        let controller = makeController(backend: backend, logger: logger)
         #expect(await controller.prepareForSpeech())
         let queueState = TestQueueState(isIdle: false)
 
         controller.scheduleResume(after: 0, resumeAllowed: { queueState.isIdle })
-        try await Task.sleep(for: .milliseconds(10))
+        try await waitUntil {
+            logger.records.contains { $0.event == "resume_deferred" && $0.reason == "queue_not_idle" }
+        }
 
         #expect(backend.playCalls == 0)
         #expect(controller.hasActiveLease)
@@ -106,11 +111,15 @@ struct MediaControllerTests {
     func unverifiedPauseDoesNotDelaySpeechOrCreateOwnership() async {
         let backend = TestMediaControlBackend(session: session(playing: true))
         backend.pauseChangesState = false
-        let controller = makeController(backend: backend)
+        let logger = TestMediaInterventionLogger()
+        let controller = makeController(backend: backend, logger: logger)
 
         #expect(!(await controller.prepareForSpeech()))
         #expect(!controller.hasActiveLease)
         #expect(backend.pauseCalls == 1)
+        #expect(logger.records.contains {
+            $0.event == "state_verification_timed_out" && $0.desiredPlaying == false
+        })
     }
 
     @Test
@@ -126,7 +135,30 @@ struct MediaControllerTests {
         #expect(!controller.hasActiveLease)
     }
 
-    private func makeController(backend: TestMediaControlBackend) -> MediaController {
+    @Test
+    func recordsCorrelatedPauseAndResumeLifecycle() async throws {
+        let backend = TestMediaControlBackend(session: session(playing: true))
+        let logger = TestMediaInterventionLogger()
+        let controller = makeController(backend: backend, logger: logger)
+
+        #expect(await controller.prepareForSpeech(itemID: "speech-123"))
+        controller.scheduleResume(after: 0, resumeAllowed: { true })
+        try await waitUntil { !controller.hasActiveLease }
+
+        let correlated = logger.records.filter { $0.itemID == "speech-123" }
+        let events = correlated.map(\.event)
+        #expect(events.contains("lease_acquired"))
+        #expect(events.contains("resume_scheduled"))
+        #expect(events.contains("resume_requested"))
+        #expect(correlated.contains { $0.event == "state_verified" && $0.desiredPlaying == true })
+        #expect(correlated.contains { $0.event == "lease_released" && $0.reason == "resume_verified" })
+        #expect(Set(correlated.compactMap(\.leaseID)).count == 1)
+    }
+
+    private func makeController(
+        backend: TestMediaControlBackend,
+        logger: (any MediaInterventionLogging)? = nil
+    ) -> MediaController {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("media-controller-tests-\(UUID().uuidString)")
         let preferences = PlayerPreferencesStore(stateDirectory: directory)
@@ -134,6 +166,7 @@ struct MediaControllerTests {
         return MediaController(
             preferencesStore: preferences,
             backends: [backend],
+            logger: logger,
             verificationAttempts: 3,
             verificationDelay: 0.001
         )
@@ -162,6 +195,15 @@ struct MediaControllerTests {
             try await Task.sleep(for: .milliseconds(2))
         }
         Issue.record("Condition did not become true before timeout.")
+    }
+}
+
+@MainActor
+private final class TestMediaInterventionLogger: MediaInterventionLogging {
+    var records: [MediaInterventionRecord] = []
+
+    func record(_ record: MediaInterventionRecord) {
+        records.append(record)
     }
 }
 
