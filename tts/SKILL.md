@@ -35,6 +35,12 @@ Write the summary as one concise factual sentence stating what changed or why
 it matters. The player shows it as preview text, but it is not synthesized.
 Do not repeat the title in the summary or the agent identity in the message.
 
+Keep the primary `--message` under 300 words. The runtime permits a 10 percent
+tolerance but rejects a primary message over 330 words. For a longer update,
+keep the concise, automatically played main corpus in `--message`, then split
+the rest into labeled narrated chapter attachments with repeated `--attach`
+pairs. The limit applies only to the primary message, not to those attachments.
+
 When an update has useful supporting material—screenshots, mockups, a proposal,
 detailed findings, or decision context—attach it. Attachments let the user
 expand a concise update in different directions: inspect visuals, open an
