@@ -19,6 +19,8 @@ source "$SCRIPT_DIR/tts-generation-gate.sh"
 source "$SCRIPT_DIR/tts-attachments.sh"
 # shellcheck source=tts-native-queue.sh
 source "$SCRIPT_DIR/tts-native-queue.sh"
+# shellcheck source=tts-playback.sh
+source "$SCRIPT_DIR/tts-playback.sh"
 # shellcheck source=tts-synthesis.sh
 source "$SCRIPT_DIR/tts-synthesis.sh"
 # shellcheck source=tts-routing.sh
@@ -399,10 +401,12 @@ SUBJECT=$(normalize_space "$SUBJECT")
 SUMMARY=$(normalize_space "$SUMMARY")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
 INTERNAL_CALL=0
-if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}" || truthy "${TTS_INTERNAL_RETRY:-0}"; then
+if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}" \
+  || truthy "${TTS_INTERNAL_RETRY:-0}" \
+  || truthy "${TTS_INTERNAL_PLAYBACK:-0}"; then
   INTERNAL_CALL=1
 fi
-if [ -z "$PLAY_EXISTING_FILE" ] && [ "$INTERNAL_CALL" -ne 1 ]; then
+if [ "$INTERNAL_CALL" -ne 1 ]; then
   if [ -z "$AGENT_NAME" ]; then
     echo "Error: --agent-name is required." >&2
     exit 1
@@ -427,12 +431,14 @@ VOICE="${TTS_INTERNAL_VOICE_ID:-}"
 if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   VOICE="$(select_voice_from_seed "$VOICE_SEED")"
 fi
-if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
+if [ -n "$SUBJECT" ]; then
   SUBJECT_WORDS=$(word_count "$SUBJECT")
   if [ "$SUBJECT_WORDS" -gt 10 ]; then
     echo "Error: --subject must not exceed 10 words." >&2
     exit 1
   fi
+fi
+if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
   TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")
 fi
 

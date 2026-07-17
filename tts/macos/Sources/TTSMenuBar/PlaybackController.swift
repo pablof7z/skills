@@ -171,13 +171,14 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             player.pause()
             item.status = .paused
             isAudioPlaying = false
-        } else {
-            player.play()
-            item.status = .playing
-            isAudioPlaying = true
+            try? store.save(item)
+            replaceItem(item)
+            mediaController.releaseForSpeechPause()
+            return
         }
         try? store.save(item)
         replaceItem(item)
+        resumeCurrentItem(player)
     }
 
     func toggleGlobalPlaybackPause() {
