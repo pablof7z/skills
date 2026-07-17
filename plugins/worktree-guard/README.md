@@ -1,178 +1,56 @@
 # WorktreeGuard
 
-Multi-harness plugin package for the WorktreeGuard product spec that prompted
-this repository addition. It supports both **Codex** and **Claude Code** from
-one shared install.
+WorktreeGuard is a lightweight accident-prevention hook for Codex and Claude
+Code. It has one policy:
 
-This package installs harness lifecycle hooks and a bundled local `wtg`
-command for protection, status, hook handling, and base-access approval
-requests. Hooks prefer the stable `~/.local/bin/wtg-hook-<harness>` entrypoint
-when it exists, then fall back to the hook bundled in the installed plugin
-cache. The bundled hook uses the bundled WorktreeGuard-lite command by
-default; set `WTG_BIN` to delegate hook events to another WorktreeGuard
-command. Git main worktrees are protected by default; linked Git worktrees are
-allowed mutation targets, Git-ignored build and generated artifacts are
-allowed in protected bases, and non-Git directories are ignored.
+> In a Git repository's base checkout, block `git checkout`, `git clean`,
+> `git rebase`, `git reset`, `git restore`, and `git switch`.
+
+That is the entire boundary. Those commands are allowed in linked worktrees.
+Every other Git command, non-Git shell command, patch, edit, write, and MCP tool
+is outside WorktreeGuard's policy.
+
+WorktreeGuard is not a security boundary. It recognizes ordinary direct shell
+invocations well enough to prevent common agent mistakes; it does not attempt
+to stop a malicious or deliberately obfuscated caller.
+
+## Commands
 
 ```bash
-<plugin-root>/bin/wtg status --repo <repo>
-<plugin-root>/bin/wtg request-base-access --repo <repo> --reason "<reason>"
-<plugin-root>/bin/wtg pair offer --relay <relay-url>
-<plugin-root>/bin/wtg pair connect '<pair-code>'
-<plugin-root>/bin/wtg pair status
-<plugin-root>/bin/wtg daemon laptop start --timeout 300
-<plugin-root>/bin/wtg daemon laptop status
-<plugin-root>/bin/wtg daemon laptop stop
-<plugin-root>/bin/wtg daemon server start --timeout 300
-<plugin-root>/bin/wtg daemon server status
-<plugin-root>/bin/wtg daemon server stop
-<plugin-root>/bin/wtg actions --tail 50
-<plugin-root>/bin/wtg actions -f --color always
-<plugin-root>/bin/wtg denials --tail 50
-<plugin-root>/bin/wtg denials -f --color always
-python3 <plugin-root>/scripts/probe_worktreeguard_lite.py
+<plugin-root>/bin/wtg status --repo <path>
+<plugin-root>/bin/wtg current --repo <path>
+<plugin-root>/bin/wtg request-base-access --repo <path> --reason "<reason>"
+<plugin-root>/bin/wtg denials --tail 20
+<plugin-root>/bin/wtg doctor
+python3 <plugin-root>/scripts/probe_worktreeguard.py
 ```
 
-The full WorktreeGuard CLI and daemon should eventually own durable policy,
-grants, audit logs, and rollback behavior. The bundled command covers the
-first testable workflow: protect Git main worktrees by default, deny direct
-agent write tools there, allow non-Git shell commands by default, and deny
-only explicitly dangerous Git subcommands such as `reset`, `checkout`,
-`switch`, `clean`, `restore`, and `rebase`. Normal Git commands, including
-`worktree`, `fetch`, `pull`, `merge`, `add`, and `commit`, are allowed by
-default. The hook tracks the agent's effective session cwd after worktree
-entry, honors simple shell `cd <path> && git ...` cwd changes, and shows a
-macOS approval prompt for temporary base checkout access. Denied actions are
-appended to `~/worktreeguard-denied-actions.jsonl`.
-Agent write tools are path-based: known targets outside protected main
-worktrees are allowed even when the session cwd is protected. Targets inside
-a protected main worktree are denied when tracked or unignored and allowed
-when `git check-ignore` identifies them as generated artifacts.
-
-When the local approval dialog is unavailable, WorktreeGuard can ask a paired
-attended laptop instead. On the laptop, run `wtg pair offer --relay <relay>`
-and share the printed `wtg pair connect ...` command with the server. On the
-server, run that connect command once. Use `wtg daemon <role> start`,
-`status`, and `stop` for durable background processing, or
-`wtg daemon <role> foreground --timeout <seconds>` when you want the process
-attached to the current terminal. Agents should use the high-level `pair`,
-`daemon`, and `request-base-access` commands; relay internals are intentionally
-hidden from normal workflow docs. Each pairing uses its own relay group; NIP-29
-group creation and membership are enabled when the chosen relay supports them,
-with ordinary public relays remaining compatible. See
-`references/remote-approval.md` for failure modes and protocol details.
+`request-base-access` uses a local macOS dialog. There is no remote approval,
+pairing, daemon, relay, MCP integration, automatic branch repair, session cwd
+tracking, or full allow-action audit.
 
 ## Architecture
 
-The policy package (`lib/worktreeguard_lite/`) and the `wtg` CLI (`bin/wtg`)
-are entirely harness-agnostic — the same code decides allow/deny for both
-Codex and Claude Code. Only the thin pieces that differ per harness are kept
-separate:
+The shared `lib/worktreeguard/` package owns the policy and CLI. The Codex and
+Claude shims only translate their hook entrypoints into the shared command.
+`hooks/hooks.json` matches only `Bash|Shell` for `PreToolUse` and
+`PermissionRequest`. It installs no other lifecycle hooks.
 
-```
-plugins/worktree-guard/
-|-- .codex-plugin/plugin.json    # Codex plugin manifest
-|-- .claude-plugin/plugin.json   # Claude Code plugin manifest
-|-- hooks/hooks.json             # shared hook registration (harness auto-detected at runtime)
-|-- bin/
-|   |-- wtg                      # shared CLI / policy engine entrypoint
-|   |-- wtg-hook-codex           # Codex hook shim -> `wtg hook codex <event>`
-|   `-- wtg-hook-claude          # Claude Code hook shim -> `wtg hook claude <event>`
-|-- lib/worktreeguard_lite/      # shared CLI, hooks, policy, state, and logging modules
-`-- scripts/probe_worktreeguard_lite.py  # regression probe, runs both harnesses
-```
+All Git main worktrees are guarded by default. No repository registration or
+protection database is required. Local grants are stored in
+`~/.local/state/worktreeguard/state.json`; denials are appended to
+`~/worktreeguard-denied-actions.jsonl`.
 
-`hooks/hooks.json` is installed once and read by whichever harness loads the
-plugin. Each hook command checks `$CLAUDE_PLUGIN_ROOT` first (set by Claude
-Code) and falls back to `$PLUGIN_ROOT` (set by Codex) to pick the harness and
-locate the plugin root, then dispatches to the matching `wtg-hook-<harness>`
-shim. Both shims run through the same `wtg hook <harness> <event>` surface in
-`worktreeguard_lite`, which handles `codex` and `claude` identically since
-both harnesses use the same `PreToolUse` / `PermissionRequest` / `PostToolUse`
-/ `SessionStart` / `Stop` hook event names and the same
-`hookSpecificOutput` JSON shape.
+## Install
 
-## Install From This Repo
-
-### Codex
-
-From the repository root:
+From this repository root:
 
 ```bash
 codex plugin marketplace add "$PWD"
 codex plugin add worktree-guard@skills-local
-```
 
-Start a new Codex session after installation so the hook package is loaded.
-
-### Claude Code
-
-From the repository root:
-
-```bash
 claude plugin marketplace add "$PWD"
-claude plugin install worktree-guard
+claude plugin install worktree-guard@skills-local
 ```
 
-Or for local iteration without a marketplace entry:
-
-```bash
-claude --plugin-dir plugins/worktree-guard
-```
-
-Start a new Claude Code session after installation so the hook package is
-loaded.
-
-## Requirements
-
-- `git` must be available.
-- Git main worktrees are protected by default.
-- `protect` is still available when you want to record explicit local state; it
-  requires a clean base checkout.
-- The bundled command stores local state in
-  `~/.local/state/worktreeguard/lite-state.json`.
-- All checked `PreToolUse` and `PermissionRequest` decisions are logged to
-  `~/worktreeguard-actions.jsonl` by default, including allowed commands,
-  denials, grant-based allows, and branch repair attempts. Set
-  `WTG_ACTION_LOG_FILE` to use a different JSONL file.
-- Denied actions are logged to `~/worktreeguard-denied-actions.jsonl` by
-  default. Set `WTG_DENY_LOG_FILE` to use a different JSONL file. Hook process
-  crashes, including shell `127` command-not-found failures before `wtg` starts,
-  are not policy denials and will not appear in this log.
-- `wtg doctor` reports whether the stable `~/.local/bin/wtg-hook-codex` and
-  `~/.local/bin/wtg-hook-claude` shims are executable. Those shims keep active
-  sessions from depending on an old plugin-cache path after reinstalling or
-  bumping the local plugin version.
-- Use `wtg denials --tail 50` to summarize and inspect recent denials.
-- Use `wtg actions --tail 50` to summarize and inspect recent checked actions.
-- Use `wtg actions -f` to follow allowed, denied, and repair decisions live.
-- Use `wtg denials -f` to follow new denials live. Human output is colorized
-  automatically on terminals; use `--color always` or `--no-color` to override.
-- Denials tell agents to report suspected WorktreeGuard bugs in
-  `skills.worktree-guard` when tenex-edge fabric is available. Reports are
-  untagged channel notes, so they do not interrupt another agent.
-- Run `python3 scripts/probe_worktreeguard_lite.py` before reinstalling or
-  changing the hook. It creates temporary Git repos and linked worktrees, calls
-  the shared hook JSON surface directly for both the Codex and Claude Code
-  harness dispatch paths, and verifies broad allow/deny behavior.
-
-## Hook Coverage
-
-- `SessionStart`: tells the agent whether the current repo is protected,
-  routes durable repository work to a worktree, and permits Git-ignored build
-  and generated artifacts in the base checkout.
-- `PreToolUse`: checks Bash, shell, patch, write, edit, and MCP tool attempts.
-- `PermissionRequest`: allows a valid local grant or denies protected-base
-  mutations with Git-native worktree guidance.
-- `PostToolUse`: records effective session cwd evidence from `pwd` and
-  successful native `git worktree add` commands.
-- `Stop`: clears tracked session cwd state.
-
-## Current Scope
-
-This is still not the full WorktreeGuard Rust workspace. The full product still
-needs `wtgd`, the Rust policy engine, SQLite state, and watcher rollback.
-The bundled hook does include watcher-lite branch repair for protected base
-checkouts: on each hook check, it restores a clean protected base checkout to
-the repository default branch if the base drifted to another branch. It logs
-repair failures instead of force-switching over dirty state.
+Start a new harness session after installation so it loads the hook manifest.

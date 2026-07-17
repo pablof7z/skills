@@ -3,7 +3,7 @@
 
 See also `wtg-hook-claude`, the Claude Code counterpart of this shim; both
 delegate to the shared `wtg hook <harness> <event>` surface in
-`lib/worktreeguard_lite/`. Use the bundled WorktreeGuard-lite command
+`lib/worktreeguard/`. Use the bundled WorktreeGuard command
 shipped inside this plugin package by default so cache fallback hooks are
 self-contained. Set `WTG_BIN` to route hook events to a different
 WorktreeGuard command.

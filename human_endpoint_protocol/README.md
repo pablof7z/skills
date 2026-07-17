@@ -3,13 +3,11 @@
 Issue #191 establishes a shared contract for pairing an attended laptop with a
 persistent backend over Nostr.
 
-The repository cannot rely on one installed runtime module for both consumers:
-top-level skills are copied as independent folders, while WorktreeGuard is
-installed as a plugin. This package is therefore the canonical contract,
-executable fixture source, and local development runtime. Artifact-local
-entrypoints in `tts/scripts/tts-human-endpoint` and
-`plugins/worktree-guard/bin/wtg-human-endpoint` delegate here when the repository
-checkout is present and otherwise fail with structured JSON.
+The TTS skill can be copied as an independent folder, so this package is the
+canonical contract, executable fixture source, and local development runtime.
+The artifact-local `tts/scripts/tts-human-endpoint` entrypoint delegates here
+when the repository checkout is present and otherwise fails with structured
+JSON.
 
 ## Pairing
 

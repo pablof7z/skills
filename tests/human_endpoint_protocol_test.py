@@ -228,26 +228,18 @@ class HumanEndpointProtocolTests(unittest.TestCase):
         self.assertIn("relay", vector)
         self.assertNotIn("relay_url", vector)
 
-    def test_product_adapters_share_pairing_code_contract(self) -> None:
+    def test_tts_adapter_matches_pairing_code_contract(self) -> None:
         repository = Path(__file__).resolve().parents[1]
         vector = json.loads((repository / "human_endpoint_protocol" / "test_vectors.json").read_text())["pairing_code_v1"]
-        adapters = [
-            (repository / "tts" / "scripts" / "tts-human-endpoint", {**vector, "product": "tts"}, "tts"),
-            (
-                repository / "plugins" / "worktree-guard" / "bin" / "wtg-human-endpoint",
-                {**vector, "product": "worktree-guard", "pairing_id": "wtg-pair-1"},
-                "worktree-guard",
-            ),
-        ]
-        for adapter, product_vector, product in adapters:
-            result = subprocess.run(
-                [str(adapter), "validate-pairing-code", json.dumps(product_vector), "--product", product],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-            )
-            self.assertEqual(json.loads(result.stdout)["pairing_id"], product_vector["pairing_id"])
+        adapter = repository / "tts" / "scripts" / "tts-human-endpoint"
+        result = subprocess.run(
+            [str(adapter), "validate-pairing-code", json.dumps(vector), "--product", "tts"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        self.assertEqual(json.loads(result.stdout)["pairing_id"], vector["pairing_id"])
 
 
 if __name__ == "__main__":
