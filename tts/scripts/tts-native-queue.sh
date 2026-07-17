@@ -87,6 +87,7 @@ write_macos_item_record() {
     "$error_message" \
     "$generation_duration" \
     "$ASK" \
+    "$NO_PLAY" \
     "$SUGGESTIONS_JSON" \
     "$QUESTION_BUNDLE_FILE" \
     "$PRIMARY_MESSAGE" <<'PY'
@@ -118,6 +119,7 @@ import tempfile
     error,
     generation_duration,
     ask,
+    no_play,
     suggestions_json,
     question_bundle_file,
     primary_message,
@@ -221,6 +223,7 @@ item = {
     "archive_reason": existing.get("archive_reason"),
     "archived_by": existing.get("archived_by"),
     "superseded_by": existing.get("superseded_by", []),
+    "playback_requested": existing.get("playback_requested", no_play != "1"),
     "playback_initiator": existing.get("playback_initiator", "automatic"),
     "engagement": existing.get("engagement", "unknown"),
     "user_activity": existing.get("user_activity"),

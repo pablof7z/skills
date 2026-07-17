@@ -221,6 +221,7 @@ class QueueCLITests(unittest.TestCase):
             )
             self.assertEqual(item["id"], output["id"])
             self.assertEqual(item["status"], "generated")
+            self.assertFalse(item["playback_requested"])
         finally:
             server.shutdown()
             thread.join(timeout=2)
@@ -274,6 +275,7 @@ class QueueCLITests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, stderr)
             final = json.loads(item_path.read_text())
             self.assertEqual(final["status"], "generated")
+            self.assertFalse(final["playback_requested"])
             self.assertTrue(final["is_archived"])
             self.assertEqual(final["archive_reason"], "Concurrent queue decision.")
             self.assertEqual(final["id"], json.loads(stdout)["id"])
