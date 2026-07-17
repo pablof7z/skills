@@ -3,6 +3,34 @@
 TTS_GENERATION_SLOT_HELD=0
 TTS_GENERATION_SLOT_DIR=""
 TTS_GENERATION_SLOT_POLL_SECONDS="${TTS_GENERATION_SLOT_POLL_SECONDS:-0.1}"
+TTS_GENERATION_TIMEOUT_SECONDS="${TTS_GENERATION_TIMEOUT_SECONDS:-60}"
+TTS_GENERATION_CONNECT_TIMEOUT_SECONDS="${TTS_GENERATION_CONNECT_TIMEOUT_SECONDS:-10}"
+TTS_GENERATION_DEADLINE_EPOCH=0
+
+configure_generation_deadline() {
+  if [[ ! "$TTS_GENERATION_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: TTS_GENERATION_TIMEOUT_SECONDS must be a positive integer." >&2
+    GENERATION_FAILURE_MESSAGE="Speech generation timeout is misconfigured."
+    return 1
+  fi
+  if [[ ! "$TTS_GENERATION_CONNECT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: TTS_GENERATION_CONNECT_TIMEOUT_SECONDS must be a positive integer." >&2
+    GENERATION_FAILURE_MESSAGE="Speech generation connection timeout is misconfigured."
+    return 1
+  fi
+  TTS_GENERATION_DEADLINE_EPOCH=$(( $(date +%s) + TTS_GENERATION_TIMEOUT_SECONDS ))
+}
+
+generation_seconds_remaining() {
+  local remaining=$(( TTS_GENERATION_DEADLINE_EPOCH - $(date +%s) ))
+  [ "$remaining" -gt 0 ] || return 1
+  printf '%s\n' "$remaining"
+}
+
+generation_timed_out() {
+  GENERATION_FAILURE_MESSAGE="Speech generation timed out after ${TTS_GENERATION_TIMEOUT_SECONDS} seconds."
+  echo "Error: $GENERATION_FAILURE_MESSAGE" >&2
+}
 
 tts_generation_limit() {
   local limit="${TTS_MAX_PARALLEL_GENERATIONS:-}"
@@ -95,6 +123,10 @@ acquire_generation_slot() {
   fi
 
   while true; do
+    if ! generation_seconds_remaining >/dev/null; then
+      generation_timed_out
+      return 1
+    fi
     index=1
     while [ "$index" -le "$limit" ]; do
       slot_dir="$slots_dir/slot-$index"

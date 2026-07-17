@@ -163,6 +163,8 @@ state_directory = os.path.dirname(os.path.dirname(destination))
 os.makedirs(state_directory, exist_ok=True)
 lock_handle = open(os.path.join(state_directory, "operations.flock"), "a+")
 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+generation_owners_directory = os.path.join(state_directory, "generation-owners")
+generation_owner = os.path.join(generation_owners_directory, f"{item_id}.owner")
 
 existing = {}
 existing_path = os.path.join(os.path.dirname(destination), f"{item_id}.json")
@@ -238,6 +240,24 @@ try:
         json.dump(item, handle, indent=2, sort_keys=True)
         handle.write("\n")
     os.replace(temporary, destination)
+
+    if status == "generating":
+        os.makedirs(generation_owners_directory, exist_ok=True)
+        owner_descriptor, owner_temporary = tempfile.mkstemp(
+            prefix=f".{item_id}.", suffix=".tmp", dir=generation_owners_directory
+        )
+        try:
+            with os.fdopen(owner_descriptor, "w", encoding="utf-8") as handle:
+                handle.write(f"{os.getppid()}\n{created_at}\n")
+            os.replace(owner_temporary, generation_owner)
+        finally:
+            if os.path.exists(owner_temporary):
+                os.unlink(owner_temporary)
+    else:
+        try:
+            os.unlink(generation_owner)
+        except FileNotFoundError:
+            pass
 finally:
     if os.path.exists(temporary):
         os.unlink(temporary)

@@ -240,6 +240,7 @@ extension QueueStoreTests {
         var generating = item(id: "generating", createdAt: 10)
         generating.status = .generating
         try store.save(generating)
+        try writeGenerationOwner(getpid(), itemID: generating.id, store: store)
         let controller = PlaybackController(
             store: store,
             mediaController: disabledMediaController(stateDirectory: directory),

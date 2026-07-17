@@ -24,9 +24,15 @@ extension PlaybackController {
                 isSystemOutputMuted = outputMuted
                 updatePlaybackForBlockingState()
             }
-            let itemsChangeToken = try store.itemsChangeToken()
+            var itemsChangeToken = try store.itemsChangeToken()
             let shouldReloadItems = itemsChangeToken != lastItemsChangeToken
-            let loaded = shouldReloadItems ? try store.loadItems() : items
+            var loaded = shouldReloadItems ? try store.loadItems() : items
+            let generatingIDs = loaded.filter { $0.status == .generating }.map(\.id)
+            if !generatingIDs.isEmpty,
+               try store.recoverOrphanedGeneratingItems(generatingIDs) > 0 {
+                itemsChangeToken = try store.itemsChangeToken()
+                loaded = try store.loadItems()
+            }
             if let heldID = visibleAskQueueHoldID,
                loaded.first(where: { $0.id == heldID })?.isPendingQuestion != true {
                 visibleAskQueueHoldID = nil

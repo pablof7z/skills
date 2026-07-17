@@ -40,7 +40,10 @@ class ConcurrencyTrackingKokoroHandler(KokoroHandler):
             handler.condition.notify_all()
         try:
             handler.release_responses.wait(timeout=10)
-            super().do_POST()
+            try:
+                super().do_POST()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         finally:
             with handler.condition:
                 handler.active_requests -= 1
@@ -186,6 +189,92 @@ class GenerationConcurrencyTests(unittest.TestCase):
         self.assertTrue(self.wait_for_request_count(1))
         self.finish_processes()
         self.assertFalse(stale_slot.exists())
+
+    def test_active_generation_publishes_and_releases_item_owner(self) -> None:
+        self.launch(1, limit=1)
+        self.assertTrue(self.wait_for_request_count(1))
+
+        owners = list((self.state / "generation-owners").glob("*.owner"))
+        self.assertEqual(len(owners), 1)
+        owner_pid = owners[0].read_text(encoding="utf-8").splitlines()[0]
+        self.assertEqual(owner_pid, str(self.processes[0].pid))
+
+        self.finish_processes()
+        self.assertEqual(list((self.state / "generation-owners").glob("*.owner")), [])
+
+    def test_generation_timeout_fails_item_and_releases_capacity(self) -> None:
+        environment = self.environment(limit=1)
+        environment["TTS_GENERATION_TIMEOUT_SECONDS"] = "1"
+        started_at = time.monotonic()
+        process = subprocess.Popen(
+            [
+                str(self.tts),
+                "--no-play",
+                "--agent-name",
+                "timeout-test",
+                "--subject",
+                "Generation Deadline",
+                "--summary",
+                "A blocked endpoint must leave a failed item and release its slot.",
+                "--message",
+                "This request should stop at the configured generation deadline.",
+            ],
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.processes.append(process)
+        self.assertTrue(self.wait_for_request_count(1))
+
+        stdout, stderr = process.communicate(timeout=5)
+        self.assertNotEqual(process.returncode, 0, stdout)
+        self.assertLess(time.monotonic() - started_at, 4)
+        self.assertIn("timed out after 1 seconds", stderr)
+
+        item_files = list((self.state / "items").glob("*.json"))
+        self.assertEqual(len(item_files), 1)
+        item = json.loads(item_files[0].read_text(encoding="utf-8"))
+        self.assertEqual(item["status"], "failed")
+        self.assertEqual(item["error"], "Speech generation timed out after 1 seconds.")
+        self.assertEqual(list((self.state / "generation-owners").glob("*.owner")), [])
+        self.assertEqual(list((self.state / "generation-slots").glob("slot-*")), [])
+
+    def test_generation_deadline_includes_waiting_for_a_slot(self) -> None:
+        self.launch(1, limit=1)
+        self.assertTrue(self.wait_for_request_count(1))
+
+        environment = self.environment(limit=1)
+        environment["TTS_GENERATION_TIMEOUT_SECONDS"] = "1"
+        waiter = subprocess.Popen(
+            [
+                str(self.tts),
+                "--no-play",
+                "--agent-name",
+                "slot-timeout-test",
+                "--subject",
+                "Slot Deadline",
+                "--summary",
+                "Waiting for generation capacity must have a terminal deadline.",
+                "--message",
+                "This request should time out while waiting for the occupied slot.",
+            ],
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout, stderr = waiter.communicate(timeout=5)
+
+        self.assertNotEqual(waiter.returncode, 0, stdout)
+        self.assertIn("timed out after 1 seconds", stderr)
+        self.assertEqual(ConcurrencyTrackingKokoroHandler.request_count, 1)
+        items = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.state / "items").glob("*.json")
+        ]
+        self.assertEqual([item["status"] for item in items].count("failed"), 1)
+        self.finish_processes()
 
     def test_rejects_non_positive_limit_before_calling_kokoro(self) -> None:
         self.launch(1, limit=0)
