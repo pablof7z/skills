@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "tts_generate",
     "tts_get_item",
     "tts_health",
+    "tts_http_header_traffic",
     "tts_list_items",
     "tts_restore_items",
     "tts_speak",

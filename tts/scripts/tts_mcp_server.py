@@ -3,27 +3,34 @@
 
 from __future__ import annotations
 
-import argparse
-import hmac
-import ipaddress
 import json
-import os
-from pathlib import Path
 import sys
+from typing import Any
 
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
-from starlette.responses import JSONResponse
-from starlette.routing import Route
 
 from tts_mcp_adapter import TTSAdapter
 from tts_mcp_config import MCPConfig
-from tts_mcp_models import AttachmentInput, ItemFilters, QuestionBundleInput, SummaryInput, TitleInput
+from tts_mcp_http_log import HeaderTrafficStore
+from tts_mcp_models import (
+    AttachmentInput,
+    ItemFilters,
+    QuestionBundleInput,
+    SummaryInput,
+    TitleInput,
+)
 from tts_mcp_state import item_attachment, item_audio, item_json
 
 
-def build_server(config: MCPConfig, security: TransportSecuritySettings | None = None) -> FastMCP:
+def build_server(
+    config: MCPConfig,
+    security: TransportSecuritySettings | None = None,
+    auth: AuthSettings | None = None,
+    provider: Any = None,
+) -> FastMCP:
     adapter = TTSAdapter(config)
     server = FastMCP(
         "TTS",
@@ -35,6 +42,8 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
         json_response=True,
         stateless_http=True,
         transport_security=security,
+        auth=auth,
+        auth_server_provider=provider,
     )
 
     @server.tool(name="tts_speak", annotations=write_annotation(idempotent=False))
@@ -123,14 +132,18 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
         return await adapter.get_item(item_id)
 
     @server.tool(name="tts_wait_for_item", annotations=read_only())
-    async def tts_wait_for_item(item_id: str, timeout_seconds: int) -> dict[str, object]:
+    async def tts_wait_for_item(
+        item_id: str, timeout_seconds: int
+    ) -> dict[str, object]:
         """Wait for an answer or terminal playback state for a bounded interval."""
         bounded_seconds(timeout_seconds, "timeout_seconds")
         return await adapter.wait_for_item(item_id, timeout_seconds)
 
     @server.tool(name="tts_archive_items", annotations=write_annotation())
     async def tts_archive_items(
-        ids: list[str], reason: str, actor: str | None = None,
+        ids: list[str],
+        reason: str,
+        actor: str | None = None,
     ) -> dict[str, object]:
         """Archive one or more durable items without deleting their records."""
         require_ids(ids)
@@ -138,7 +151,9 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
 
     @server.tool(name="tts_restore_items", annotations=write_annotation())
     async def tts_restore_items(
-        ids: list[str], reason: str = "Restored through MCP.", actor: str | None = None,
+        ids: list[str],
+        reason: str = "Restored through MCP.",
+        actor: str | None = None,
     ) -> dict[str, object]:
         """Restore one or more archived durable items."""
         require_ids(ids)
@@ -154,20 +169,32 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
         ),
     )
     async def tts_supersede_questions(
-        ids: list[str], replacements: list[str], reason: str, actor: str | None = None,
+        ids: list[str],
+        replacements: list[str],
+        reason: str,
+        actor: str | None = None,
     ) -> dict[str, object]:
         """Atomically supersede pending questions with replacement item IDs."""
         require_ids(ids)
         require_ids(replacements)
         return await adapter.supersede(ids, replacements, reason, actor)
 
+    @server.tool(name="tts_http_header_traffic", annotations=read_only())
+    async def tts_http_header_traffic(limit: int = 50) -> dict[str, object]:
+        """Inspect recent inbound HTTP headers with credentials and token material redacted."""
+        return HeaderTrafficStore().recent(limit)
+
     @server.resource("tts://status", mime_type="application/json")
     async def status_resource() -> str:
-        return json.dumps(await adapter.status(), ensure_ascii=False, indent=2, sort_keys=True)
+        return json.dumps(
+            await adapter.status(), ensure_ascii=False, indent=2, sort_keys=True
+        )
 
     @server.resource("tts://health", mime_type="application/json")
     async def health_resource() -> str:
-        return json.dumps(await adapter.health(), ensure_ascii=False, indent=2, sort_keys=True)
+        return json.dumps(
+            await adapter.health(), ensure_ascii=False, indent=2, sort_keys=True
+        )
 
     @server.resource("tts://items/{item_id}", mime_type="application/json")
     def item_resource(item_id: str) -> str:
@@ -215,85 +242,10 @@ def bounded_seconds(value: int, name: str) -> None:
         raise ValueError(f"{name} must be between 1 and 3600")
 
 
-class BearerAuthMiddleware:
-    def __init__(self, app, token: str) -> None:
-        self.app = app
-        self.token = token
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope.get("type") == "http" and scope.get("path") != "/healthz":
-            headers = {key.lower(): value for key, value in scope.get("headers", [])}
-            supplied = headers.get(b"authorization", b"").decode("utf-8", errors="ignore")
-            if not hmac.compare_digest(supplied, f"Bearer {self.token}"):
-                response = JSONResponse(
-                    {"error": "unauthorized"},
-                    status_code=401,
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-                await response(scope, receive, send)
-                return
-        await self.app(scope, receive, send)
-
-
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="tts-mcp")
-    parser.add_argument("--http", action="store_true", help="serve Streamable HTTP instead of stdio")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8781)
-    parser.add_argument("--path", default="/mcp")
-    parser.add_argument("--token-env", default="TTS_MCP_TOKEN")
-    parser.add_argument("--allow-origin", action="append", default=[])
-    parser.add_argument("--allow-root", action="append", default=[])
-    parser.add_argument("--route", choices=["automatic", "paired", "local"], default="automatic")
-    return parser.parse_args(argv)
-
-
 def main(argv: list[str]) -> int:
-    args = parse_args(argv)
-    skill_dir = Path(__file__).resolve().parents[1]
-    config = MCPConfig(
-        skill_dir=skill_dir,
-        route=args.route,
-        allowed_roots=tuple(valid_root(value) for value in args.allow_root),
-    )
-    if not args.http:
-        build_server(config).run(transport="stdio")
-        return 0
-    validate_http_args(args)
-    token = os.environ.get(args.token_env, "")
-    if len(token) < 24:
-        raise SystemExit(f"{args.token_env} must contain a bearer token of at least 24 characters")
-    security = TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
-        allowed_origins=["http://127.0.0.1:*", "http://localhost:*", *args.allow_origin],
-    )
-    server = build_server(config, security)
-    server.settings.streamable_http_path = args.path
-    app = server.streamable_http_app()
-    app.routes.append(Route("/healthz", lambda _request: JSONResponse({"status": "ok"})))
-    import uvicorn
-    uvicorn.run(BearerAuthMiddleware(app, token), host=args.host, port=args.port, log_level="info")
-    return 0
+    from tts_mcp_http import main as runtime_main
 
-
-def valid_root(value: str) -> Path:
-    path = Path(value).expanduser().resolve()
-    if not path.is_dir():
-        raise SystemExit(f"allowed root is not a directory: {value}")
-    return path
-
-
-def validate_http_args(args: argparse.Namespace) -> None:
-    try:
-        if args.host != "localhost" and not ipaddress.ip_address(args.host).is_loopback:
-            raise ValueError
-    except ValueError as error:
-        raise SystemExit("HTTP mode only supports loopback hosts; public hosting requires OAuth") from error
-    if not 1 <= args.port <= 65535:
-        raise SystemExit("port must be between 1 and 65535")
-    if not args.path.startswith("/") or "//" in args.path or args.path == "/":
-        raise SystemExit("path must be a non-root absolute URL path")
+    return runtime_main(argv)
 
 
 if __name__ == "__main__":

@@ -63,11 +63,12 @@ Use `./scripts/tts-menu status` to inspect current playback and queue counts. Us
 ## MCP interface
 
 `./scripts/tts-mcp` exposes the TTS workflow to standard MCP clients over
-stdio. It can also serve authenticated Streamable HTTP on loopback:
+stdio. It can also serve OAuth-protected Streamable HTTP on loopback behind a
+public HTTPS tunnel:
 
 ```bash
-export TTS_MCP_TOKEN="<at-least-24-random-characters>"
-./scripts/tts-mcp --http --route automatic
+./scripts/tts-mcp --http --public-url https://example.ngrok.app --route automatic
+./scripts/tts-mcp pairing-code
 ```
 
 Use `--route paired` when the MCP server runs on an agent host paired to the
@@ -77,7 +78,9 @@ runs with no playback on the TTS computer, uploads the MP3 to
 `https://blossom.primal.net`, and returns its hosted descriptor without leaking
 the computer's local output path.
 
-See [MCP setup and tool contracts](references/mcp.md).
+Inbound HTTP headers, including rejected requests, are retained in a bounded
+local diagnostic log with credentials and token material redacted. See
+[MCP setup and tool contracts](references/mcp.md).
 
 ## What it touches
 

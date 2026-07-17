@@ -82,5 +82,6 @@ request identifier and delivery status without exposing files on the laptop.
   [results-and-troubleshooting.md](references/results-and-troubleshooting.md).
 - **Endpoint configuration**: Read [setup.md](references/setup.md).
 - **MCP clients or HTTP deployment**: Read [mcp.md](references/mcp.md). The MCP
-  wrapper supports stdio, authenticated loopback Streamable HTTP, explicit
-  paired routing, and generation-only MP3 results hosted on Blossom.
+  wrapper supports stdio, pairing-code OAuth over loopback Streamable HTTP,
+  redacted inbound-header diagnostics, explicit paired routing, and
+  generation-only MP3 results hosted on Blossom.
