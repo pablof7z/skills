@@ -3,7 +3,7 @@
 prepare_attachment_manifest() {
   local manifest="$1"
   shift
-  python3 - "$manifest" "$@" <<'PY'
+  python3 - "$manifest" "$SCRIPT_DIR" "$@" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -13,7 +13,10 @@ import sys
 import tempfile
 
 manifest = Path(sys.argv[1])
-values = sys.argv[2:]
+sys.path.insert(0, sys.argv[2])
+from tts_attachment_text import narrated_attachment_speech
+
+values = sys.argv[3:]
 if len(values) % 2:
     raise SystemExit("attachment labels and paths must be paired")
 
@@ -44,6 +47,10 @@ for index in range(0, len(values), 2):
     audio_file = None
     text = None
     if extension in text_extensions:
+        try:
+            narrated_attachment_speech(label, copied)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         kind = "narrated_text"
         status = "preparing"
         audio_file = str(directory / "narration.mp3")
@@ -86,7 +93,7 @@ prepare_question_bundle() {
   local raw_bundle="$2"
   local root_manifest="$3"
   local item_directory="$4"
-  python3 - "$destination" "$raw_bundle" "$root_manifest" "$item_directory" <<'PY'
+  python3 - "$destination" "$raw_bundle" "$root_manifest" "$item_directory" "$SCRIPT_DIR" <<'PY'
 import json
 import os
 from pathlib import Path
@@ -99,6 +106,9 @@ destination = Path(sys.argv[1])
 bundle = json.loads(sys.argv[2])
 root_manifest = Path(sys.argv[3]) if sys.argv[3] else destination.parent / "attachments" / "manifest.json"
 item_directory = Path(sys.argv[4])
+sys.path.insert(0, sys.argv[5])
+from tts_attachment_text import narrated_attachment_speech
+
 image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".tif", ".tiff", ".svg"}
 diagram_extensions = {".mmd"}
 audio_extensions = {".mp3", ".m4a", ".wav", ".aac", ".aiff", ".caf"}
@@ -130,6 +140,10 @@ def copy_attachment(spec, attachment_id, directory):
     audio_file = None
     text = None
     if extension in text_extensions:
+        try:
+            narrated_attachment_speech(label, copied)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         kind = "narrated_text"
         status = "preparing"
         audio_file = str(directory / "narration.mp3")

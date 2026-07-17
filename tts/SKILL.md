@@ -39,7 +39,10 @@ Keep the primary `--message` under 600 words. The runtime permits a 10 percent
 tolerance but rejects a primary message over 660 words. For a longer update,
 keep the concise, automatically played main corpus in `--message`, then split
 the rest into labeled narrated chapter attachments with repeated `--attach`
-pairs. The limit applies only to the primary message, not to those attachments.
+pairs. Each Markdown or text attachment may contain up to 2,000 narrated words
+after formatting-only content is removed. Split longer narration into focused
+labeled attachments. Attach raw logs and diagnostic captures with a non-text
+extension when they should remain available to open without being narrated.
 
 When an update has useful supporting material—screenshots, mockups, a proposal,
 detailed findings, or decision context—attach it. Attachments let the user
