@@ -9,7 +9,7 @@
     {
       "name": "worktree-guard",
       "source": "./plugins/worktree-guard",
-      "description": "Keep agent writes out of protected Git main worktrees; allow linked worktrees."
+      "description": "Block six risky Git commands in base checkouts; leave linked worktrees and other tools alone."
     }
   ]
 }

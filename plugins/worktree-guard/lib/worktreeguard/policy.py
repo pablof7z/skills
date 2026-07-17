@@ -1,0 +1,129 @@
+"""The complete WorktreeGuard policy: six Git subcommands in base checkouts."""
+
+from __future__ import annotations
+
+import shlex
+from dataclasses import dataclass
+from pathlib import Path
+
+from .core import BLOCKED_GIT_COMMANDS, resolve_path
+from .git import is_main_worktree
+
+
+CONTROL_TOKENS = {"&&", "||", ";", "|", "&"}
+GIT_FLAGS_WITH_VALUES = {"-c", "--config-env", "--exec-path", "--git-dir", "--namespace"}
+GIT_FLAGS = {"--bare", "--help", "--no-optional-locks", "--no-pager", "--paginate", "--version"}
+
+
+@dataclass(frozen=True)
+class BlockedGitOperation:
+    subcommand: str
+    command: str
+    cwd: Path
+    base_path: Path
+
+
+def blocked_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None:
+    """Return the first explicitly blocked Git invocation in a protected base."""
+    segments = shell_segments(command)
+    if not segments:
+        return None
+
+    active_cwd = resolve_path(cwd)
+    for tokens in segments:
+        active_cwd = cd_result(tokens, active_cwd)
+        invocation = git_invocation(tokens, active_cwd)
+        if invocation is None:
+            continue
+        git_cwd, subcommand = invocation
+        if subcommand not in BLOCKED_GIT_COMMANDS:
+            continue
+        is_base, repo = is_main_worktree(git_cwd)
+        if is_base and repo is not None:
+            return BlockedGitOperation(subcommand, command, git_cwd, repo.base_path)
+    return None
+
+
+def shell_segments(command: str) -> list[list[str]]:
+    if not isinstance(command, str) or not command.strip():
+        return []
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return []
+
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in CONTROL_TOKENS:
+            if current:
+                segments.append(current)
+            current = []
+        else:
+            current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def cd_result(tokens: list[str], cwd: Path) -> Path:
+    if not tokens or tokens[0] != "cd" or len(tokens) < 2:
+        return cwd
+    candidate = Path(tokens[1]).expanduser()
+    return resolve_path(candidate if candidate.is_absolute() else cwd / candidate)
+
+
+def git_invocation(tokens: list[str], cwd: Path) -> tuple[Path, str] | None:
+    index = command_index(tokens)
+    if index is None or Path(tokens[index]).name != "git":
+        return None
+    return parse_git_args(tokens[index + 1 :], cwd)
+
+
+def command_index(tokens: list[str]) -> int | None:
+    index = 0
+    while index < len(tokens) and "=" in tokens[index] and not tokens[index].startswith("="):
+        index += 1
+    if index < len(tokens) and tokens[index] == "command":
+        index += 1
+    if index < len(tokens) and tokens[index] == "env":
+        index += 1
+        while index < len(tokens) and (tokens[index].startswith("-") or "=" in tokens[index]):
+            index += 1
+    return index if index < len(tokens) else None
+
+
+def parse_git_args(args: list[str], cwd: Path) -> tuple[Path, str] | None:
+    remaining = list(args)
+    effective_cwd = cwd
+    while remaining:
+        arg = remaining[0]
+        if arg == "-C" and len(remaining) >= 2:
+            effective_cwd = relative_path(remaining[1], effective_cwd)
+            remaining = remaining[2:]
+        elif arg.startswith("-C") and len(arg) > 2:
+            effective_cwd = relative_path(arg[2:], effective_cwd)
+            remaining = remaining[1:]
+        elif arg == "--work-tree" and len(remaining) >= 2:
+            effective_cwd = relative_path(remaining[1], effective_cwd)
+            remaining = remaining[2:]
+        elif arg.startswith("--work-tree="):
+            effective_cwd = relative_path(arg.partition("=")[2], effective_cwd)
+            remaining = remaining[1:]
+        elif arg in GIT_FLAGS_WITH_VALUES and len(remaining) >= 2:
+            remaining = remaining[2:]
+        elif arg in GIT_FLAGS or any(arg.startswith(f"{flag}=") for flag in GIT_FLAGS_WITH_VALUES):
+            remaining = remaining[1:]
+        elif arg.startswith("-"):
+            return None
+        else:
+            return effective_cwd, arg
+    return None
+
+
+def relative_path(raw: str, cwd: Path) -> Path:
+    candidate = Path(raw).expanduser()
+    return resolve_path(candidate if candidate.is_absolute() else cwd / candidate)

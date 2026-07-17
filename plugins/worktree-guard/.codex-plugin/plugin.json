@@ -1,7 +1,7 @@
 {
   "name": "worktree-guard",
-  "version": "0.2.1+codex.20260716080559",
-  "description": "Codex hooks and a bundled local command for WorktreeGuard-protected Git worktrees.",
+  "version": "0.3.0",
+  "description": "Lightweight Git accident prevention for protected base checkouts.",
   "author": {
     "name": "Pablo Fernandez",
     "url": "https://github.com/pablof7z"
@@ -16,9 +16,9 @@
     "guardrails"
   ],
   "interface": {
-    "displayName": "WorktreeGuard Codex",
-    "shortDescription": "Keep Codex writes out of protected base checkouts.",
-    "longDescription": "Installs Codex lifecycle hooks plus a bundled local WorktreeGuard command so Git main worktrees are protected by default, linked worktrees remain writable, and human-approved base access grants are honored.",
+    "displayName": "WorktreeGuard",
+    "shortDescription": "Block six risky Git commands in base checkouts.",
+    "longDescription": "A lightweight accident-prevention hook that blocks checkout, clean, rebase, reset, restore, and switch only in Git base checkouts. Linked worktrees and every other tool remain unrestricted.",
     "developerName": "Pablo Fernandez",
     "category": "Productivity",
     "capabilities": [
@@ -27,7 +27,7 @@
       "Policy"
     ],
     "defaultPrompt": [
-      "Use WorktreeGuard before editing this repo."
+      "Use linked worktrees for risky Git history or checkout operations."
     ]
   }
 }
