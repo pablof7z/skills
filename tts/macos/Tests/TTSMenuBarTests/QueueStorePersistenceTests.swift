@@ -34,27 +34,6 @@ extension QueueStoreTests {
     }
 
     @Test
-    func recoversInterruptedPlayback() throws {
-        let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audio = directory.appendingPathComponent("speech.mp3")
-        try Data("audio".utf8).write(to: audio)
-        let store = QueueStore(stateDirectory: directory)
-
-        var interrupted = item(id: "active", createdAt: 10, outputFile: audio.path)
-        interrupted.status = .paused
-        interrupted.startedAt = 11
-        try store.save(interrupted)
-
-        try store.recoverInterruptedItems()
-
-        let recovered = try #require(store.loadItems().first)
-        #expect(recovered.status == .queued)
-        #expect(recovered.startedAt == nil)
-    }
-
-    @Test
     func persistsGlobalPlaybackPauseAcrossProcesses() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

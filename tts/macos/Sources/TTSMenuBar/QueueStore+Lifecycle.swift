@@ -231,23 +231,6 @@ extension QueueStore {
         }
     }
 
-    func recoverInterruptedItems() throws {
-        for var item in try loadItems() where item.status == .playing || item.status == .paused {
-            guard FileManager.default.fileExists(atPath: item.outputFile) else {
-                item.status = .failed
-                item.error = "Audio file is no longer available."
-                item.completedAt = Int64(Date().timeIntervalSince1970)
-                try save(item)
-                continue
-            }
-            item.status = .queued
-            item.startedAt = nil
-            item.completedAt = nil
-            item.error = nil
-            try save(item)
-        }
-    }
-
     static func defaultStateDirectory(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "--state-dir"), arguments.indices.contains(index + 1) {

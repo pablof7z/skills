@@ -83,6 +83,24 @@ extension PlaybackController {
         manualQueuePauseBarrier = ManualQueuePauseBarrier(itemsAtPause: persisted)
     }
 
+    func parkCurrentForShutdown() {
+        guard var item = currentItem,
+              item.status == .playing || item.status == .paused else { return }
+        let playbackOffset = player?.currentTime ?? item.playbackOffset
+        player?.stop()
+        item.status = .interrupted
+        item.playbackOffset = playbackOffset
+        item.completedAt = Int64(Date().timeIntervalSince1970)
+        item.duration = player?.duration ?? item.duration
+        item.error = nil
+        if !item.isAttachmentPlayback {
+            item.isUnheard = true
+        }
+        finalizeEngagement(on: &item)
+        try? store.save(item)
+        replaceItem(item)
+    }
+
     func parkPausedCurrentForIncomingPlayback() {
         guard var item = currentItem, item.status == .paused, let player else { return }
         playbackStartTask?.cancel()
