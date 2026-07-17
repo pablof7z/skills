@@ -99,7 +99,9 @@ extension NowSpeakingHUDView {
                         guard abs(primaryMessageContentHeight - height) > 1 else { return }
                         primaryMessageContentHeight = height
                     },
-                    allowsVerticalScrolling: false
+                    allowsVerticalScrolling: false,
+                    attachments: item.briefAttachments,
+                    onOpenAttachment: { openSupportingAttachment($0, item: item) }
                 )
                 .frame(height: max(primaryMessageContentHeight, 72))
                 .accessibilityLabel("Primary message")

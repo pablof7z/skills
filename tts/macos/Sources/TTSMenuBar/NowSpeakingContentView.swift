@@ -29,7 +29,9 @@ struct NowSpeakingHUDView: View {
                             currentTime: 0,
                             duration: 0,
                             accent: accent,
-                            onSeek: { _ in }
+                            onSeek: { _ in },
+                            attachments: item.briefAttachments,
+                            onOpenAttachment: { activateAttachment($0, item: item) }
                         )
                         .transition(.opacity)
                         Divider().overlay(Color.white.opacity(0.11))
@@ -49,7 +51,9 @@ struct NowSpeakingHUDView: View {
                                 currentTime: playbackTime,
                                 duration: playbackDuration,
                                 accent: accent,
-                                onSeek: { seek(item: item, to: $0) }
+                                onSeek: { seek(item: item, to: $0) },
+                                attachments: item.briefAttachments,
+                                onOpenAttachment: { activateAttachment($0, item: item) }
                             )
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
