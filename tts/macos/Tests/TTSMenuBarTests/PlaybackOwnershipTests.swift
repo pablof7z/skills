@@ -13,6 +13,7 @@ extension QueueStoreTests {
         try writeLongSilentAudio(to: audio)
         let store = QueueStore(stateDirectory: directory)
         try store.save(item(id: "owned", createdAt: 10, outputFile: audio.path))
+        try store.admitPlayback(of: "owned", requestedAtNanoseconds: 10)
         let preferences = PlayerPreferencesStore(stateDirectory: directory)
         preferences.setPausesMedia(false)
         let logger = PlaybackOwnershipLogger()

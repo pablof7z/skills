@@ -60,13 +60,13 @@ extension PlaybackController {
                 if currentItem?.status == .paused,
                    automaticallyPausedItemID == nil,
                    !isPlaybackBlocked,
-                   let next = automaticPlaybackCandidate(in: loaded)
+                   let next = automaticPlaybackCandidate()
                 {
                     parkPausedCurrentForIncomingPlayback()
                     playAutomaticCandidate(next)
                 }
             } else if !isPlaybackBlocked {
-                if let next = automaticPlaybackCandidate(in: loaded) {
+                if let next = automaticPlaybackCandidate() {
                     playAutomaticCandidate(next)
                 }
             }
@@ -75,29 +75,23 @@ extension PlaybackController {
         }
     }
 
-    static func nextQueuedItem(in items: [TTSItem]) -> TTSItem? {
-        QueuePlaybackPolicy.nextQueuedItem(in: items)
-    }
-
-    func automaticPlaybackCandidate(in items: [TTSItem]) -> TTSItem? {
-        if let heldID = visibleAskQueueHoldID {
-            guard let held = items.first(where: {
-                $0.id == heldID && QueuePlaybackPolicy.isAutomaticallyPlayable($0, in: items)
-            }) else {
-                return nil
-            }
-            guard manualQueuePauseBarrier?.allows(held) != false else { return nil }
-            return held
+    func automaticPlaybackCandidate() -> TTSItem? {
+        do {
+            return try store.pendingPlaybackItem(heldItemID: visibleAskQueueHoldID)
+        } catch {
+            NSLog("Unable to inspect waiting TTS playback requests: %@", error.localizedDescription)
+            return nil
         }
-        if let manualQueuePauseBarrier {
-            return manualQueuePauseBarrier.nextArrival(in: items)
-        }
-        return QueuePlaybackPolicy.nextQueuedItem(in: items)
     }
 
     func playAutomaticCandidate(_ item: TTSItem) {
-        manualQueuePauseBarrier?.recordStarted(item)
-        play(item)
+        do {
+            guard let claimed = try store.claimPlaybackItem(id: item.id) else { return }
+            replaceItem(claimed)
+            play(claimed)
+        } catch {
+            NSLog("Unable to claim TTS playback request: %@", error.localizedDescription)
+        }
     }
 
     func play(
@@ -109,6 +103,9 @@ extension PlaybackController {
             initiator: initiator,
             in: items
         ) else { return }
+        if initiator == .direct {
+            try? store.discardPlaybackAdmission(for: queuedItem.id)
+        }
         let opensPaused = isPlaybackBlocked && initiator == .direct
         guard !isPlaybackBlocked || opensPaused else { return }
         guard FileManager.default.fileExists(atPath: queuedItem.outputFile) else {

@@ -100,6 +100,7 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                     "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04",
                 )
                 self.assertFalse(Path(generating["output_file"]).exists())
+                self.assertFalse((state / "playback-admissions").exists())
                 self.assertIsNone(process.poll())
 
                 BlockingKokoroHandler.release_response.set()
@@ -113,6 +114,12 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                 self.assertIsNotNone(queued["generation_duration"])
                 self.assertTrue(queued["is_unheard"])
                 self.assertTrue(Path(queued["output_file"]).is_file())
+                admission = json.loads(
+                    (state / "playback-admissions" / f"{queued['id']}.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(admission["item_id"], queued["id"])
                 with KokoroHandler.received_inputs_lock:
                     spoken = KokoroHandler.received_inputs[-1]
                 self.assertTrue(

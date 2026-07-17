@@ -83,21 +83,6 @@ extension QueueStoreTests {
         #expect(children.first?.attachmentID == why.id)
     }
 
-    @Test @MainActor
-    func explicitlyRequestedAttachmentPlaysBeforeOrdinaryQueue() throws {
-        let ordinary = item(id: "ordinary", createdAt: 10)
-        let parent = item(id: "main", createdAt: 15)
-        var attachmentPlayback = item(id: "attachment", createdAt: 20)
-        attachmentPlayback.parentItemID = parent.id
-        attachmentPlayback.attachmentID = "why"
-
-        let next = try #require(
-            PlaybackController.nextQueuedItem(in: [ordinary, parent, attachmentPlayback])
-        )
-
-        #expect(next.id == attachmentPlayback.id)
-    }
-
     @Test
     func playbackStateSaveCannotClobberPreparedAttachmentAudio() throws {
         var stale = attachment()

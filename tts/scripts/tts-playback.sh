@@ -23,7 +23,7 @@ queue_macos_playback() {
   item_file="$items_dir/$item_id.json"
   generation_duration=$(( $(date +%s) - ITEM_CREATED_AT ))
 
-  if ! write_macos_item_record "$item_file" "queued" "" "" "$generation_duration"; then
+  if ! write_macos_item_record "$item_file" "queued" "" "" "$generation_duration" "1"; then
     return 1
   fi
 

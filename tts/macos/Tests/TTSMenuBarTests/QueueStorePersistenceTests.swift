@@ -197,6 +197,7 @@ extension QueueStoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = QueueStore(stateDirectory: directory)
         try store.save(item(id: "muted", createdAt: 10))
+        try store.admitPlayback(of: "muted", requestedAtNanoseconds: 10)
         let controller = PlaybackController(
             store: store,
             mediaController: disabledMediaController(stateDirectory: directory),
@@ -209,6 +210,7 @@ extension QueueStoreTests {
         #expect(controller.isSystemOutputMuted)
         #expect(controller.currentItem == nil)
         #expect(try store.loadItems().map(\.status) == [.queued])
+        #expect(try store.pendingPlaybackAdmissions().map(\.itemID) == ["muted"])
     }
 
     @Test @MainActor

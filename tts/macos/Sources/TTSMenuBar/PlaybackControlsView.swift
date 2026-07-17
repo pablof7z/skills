@@ -102,7 +102,7 @@ extension NowSpeakingHUDView {
 
     @ViewBuilder
     var nextInQueueIndicator: some View {
-        if let next = controller.nextQueuedItem {
+        if let next = controller.nextPlaybackRequestItem {
             HStack(spacing: 6) {
                 VStack(alignment: .trailing, spacing: 1) {
                     Text("UP NEXT")

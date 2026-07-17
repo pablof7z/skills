@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer
 import json
 import os
@@ -97,6 +98,12 @@ class PlaybackOwnershipTests(unittest.TestCase):
         self.assertEqual(item["subject"], "Existing Audio Routed")
         self.assertEqual(Path(item["output_file"]).read_bytes(), b"existing-audio")
         self.assertTrue(Path(item["output_file"]).is_relative_to(self.sessions))
+        admission = json.loads(
+            (self.state / "playback-admissions" / f"{response['id']}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(admission["item_id"], response["id"])
         self.assertEqual(self.menu_log.read_text(encoding="utf-8").splitlines(), ["start"])
         self.assertFalse(self.afplay_marker.exists())
 
@@ -108,6 +115,23 @@ class PlaybackOwnershipTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.afplay_marker.read_text(encoding="utf-8").strip(), str(self.audio))
         self.assertFalse(self.menu_log.exists())
+
+    def test_concurrent_requests_create_one_ordered_admission_each(self) -> None:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: self.run_existing(), range(2)))
+
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        responses = [json.loads(result.stdout) for result in results]
+        item_ids = {response["id"] for response in responses}
+        self.assertEqual(len(item_ids), 2)
+        admissions = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.state / "playback-admissions").glob("*.json")
+        ]
+        self.assertEqual({value["item_id"] for value in admissions}, item_ids)
+        requested_at = sorted(value["requested_at_ns"] for value in admissions)
+        self.assertLess(requested_at[0], requested_at[1])
 
     def test_generated_audio_does_not_bypass_an_unavailable_macos_player(self) -> None:
         with KokoroHandler.received_inputs_lock:
@@ -146,6 +170,7 @@ class PlaybackOwnershipTests(unittest.TestCase):
             self.assertEqual(len(item_paths), 1)
             item = json.loads(item_paths[0].read_text(encoding="utf-8"))
             self.assertEqual(item["status"], "failed")
+            self.assertEqual(list((self.state / "playback-admissions").glob("*.json")), [])
         finally:
             server.shutdown()
             thread.join(timeout=2)

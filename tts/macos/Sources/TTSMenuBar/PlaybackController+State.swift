@@ -60,8 +60,7 @@ extension PlaybackController {
             }
         }
 
-        let persisted = try? store.loadItems()
-        let hasAutomaticCandidate = persisted.flatMap { automaticPlaybackCandidate(in: $0) } != nil
+        let hasAutomaticCandidate = automaticPlaybackCandidate() != nil
         if hasAutomaticCandidate {
             refresh()
         } else {
@@ -75,12 +74,7 @@ extension PlaybackController {
         guard player == nil else { return false }
         guard let persisted = try? store.loadItems() else { return false }
         guard !persisted.contains(where: { $0.status == .playing }) else { return false }
-        return automaticPlaybackCandidate(in: persisted) == nil
-    }
-
-    func beginManualQueuePauseBarrier() {
-        let persisted = (try? store.loadItems()) ?? items
-        manualQueuePauseBarrier = ManualQueuePauseBarrier(itemsAtPause: persisted)
+        return automaticPlaybackCandidate() == nil
     }
 
     func parkCurrentForShutdown() {

@@ -277,6 +277,7 @@ class QueueCLITests(unittest.TestCase):
             self.assertEqual(item["id"], output["id"])
             self.assertEqual(item["status"], "generated")
             self.assertFalse(item["playback_requested"])
+            self.assertEqual(list((self.state / "playback-admissions").glob("*.json")), [])
         finally:
             server.shutdown()
             thread.join(timeout=2)
