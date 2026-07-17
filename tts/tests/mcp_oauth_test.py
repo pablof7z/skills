@@ -125,7 +125,7 @@ class MCPOAuthHTTPTests(unittest.TestCase):
         self.assertEqual(
             authorization_metadata.json()["code_challenge_methods_supported"], ["S256"]
         )
-        callback = "http://127.0.0.1:45454/callback"
+        callback = "https://chatgpt.com/connector/oauth/test-callback"
         registration = httpx.post(
             f"{origin}/register",
             json={
@@ -165,10 +165,15 @@ class MCPOAuthHTTPTests(unittest.TestCase):
         pairing = json.loads(
             (root / "state" / "mcp" / "oauth-pairing.json").read_text()
         )
-        pair_html = httpx.get(pair_url).text
+        pair_response = httpx.get(pair_url)
+        pair_html = pair_response.text
         self.assertNotIn(pairing["code"], pair_html)
         self.assertIn("TTS MCP test caller", pair_html)
-        self.assertIn("127.0.0.1", pair_html)
+        self.assertIn("chatgpt.com", pair_html)
+        self.assertIn(
+            "form-action 'self' https://chatgpt.com;",
+            pair_response.headers["content-security-policy"],
+        )
         approved = httpx.post(
             f"{origin}/pair",
             data={"request": request_id, "pairing_code": pairing["code"]},

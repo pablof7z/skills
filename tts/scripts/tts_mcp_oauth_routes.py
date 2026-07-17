@@ -13,17 +13,6 @@ from starlette.routing import Route
 from tts_mcp_oauth import PairingApprovalError, PairingOAuthProvider, SCOPE
 
 
-SECURITY_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
-        "frame-ancestors 'none'; base-uri 'none'"
-    ),
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-}
-
-
 def oauth_extra_routes(provider: PairingOAuthProvider) -> list[Route]:
     async def pair(request: Request):
         if request.method == "POST":
@@ -86,7 +75,11 @@ def pair_page(
  inputmode="text" autocapitalize="characters" spellcheck="false" required autofocus>
 <button type="submit">Approve caller</button></form>
 <p class="fine">One use only. Expires in at most {seconds} seconds.</p></main></body></html>"""
-    return HTMLResponse(body, status_code=status_code, headers=SECURITY_HEADERS)
+    return HTMLResponse(
+        body,
+        status_code=status_code,
+        headers=security_headers(str(summary["redirect_origin"])),
+    )
 
 
 def message_page(message: str, status_code: int) -> HTMLResponse:
@@ -94,7 +87,23 @@ def message_page(message: str, status_code: int) -> HTMLResponse:
 <meta name="viewport" content="width=device-width"><title>TTS MCP</title>
 <style>{styles()}</style></head><body><main><p class="eyebrow">TTS MCP</p>
 <h1>Authorization unavailable</h1><p>{escape(message)}</p></main></body></html>"""
-    return HTMLResponse(body, status_code=status_code, headers=SECURITY_HEADERS)
+    return HTMLResponse(body, status_code=status_code, headers=security_headers())
+
+
+def security_headers(redirect_origin: str | None = None) -> dict[str, str]:
+    form_action = "form-action 'self'"
+    if redirect_origin:
+        # Chromium applies form-action to redirects caused by a form submission.
+        form_action += f" {redirect_origin}"
+    return {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": (
+            f"default-src 'none'; style-src 'unsafe-inline'; {form_action}; "
+            "frame-ancestors 'none'; base-uri 'none'"
+        ),
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    }
 
 
 def styles() -> str:
