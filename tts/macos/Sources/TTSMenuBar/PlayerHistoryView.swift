@@ -130,6 +130,12 @@ private struct PlayerHistoryRow: View {
                             .foregroundStyle(summaryColor)
                             .lineLimit(1)
                         Spacer(minLength: 8)
+                        if !item.briefAttachments.isEmpty {
+                            Label("\(item.briefAttachments.count)", systemImage: "paperclip")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("\(item.briefAttachments.count) attachments")
+                        }
                         Text(item.timestampLabel(now: timestampNow))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tertiary)
