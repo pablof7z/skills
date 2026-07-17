@@ -15,7 +15,7 @@ from .core import (
     path_contains,
     resolve_path,
 )
-from .git import git_effective_cwd, git_main_worktree_matches
+from .git import git_effective_cwd, git_main_worktree_matches, git_path_is_ignored
 from .repositories import protected_repo_for_path
 
 
@@ -56,7 +56,11 @@ def protected_write_target(operation: dict[str, Any], cwd: Path) -> tuple[Path, 
         if protected is None:
             continue
         base_path = resolve_path(str(protected["base_path"]))
-        if path_contains(base_path, target) and git_main_worktree_matches(base_path, context):
+        if (
+            path_contains(base_path, target)
+            and git_main_worktree_matches(base_path, context)
+            and not git_path_is_ignored(base_path, target)
+        ):
             return base_path, protected
     return None
 
@@ -122,7 +126,11 @@ def path_is_protected_main_worktree_target(path: Path) -> bool:
     if protected is None:
         return False
     base_path = resolve_path(str(protected["base_path"]))
-    return path_contains(base_path, path) and git_main_worktree_matches(base_path, context)
+    return (
+        path_contains(base_path, path)
+        and git_main_worktree_matches(base_path, context)
+        and not git_path_is_ignored(base_path, path)
+    )
 
 
 def existing_context_dir(path: Path) -> Path:

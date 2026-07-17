@@ -118,6 +118,24 @@ def git_status_is_clean(base_path: Path) -> bool:
     return result.returncode == 0 and result.stdout == b""
 
 
+def git_path_is_ignored(base_path: Path, path: Path) -> bool:
+    try:
+        relative_path = resolve_path(path).relative_to(resolve_path(base_path))
+    except ValueError:
+        return False
+    if relative_path == Path("."):
+        return False
+    result = subprocess.run(
+        ["git", "check-ignore", "--quiet", "--", str(relative_path)],
+        cwd=str(base_path),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=False,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def git_output_optional(base_path: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
