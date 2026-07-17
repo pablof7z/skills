@@ -16,16 +16,19 @@ def request_tags(
     peer_pubkey: str,
     group_id: str,
     title: str,
+    summary: str,
     agent_name: str,
     message: str,
     attachments: list[dict[str, str]],
     ask: dict[str, object] | None = None,
     wait: str | None = None,
 ) -> list[list[str]]:
+    title, summary = normalized_request_copy(title, summary)
     tags = [
         ["p", peer_pubkey],
         ["h", group_id],
         ["title", title],
+        ["summary", summary],
         ["agent", agent_name],
     ]
     tags.extend(["attachment", item["path"], item["label"]] for item in attachments)
@@ -53,6 +56,18 @@ def request_tags(
             tags.append(option_tag)
     tags.append(["wait", str(wait)])
     return tags
+
+
+def normalized_request_copy(title: str, summary: str) -> tuple[str, str]:
+    title = " ".join(title.split())
+    summary = " ".join(summary.split())
+    if not title:
+        raise RuntimeError("subject is required")
+    if len(title.split()) > 10:
+        raise RuntimeError("subject must not exceed 10 words")
+    if not summary:
+        raise RuntimeError("summary is required")
+    return title, summary
 
 
 def render_request_content(tags: list[list[str]]) -> str:
@@ -110,6 +125,7 @@ def request_payload(event: dict[str, object]) -> dict[str, object] | None:
     result: dict[str, object] = {
         "message": content,
         "subject": title,
+        "summary": normalized_summary(event, content),
         "agent_name": agent_name,
         "attachments": attachments,
         "action": action or "speak",
@@ -131,6 +147,13 @@ def request_payload(event: dict[str, object]) -> dict[str, object] | None:
         "wait": wait,
     })
     return result
+
+
+def normalized_summary(event: dict[str, object], fallback: str) -> str:
+    value = unique_tag_value(event, "summary")
+    if not value:
+        value = unique_tag_value(event, "message") or fallback
+    return " ".join(value.split())
 
 
 def parse_questions(event: dict[str, object]) -> list[dict[str, object]] | None:

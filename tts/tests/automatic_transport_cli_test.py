@@ -74,6 +74,7 @@ class AutomaticTransportCLITests(unittest.TestCase):
         result = self.run_tts(
             "--agent-name", "automatic transport",
             "--subject", "Ordinary speech chooses paired playback",
+            "--summary", "Ordinary speech should select paired playback automatically.",
             "--message", "The agent does not choose a transport.",
             state=self.server_state,
         )
@@ -86,11 +87,16 @@ class AutomaticTransportCLITests(unittest.TestCase):
         self.assertEqual(request["content"], "The agent does not choose a transport.")
         self.assertIn(["agent", "automatic transport"], request["tags"])
         self.assertIn(["title", "Ordinary speech chooses paired playback"], request["tags"])
+        self.assertIn(
+            ["summary", "Ordinary speech should select paired playback automatically."],
+            request["tags"],
+        )
 
     def test_missing_endpoint_still_explains_setup_when_no_pair_exists(self) -> None:
         result = self.run_tts(
             "--agent-name", "automatic transport",
             "--subject", "No playback destination is available",
+            "--summary", "Neither local synthesis nor paired playback is available.",
             "--message", "This cannot be delivered.",
             state=self.server_state,
             check=False,
@@ -118,6 +124,7 @@ class AutomaticTransportCLITests(unittest.TestCase):
                     str(self.tts),
                     "--agent-name", "local no-play",
                     "--subject", "Local no-play remains private and unplayed",
+                    "--summary", "Generation-only audio stays local and out of the player.",
                     "--no-play",
                     "--message", "Generate this only on the originating host.",
                 ],

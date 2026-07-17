@@ -23,6 +23,7 @@ def materialize_request(
         str(SCRIPT_DIR / "tts"),
         "--agent-name", str(content.get("agent_name") or "remote"),
         "--subject", str(content.get("subject") or "Remote TTS request from paired host"),
+        "--summary", str(content.get("summary") or content.get("message") or "Remote spoken update"),
         "--message", str(content.get("message") or ""),
     ]
     for attachment in content.get("attachments") or []:

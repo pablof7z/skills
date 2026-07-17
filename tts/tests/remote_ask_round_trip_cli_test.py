@@ -130,6 +130,7 @@ class RemoteAskRoundTripCLITests(unittest.TestCase):
             [
                 str(self.tts), "remote", "speak", "--peer", peer,
                 "--agent-name", "Codex", "--subject", "Choose the deployment regions",
+                "--summary", "The release is ready and needs a deployment decision.",
                 "--message", "The release is ready for a deployment decision.",
                 "--ask", bundle, "--wait", "5s",
             ],

@@ -10,8 +10,8 @@ Read this reference before using `--ask`.
 - [Attachments](#attachments)
 - [Completion and lifecycle](#completion-and-lifecycle)
 
-Always pass the stable agent seed name and session subject required by the root
-skill.
+Always pass the stable agent seed name, concise title, and non-spoken one-line
+summary required by the root skill.
 
 ## One question
 
@@ -21,7 +21,8 @@ with `--suggestions` as JSON title-and-description pairs:
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
-  --subject "Choosing the implementation ownership boundary" \
+  --subject "Ownership Boundary" \
+  --summary "One implementation ownership decision remains before work can continue." \
   --ask \
   --wait 5m \
   --suggestions '[["Use the existing model", "Keep the current ownership boundary."], ["Split the model", "Give questions an independent lifecycle."]]' \
@@ -63,7 +64,8 @@ several suggestions may be selected.
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
-  --subject "Choosing the rollout and notification plan" \
+  --subject "Rollout Decisions" \
+  --summary "The release candidate passed and two rollout choices remain." \
   --message "The release candidate passed its automated checks. I narrowed the remaining decisions to rollout risk and who needs advance notice." \
   --wait 5m \
   --ask '{

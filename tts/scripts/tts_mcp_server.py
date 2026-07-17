@@ -19,7 +19,7 @@ from starlette.routing import Route
 
 from tts_mcp_adapter import TTSAdapter
 from tts_mcp_config import MCPConfig
-from tts_mcp_models import AttachmentInput, ItemFilters, QuestionBundleInput
+from tts_mcp_models import AttachmentInput, ItemFilters, QuestionBundleInput, SummaryInput, TitleInput
 from tts_mcp_state import item_attachment, item_audio, item_json
 
 
@@ -40,7 +40,8 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
     @server.tool(name="tts_speak", annotations=write_annotation(idempotent=False))
     async def tts_speak(
         agent_name: str,
-        subject: str,
+        subject: TitleInput,
+        summary: SummaryInput,
         message: str,
         attachments: list[AttachmentInput] | None = None,
     ) -> dict[str, object]:
@@ -48,6 +49,7 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
         return await adapter.speak(
             agent_name=agent_name,
             subject=subject,
+            summary=summary,
             message=message,
             attachments=attachments or [],
         )
@@ -55,7 +57,8 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
     @server.tool(name="tts_ask", annotations=write_annotation(idempotent=False))
     async def tts_ask(
         agent_name: str,
-        subject: str,
+        subject: TitleInput,
+        summary: SummaryInput,
         message: str,
         bundle: QuestionBundleInput,
         wait_seconds: int = 300,
@@ -66,6 +69,7 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
         return await adapter.ask(
             agent_name=agent_name,
             subject=subject,
+            summary=summary,
             message=message,
             bundle=bundle,
             wait_seconds=wait_seconds,
@@ -83,7 +87,8 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
     )
     async def tts_generate(
         agent_name: str,
-        subject: str,
+        subject: TitleInput,
+        summary: SummaryInput,
         message: str,
         wait_seconds: int = 300,
     ) -> dict[str, object]:
@@ -92,6 +97,7 @@ def build_server(config: MCPConfig, security: TransportSecuritySettings | None =
         return await adapter.generate(
             agent_name=agent_name,
             subject=subject,
+            summary=summary,
             message=message,
             wait_seconds=wait_seconds,
         )

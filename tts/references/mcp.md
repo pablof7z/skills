@@ -66,6 +66,10 @@ the signed reply path.
 
 ## Tools
 
+The three creation tools require `agent_name`, a concise `subject` title, a
+one-line non-spoken `summary`, and the spoken `message`. Titles aim for 2-5
+words and must not exceed 10 words.
+
 - `tts_speak`: generate and queue an audible update.
 - `tts_ask`: present one to three structured questions and wait for a bounded
   answer.

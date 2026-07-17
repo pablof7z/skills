@@ -94,7 +94,13 @@ enum PlayerHistoryFilterPolicy {
     private static func matchesSearch(_ item: TTSItem, query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
-        return [item.nowSpeakingTitle, item.text, item.displayAgent, item.workspaceName]
+        return [
+            item.nowSpeakingTitle,
+            item.previewSummary,
+            item.text,
+            item.displayAgent,
+            item.workspaceName,
+        ]
             .compactMap(\.self)
             .contains { $0.localizedCaseInsensitiveContains(query) }
     }

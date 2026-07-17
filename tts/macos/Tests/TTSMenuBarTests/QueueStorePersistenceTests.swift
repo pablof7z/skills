@@ -361,6 +361,7 @@ extension QueueStoreTests {
         original.attachments = [attachment()]
         original.assetDirectory = "/tmp/brief"
         original.iTermSessionID = "w1t2p3:9473B74C-9371-4C44-B34C-84F40E3D2F04"
+        original.summary = "The implementation is complete and two decisions remain."
         original.primaryMessage = "The implementation is complete. Two decisions remain."
 
         let replay = original.requeuedForReplay()
@@ -368,6 +369,7 @@ extension QueueStoreTests {
         #expect(replay.id == original.id)
         #expect(replay.text == original.text)
         #expect(replay.subject == original.subject)
+        #expect(replay.summary == original.summary)
         #expect(replay.agentName == original.agentName)
         #expect(replay.sessionID == original.sessionID)
         #expect(replay.iTermSessionID == original.iTermSessionID)

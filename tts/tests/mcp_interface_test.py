@@ -98,6 +98,11 @@ class MCPInterfaceTests(unittest.TestCase):
                     await session.initialize()
                     tools = await session.list_tools()
                     self.assertEqual({tool.name for tool in tools.tools}, EXPECTED_TOOLS)
+                    speak = next(tool for tool in tools.tools if tool.name == "tts_speak")
+                    properties = speak.inputSchema["properties"]
+                    self.assertIn("2 to 5 words", properties["subject"]["description"])
+                    self.assertIn("not spoken", properties["summary"]["description"])
+                    self.assertIn("summary", speak.inputSchema["required"])
                     health = await session.call_tool("tts_health", {})
                     self.assertFalse(health.isError)
                     self.assertEqual(health.structuredContent["status"], "ok")

@@ -80,6 +80,7 @@ class MCPGenerateTests(unittest.TestCase):
                     )).generate(
                         agent_name="MCP agent",
                         subject="Generate a hosted local audio file",
+                        summary="A local MCP request should return hosted audio.",
                         message="Return this as a Blossom-hosted MP3.",
                         wait_seconds=30,
                     ))
@@ -88,7 +89,9 @@ class MCPGenerateTests(unittest.TestCase):
                 self.assertNotIn("output_file", result)
                 self.assertEqual(UploadHandler.uploads, [b"test-mp3-audio"])
                 items = list((root / "state" / "items").glob("*.json"))
-                self.assertEqual(json.loads(items[0].read_text())["status"], "generated")
+                item = json.loads(items[0].read_text())
+                self.assertEqual(item["status"], "generated")
+                self.assertEqual(item["summary"], "A local MCP request should return hosted audio.")
             finally:
                 for server, thread in zip((kokoro, blossom), threads):
                     server.shutdown()

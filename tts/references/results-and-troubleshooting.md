@@ -10,7 +10,8 @@ Use `--no-play` to generate an MP3 without queueing playback:
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
-  --subject "Generating the requested standalone audio file" \
+  --subject "Standalone Audio" \
+  --summary "The requested audio is being generated without player playback." \
   --no-play \
   --message "<spoken content>"
 ```

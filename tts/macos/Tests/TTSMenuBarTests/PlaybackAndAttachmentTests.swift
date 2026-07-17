@@ -212,6 +212,14 @@ extension QueueStoreTests {
     }
 
     @Test
+    func keepsOptionalSummaryForPreview() {
+        var value = item(id: "summary", createdAt: 10)
+        value.summary = "Queue ownership now has one clear source of truth."
+
+        #expect(value.previewSummary == "Queue ownership now has one clear source of truth.")
+    }
+
+    @Test
     func buildsNowSpeakingContextFromAgentAndNonGitDirectoryPath() {
         var value = item(id: "hud", createdAt: 10)
         value.subject = "The passive speaking cue is ready"

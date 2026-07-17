@@ -3,9 +3,25 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+
+TitleInput = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description="Natural topic or topic-plus-result title; aim for 2 to 5 words, maximum 10.",
+    ),
+]
+SummaryInput = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description="One concise factual preview sentence; displayed in the player but not spoken.",
+    ),
+]
 
 
 class AttachmentInput(BaseModel):

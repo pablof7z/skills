@@ -91,6 +91,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
             "--peer", str(peer_pubkey),
             "--agent-name", "agent one",
             "--subject", "Remote signer selection test case",
+            "--summary", "The configured agent key should sign this request.",
             "--message", "Text speech request.",
             env={"AGENT_NSEC": "nsec-agent-secret"},
             state=self.server_state,
@@ -115,6 +116,10 @@ class RemoteDaemonCLITests(unittest.TestCase):
         self.assertNotEqual(request["pubkey"], backend_pubkey)
         self.assertEqual(request["content"], "Text speech request.")
         self.assertIn(["title", "Remote signer selection test case"], request["tags"])
+        self.assertIn(
+            ["summary", "The configured agent key should sign this request."],
+            request["tags"],
+        )
         self.assertIn(["agent", "agent one"], request["tags"])
         self.assertFalse({"product", "request", "reply", "subject"}.intersection(
             tag[0] for tag in request["tags"]
@@ -134,6 +139,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
                 "--peer", str(connected["peer_pubkey"]),
                 "--agent-name", "remote agent",
                 "--subject", "Remote text playback through queue",
+                "--summary", "Remote text should materialize in the local queue.",
                 "--message", "Remote text works.",
                 state=self.server_state,
             )
@@ -151,6 +157,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
             self.assertEqual(item["status"], "generated")
             self.assertEqual(item["remote_request"]["transport"], "kind:9")
             self.assertEqual(item["agent_name"], "remote agent")
+            self.assertEqual(item["summary"], "Remote text should materialize in the local queue.")
 
             events = [json.loads(line) for line in self.transport_file.read_text().splitlines()]
             reply = events[-1]
@@ -176,6 +183,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
             "--peer", str(connected["peer_pubkey"]),
             "--agent-name", "remote agent",
             "--subject", "Remote attachment safe failure",
+            "--summary", "An unavailable remote attachment should fail safely.",
             "--message", "Attachment should fail safely.",
             "--attach", "Missing file", "/not/on/this/laptop.txt",
             state=self.server_state,
@@ -202,6 +210,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
                 "--peer", str(connected["peer_pubkey"]),
                 "--agent-name", "remote agent",
                 "--subject", "Remote accessible attachment delivery test",
+                "--summary", "An accessible remote attachment should materialize locally.",
                 "--message", "The attachment should appear locally.",
                 "--attach", "Remote notes", str(attachment),
                 state=self.server_state,
@@ -252,6 +261,7 @@ class RemoteDaemonCLITests(unittest.TestCase):
             "--peer", str(connected["peer_pubkey"]),
             "--agent-name", "remote agent",
             "--subject", "Fake nak request",
+            "--summary", "The fake nak transport should deliver this request.",
             "--message", "Fetched through fake nak.",
             state=self.server_state,
             env={"TTS_REMOTE_TRANSPORT": "file"},

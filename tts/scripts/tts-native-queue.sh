@@ -70,6 +70,7 @@ write_macos_item_record() {
     "$ITEM_ID" \
     "$DISPLAY_TEXT" \
     "$SUBJECT" \
+    "$SUMMARY" \
     "$inferred_agent" \
     "$harness" \
     "$session_id" \
@@ -102,6 +103,7 @@ import tempfile
     item_id,
     text,
     subject,
+    summary,
     agent_name,
     harness,
     session_id,
@@ -195,6 +197,7 @@ item = {
     "id": item_id,
     "text": text,
     "subject": optional(subject),
+    "summary": optional(summary),
     "agent_name": optional(agent_name),
     "harness": optional(harness),
     "session_id": optional(session_id),

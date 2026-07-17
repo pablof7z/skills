@@ -75,6 +75,8 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                         "agent-foreground-test",
                         "--subject",
                         "Foreground TTS generation remains clearly observable",
+                        "--summary",
+                        "The player publishes the update\nbefore audio generation finishes.",
                     ],
                     env=environment,
                     text=True,
@@ -88,6 +90,10 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                 item_path = item_files[0]
                 generating = json.loads(item_path.read_text(encoding="utf-8"))
                 self.assertEqual(generating["status"], "generating")
+                self.assertEqual(
+                    generating["summary"],
+                    "The player publishes the update before audio generation finishes.",
+                )
                 self.assertTrue(generating["playback_requested"])
                 self.assertEqual(
                     generating["iterm_session_id"],
@@ -103,6 +109,7 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                 self.assertEqual(queued["status"], "queued")
                 self.assertEqual(queued["iterm_session_id"], generating["iterm_session_id"])
                 self.assertEqual(queued["agent_name"], "agent-foreground-test")
+                self.assertEqual(queued["summary"], generating["summary"])
                 self.assertIsNotNone(queued["generation_duration"])
                 self.assertTrue(queued["is_unheard"])
                 self.assertTrue(Path(queued["output_file"]).is_file())
@@ -112,6 +119,7 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                     spoken.startswith("Foreground TTS generation remains clearly observable.")
                 )
                 self.assertNotIn("agent-foreground-test", spoken)
+                self.assertNotIn(generating["summary"], spoken)
             finally:
                 BlockingKokoroHandler.release_response.set()
                 if process is not None and process.poll() is None:
@@ -160,6 +168,8 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                         "failure-test",
                         "--subject",
                         "Testing visible TTS generation failure handling",
+                        "--summary",
+                        "Failed synthesis remains visible with a retry action.",
                         "--message",
                         "This request will fail.",
                     ],
@@ -234,6 +244,8 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                         "attachment-wait-test",
                         "--subject",
                         "Waiting for narrated attachment generation completion",
+                        "--summary",
+                        "The command waits until narrated attachments finish generating.",
                         "--attach",
                         "Details",
                         str(markdown),
@@ -310,6 +322,8 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                         "newline-test",
                         "--subject",
                         "Normalizing literal newlines across visible spoken text",
+                        "--summary",
+                        "Literal newline sequences become natural spoken line breaks.",
                     ],
                     env=environment,
                     text=True,

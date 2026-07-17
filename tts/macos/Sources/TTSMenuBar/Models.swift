@@ -254,6 +254,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var id: String
     var text: String
     var subject: String?
+    var summary: String? = nil
     var agentName: String?
     var harness: String?
     var sessionID: String?
@@ -298,6 +299,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case id
         case text
         case subject
+        case summary
         case agentName = "agent_name"
         case harness
         case sessionID = "session_id"
@@ -345,6 +347,10 @@ struct TTSItem: Codable, Identifiable, Equatable {
 
     var subjectLabel: String? {
         nonempty(subject)
+    }
+
+    var previewSummary: String? {
+        nonempty(summary)
     }
 
     var workspaceName: String? {
@@ -422,6 +428,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
             id: id,
             text: text,
             subject: subject,
+            summary: summary,
             agentName: agentName,
             harness: harness,
             sessionID: sessionID,

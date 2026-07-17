@@ -44,7 +44,8 @@ Configure a Kokoro-compatible endpoint, then run:
 export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
 ./scripts/tts \
   --agent-name "<your-agent-id>" \
-  --subject "The repository launch update is ready" \
+  --subject "Repository Launch Ready" \
+  --summary "The README update and its supporting artifacts are ready for review." \
   --message "The README update is ready for review. I attached the proposal and a mockup." \
   --attach "Architectural proposal" ./proposal.md \
   --attach "Mockup A" ./mockup-a.svg

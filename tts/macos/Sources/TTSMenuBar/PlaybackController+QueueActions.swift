@@ -64,6 +64,9 @@ extension PlaybackController {
         if let subject = item.subject, !subject.isEmpty {
             arguments += ["--subject", subject]
         }
+        if let summary = item.previewSummary {
+            arguments += ["--summary", summary]
+        }
         if let agentName = item.agentName, !agentName.isEmpty {
             arguments += ["--agent-name", agentName]
         }

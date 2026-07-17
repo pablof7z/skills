@@ -140,6 +140,12 @@ private struct PlayerHistoryRow: View {
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
+                    if let previewSummary = item.previewSummary {
+                        Text(previewSummary)
+                            .font(.system(size: 14, weight: item.unheard ? .medium : .regular))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                     HStack(spacing: 0) {
                         let segments = PlayerIdentityPresentation.segments(for: item)
                         ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in

@@ -67,6 +67,25 @@ struct PlayerHistoryFilterPolicyTests {
         ))
     }
 
+    @Test
+    func searchMatchesPreviewSummary() {
+        var matching = item(id: "matching", createdAt: now)
+        matching.summary = "Hosted audio generation succeeds through MCP."
+        let hidden = item(id: "hidden", createdAt: now)
+
+        let results = PlayerHistoryFilterPolicy.filteredItems(
+            in: [matching, hidden],
+            project: nil,
+            ageFilter: .today,
+            hasInteractedWithHistory: false,
+            searchQuery: "hosted audio",
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(results.map(\.id) == ["matching"])
+    }
+
     private func item(id: String, createdAt: Date, workspace: String = "/tmp/current") -> TTSItem {
         TTSItem(
             id: id,

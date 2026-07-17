@@ -41,7 +41,7 @@ class AttachmentContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Error: unknown option: --introduction", result.stderr)
 
-    def test_requires_agent_seed_and_subject(self) -> None:
+    def test_requires_agent_seed_subject_and_summary(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         tts_command = repository / "tts" / "scripts" / "tts"
 
@@ -50,6 +50,8 @@ class AttachmentContractTests(unittest.TestCase):
                 str(tts_command),
                 "--subject",
                 "Testing the required agent seed contract",
+                "--summary",
+                "This request is missing its agent seed.",
                 "--message",
                 "This should not run.",
             ],
@@ -65,6 +67,8 @@ class AttachmentContractTests(unittest.TestCase):
                 str(tts_command),
                 "--agent-name",
                 "required-fields-test",
+                "--summary",
+                "This request is missing its title.",
                 "--message",
                 "This should not run.",
             ],
@@ -75,6 +79,23 @@ class AttachmentContractTests(unittest.TestCase):
         self.assertNotEqual(missing_subject.returncode, 0)
         self.assertIn("Error: --subject is required.", missing_subject.stderr)
 
+        missing_summary = subprocess.run(
+            [
+                str(tts_command),
+                "--agent-name",
+                "required-fields-test",
+                "--subject",
+                "Required Fields",
+                "--message",
+                "This should not run.",
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertNotEqual(missing_summary.returncode, 0)
+        self.assertIn("Error: --summary is required.", missing_summary.stderr)
+
     def test_rejects_public_voice_selection(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         tts_command = repository / "tts" / "scripts" / "tts"
@@ -84,6 +105,8 @@ class AttachmentContractTests(unittest.TestCase):
             "voice-contract-test",
             "--subject",
             "Testing public voice selection removal behavior",
+            "--summary",
+            "Public voice selection remains unavailable.",
         ]
 
         option = subprocess.run(
@@ -104,7 +127,7 @@ class AttachmentContractTests(unittest.TestCase):
         self.assertNotEqual(positional.returncode, 0)
         self.assertIn("Error: too many arguments.", positional.stderr)
 
-    def test_runtime_accepts_subjects_up_to_fourteen_words(self) -> None:
+    def test_runtime_accepts_short_titles_and_rejects_over_ten_words(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         tts_command = repository / "tts" / "scripts" / "tts"
         with tempfile.TemporaryDirectory(prefix="tts-subject-tolerance-") as temporary:
@@ -130,7 +153,9 @@ class AttachmentContractTests(unittest.TestCase):
                         "--agent-name",
                         "subject-tolerance-test",
                         "--subject",
-                        "This subject quietly accepts fourteen words while agents still receive shorter writing guidance today",
+                        "MCP Audio",
+                        "--summary",
+                        "A two-word title is valid.",
                         "--no-play",
                         "--message",
                         "The subject is accepted.",
@@ -142,13 +167,35 @@ class AttachmentContractTests(unittest.TestCase):
                 )
                 self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
+                boundary = subprocess.run(
+                    [
+                        str(tts_command),
+                        "--agent-name",
+                        "subject-tolerance-test",
+                        "--subject",
+                        "MCP audio generation now works across every paired delivery path",
+                        "--summary",
+                        "A ten-word title remains valid.",
+                        "--no-play",
+                        "--message",
+                        "The boundary title is accepted.",
+                    ],
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(boundary.returncode, 0, boundary.stderr)
+
                 rejected = subprocess.run(
                     [
                         str(tts_command),
                         "--agent-name",
                         "subject-tolerance-test",
                         "--subject",
-                        "This subject quietly accepts fourteen words while agents still receive shorter writing guidance today safely",
+                        "MCP audio generation now works across every paired delivery path reliably",
+                        "--summary",
+                        "An eleven-word title must be rejected.",
                         "--no-play",
                         "--message",
                         "The subject is rejected.",
@@ -159,7 +206,7 @@ class AttachmentContractTests(unittest.TestCase):
                     stderr=subprocess.PIPE,
                 )
                 self.assertNotEqual(rejected.returncode, 0)
-                self.assertIn("between 5 and 14 words", rejected.stderr)
+                self.assertIn("must not exceed 10 words", rejected.stderr)
             finally:
                 server.shutdown()
                 thread.join(timeout=2)

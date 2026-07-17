@@ -122,6 +122,7 @@ class RemoteGenerationRoundTripTests(unittest.TestCase):
                 str(self.tts), "remote", "generate", "--peer", peer,
                 "--agent-name", "MCP agent",
                 "--subject", "Generate the hosted paired audio result",
+                "--summary", "The paired computer should generate and host this audio.",
                 "--message", "This MP3 is generated on the paired computer.",
                 "--wait", "10s",
             ],
@@ -158,6 +159,10 @@ class RemoteGenerationRoundTripTests(unittest.TestCase):
             self.assertIn(["action", "generate"], request["tags"])
             item = json.loads((self.laptop / "items" / f"{request['id']}.json").read_text())
             self.assertEqual(item["status"], "generated")
+            self.assertEqual(
+                item["summary"],
+                "The paired computer should generate and host this audio.",
+            )
         finally:
             if remote.poll() is None:
                 remote.kill()
@@ -169,6 +174,7 @@ class RemoteGenerationRoundTripTests(unittest.TestCase):
             "remote", "generate", "--peer", peer,
             "--agent-name", "MCP agent",
             "--subject", "Require a hosted result",
+            "--summary", "A pending generation result must be treated as an error.",
             "--message", "Do not return pending as a generation result.",
             "--wait", "0.1s",
             state=self.server,
