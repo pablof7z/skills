@@ -269,10 +269,19 @@ extension NowSpeakingHUDView {
     }
 
     func questionSendButton(item: TTSItem, questions: [TTSQuestion], accent: Color) -> some View {
-        Button {
-            submitAnswers(for: item, questions: questions)
+        let isComplete = canSubmit(item: item, questions: questions)
+        return Button {
+            if isComplete {
+                submitAnswers(for: item, questions: questions)
+            } else {
+                answerEditorPresenter.cancel()
+                questionComposer.advance(questionIDs: questions.map(\.id))
+            }
         } label: {
-            Label(questions.count > 1 ? "Send answers" : "Send", systemImage: "arrow.up")
+            Label(
+                isComplete ? (questions.count > 1 ? "Send answers" : "Send") : "Next",
+                systemImage: isComplete ? "arrow.up" : "arrow.right"
+            )
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.black.opacity(0.82))
                 .padding(.horizontal, 15)
@@ -280,9 +289,11 @@ extension NowSpeakingHUDView {
                 .background(accent, in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled(!canSubmit(item: item, questions: questions))
-        .opacity(canSubmit(item: item, questions: questions) ? 1 : 0.45)
         .keyboardShortcut(.return, modifiers: [.command])
-        .accessibilityHint("Submits every tab together; unanswered questions are skipped")
+        .accessibilityHint(
+            isComplete
+                ? "Submits every tab together"
+                : "Marks this optional question answered or skipped and continues"
+        )
     }
 }

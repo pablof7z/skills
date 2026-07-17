@@ -196,4 +196,57 @@ struct QuestionComposerTests {
         #expect(submissions[2].answer == nil)
         #expect(!submissions[2].isSkipped)
     }
+
+    @Test
+    func nextMarksBlankQuestionSkippedAndFindsTheNextPendingQuestion() {
+        var model = QuestionComposerModel()
+        let questionIDs = ["scope", "timing", "evidence"]
+        model.prepare(questionIDs: questionIDs)
+        model.updateDraft("Keep it narrow", for: "scope")
+
+        model.advance(questionIDs: questionIDs)
+        #expect(model.status(for: "scope") == .answered)
+        #expect(model.selectedQuestionID == "timing")
+
+        model.advance(questionIDs: questionIDs)
+        #expect(model.status(for: "timing") == .skipped)
+        #expect(model.status(for: "evidence") == .pending)
+        #expect(model.selectedQuestionID == "evidence")
+        #expect(!model.isComplete(questionIDs: questionIDs))
+
+        model.advance(questionIDs: questionIDs)
+        #expect(model.status(for: "evidence") == .skipped)
+        #expect(model.isComplete(questionIDs: questionIDs))
+    }
+
+    @Test
+    func tabNavigationSkipsOnlyTheQuestionBeingLeft() {
+        var model = QuestionComposerModel()
+        let questionIDs = ["scope", "timing", "evidence"]
+        model.prepare(questionIDs: questionIDs)
+
+        model.navigate(to: "evidence")
+
+        #expect(model.status(for: "scope") == .skipped)
+        #expect(model.status(for: "timing") == .pending)
+        #expect(model.status(for: "evidence") == .pending)
+        #expect(model.selectedQuestionID == "evidence")
+    }
+
+    @Test
+    func answeredQuestionsCompleteImmediatelyWhileClearedAnswersRespectReviewState() {
+        var model = QuestionComposerModel()
+        model.prepare(questionIDs: ["scope"])
+        model.updateDraft("Keep it narrow", for: "scope")
+
+        #expect(model.status(for: "scope") == .answered)
+        #expect(model.isComplete(questionIDs: ["scope"]))
+
+        model.updateDraft("", for: "scope")
+        #expect(model.status(for: "scope") == .pending)
+
+        model.advance(questionIDs: ["scope"])
+        #expect(model.status(for: "scope") == .skipped)
+        #expect(model.isComplete(questionIDs: ["scope"]))
+    }
 }
