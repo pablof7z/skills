@@ -286,6 +286,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
     var archiveReason: String? = nil
     var archivedBy: String? = nil
     var supersededBy: [String]? = nil
+    var playbackRequested: Bool? = nil
     var playbackInitiator: TTSPlaybackInitiator? = nil
     var engagement: TTSEngagement? = nil
     var userActivity: TTSUserActivity? = nil
@@ -329,6 +330,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
         case archiveReason = "archive_reason"
         case archivedBy = "archived_by"
         case supersededBy = "superseded_by"
+        case playbackRequested = "playback_requested"
         case playbackInitiator = "playback_initiator"
         case engagement
         case userActivity = "user_activity"
@@ -452,6 +454,7 @@ struct TTSItem: Codable, Identifiable, Equatable {
             archiveReason: archiveReason,
             archivedBy: archivedBy,
             supersededBy: supersededBy,
+            playbackRequested: true,
             playbackInitiator: nil,
             engagement: nil,
             userActivity: nil,

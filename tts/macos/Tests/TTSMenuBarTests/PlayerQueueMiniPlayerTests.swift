@@ -9,6 +9,14 @@ struct PlayerQueueMiniPlayerTests {
         #expect(PlayerListPolicy.includes(.paused))
         #expect(PlayerListPolicy.includes(.played))
         #expect(PlayerListPolicy.includes(.queued))
+        #expect(!PlayerListPolicy.includes(.generated))
+    }
+
+    @Test
+    func playerListExcludesGenerationOnlyItemsAcrossTheirLifecycle() {
+        for status in [PlaybackStatus.generating, .generated, .failed] {
+            #expect(!PlayerListPolicy.includes(status, playbackRequested: false))
+        }
     }
 
     @Test

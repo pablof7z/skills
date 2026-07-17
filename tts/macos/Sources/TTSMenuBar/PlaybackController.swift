@@ -72,7 +72,10 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     var playerListItems: [TTSItem] {
         items.filter {
-            PlayerListPolicy.includes($0.status) && !$0.isAttachmentPlayback
+            PlayerListPolicy.includes(
+                $0.status,
+                playbackRequested: $0.playbackRequested
+            ) && !$0.isAttachmentPlayback
         }
         .sorted { $0.createdAt > $1.createdAt }
     }

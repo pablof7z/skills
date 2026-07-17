@@ -88,6 +88,7 @@ class AttachmentGenerationFlowTests(unittest.TestCase):
                 item_path = item_files[0]
                 generating = json.loads(item_path.read_text(encoding="utf-8"))
                 self.assertEqual(generating["status"], "generating")
+                self.assertTrue(generating["playback_requested"])
                 self.assertEqual(
                     generating["iterm_session_id"],
                     "w5t13p3:9473B74C-9371-4C44-B34C-84F40E3D2F04",
