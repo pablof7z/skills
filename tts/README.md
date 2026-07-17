@@ -54,8 +54,27 @@ On macOS 13 or later with Swift available, the first audible request builds and 
 
 Use `./scripts/tts-menu status` to inspect current playback and queue counts. Use `--no-play` when you only need the generated file; that command returns only after the file exists.
 
+## MCP interface
+
+`./scripts/tts-mcp` exposes the TTS workflow to standard MCP clients over
+stdio. It can also serve authenticated Streamable HTTP on loopback:
+
+```bash
+export TTS_MCP_TOKEN="<at-least-24-random-characters>"
+./scripts/tts-mcp --http --route automatic
+```
+
+Use `--route paired` when the MCP server runs on an agent host paired to the
+computer that owns TTS playback. Spoken updates, questions, and generation-only
+requests then travel through the existing signed paired channel. `tts_generate`
+runs with no playback on the TTS computer, uploads the MP3 to
+`https://blossom.primal.net`, and returns its hosted descriptor without leaking
+the computer's local output path.
+
+See [MCP setup and tool contracts](references/mcp.md).
+
 ## What it touches
 
-`tts` sends the supplied message and narratable text attachments to the endpoint you configure. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state under `~/.local/state/tts`. On macOS, the player can pause and resume Music or Spotify according to an explicit local opt-in. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
+`tts` sends the supplied message and narratable text attachments to the endpoint you configure. `tts_generate` also sends its generated MP3 to the configured Blossom server, which defaults to `blossom.primal.net`. It copies attachment sources and writes generated audio under `~/.agents/skills/tts/sessions`, and keeps queue state under `~/.local/state/tts`. On macOS, the player can pause and resume Music or Spotify according to an explicit local opt-in. Set `TTS_SESSIONS_ROOT` to override the durable brief location.
 
 See [setup](references/setup.md) for endpoint configuration and [SKILL.md](SKILL.md) for the exact agent-facing writing and invocation rules.

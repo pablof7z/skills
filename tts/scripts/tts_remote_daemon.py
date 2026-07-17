@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,15 +12,19 @@ from tts_pair_token import PAIRING_KIND, pairing_key
 from tts_remote_channel import channel_parts
 from tts_remote_groups import request_group_admin, request_group_membership
 from tts_remote_ask import answers_from_result
+from tts_blossom import BlossomUploadError, upload_mp3
+from tts_remote_generation import publish_generation_reply
+from tts_remote_materialize import (
+    materialization_guidance,
+    materialize_request,
+    safe_materialization_detail,
+)
 from tts_remote_polling import events_for_laptop
 from tts_remote_profile import profile_name
 from tts_remote_protocol import render_reply_content, reply_tags, request_payload, tag_value
 from tts_remote_signing import signed_event, verify_event
-from tts_remote_state import peers, read_json, remote_dir, tts_state_dir, upsert_peer, write_json
+from tts_remote_state import peers, read_json, remote_dir, upsert_peer, write_json
 from tts_remote_transport import transport
-
-
-SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def tags_include(tags: object, name: str, value: str | None = None) -> bool:
@@ -167,6 +169,14 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
             guidance="The laptop TTS command returned an invalid response. Check its daemon log and retry.",
         )
         return True
+    if content.get("action") == "generate":
+        try:
+            descriptor = upload_mp3(Path(str(result.get("output_file") or "")), nsec=str(backend["nsec"]))
+        except BlossomUploadError as error:
+            publish_reply(event, backend, "rejected", error_code="upload_failed", guidance=str(error))
+            return True
+        publish_generation_reply(event, backend, descriptor)
+        return True
     if content.get("ask"):
         publish_reply(
             event,
@@ -177,25 +187,6 @@ def handle_request_event(event: dict[str, object], backend: dict[str, object]) -
     else:
         publish_reply(event, backend, "accepted")
     return True
-
-
-def safe_materialization_detail(stderr: str | None) -> str:
-    lines = [
-        line.strip()
-        for line in (stderr or "").splitlines()
-        if line.strip().startswith(("Error:", "Warning:"))
-    ]
-    return " | ".join(lines[-3:])[:1000] or "local TTS command exited without a diagnostic"
-
-
-def materialization_guidance(detail: str) -> str:
-    if detail == "local TTS command exited without a diagnostic":
-        return "The laptop TTS command failed before queueing. Check its daemon log and retry."
-    return f"Laptop TTS: {detail}"
-
-
-def environment_enabled(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def valid_request_tags(
@@ -230,31 +221,6 @@ def request_peer(event: dict[str, object]) -> dict[str, object] | None:
         ):
             return peer
     return None
-
-
-def materialize_request(content: dict[str, object], event: dict[str, object]) -> dict[str, object]:
-    item_id = str(event.get("id") or "")
-    command = [str(SCRIPT_DIR / "tts"), "--agent-name", str(content.get("agent_name") or "remote"), "--subject", str(content.get("subject") or "Remote TTS request from paired host"), "--message", str(content.get("message") or "")]
-    for attachment in content.get("attachments") or []:
-        path = Path(str(attachment.get("path") or "")).resolve()
-        label = str(attachment.get("label") or path.name)
-        command.extend(["--attach", label, str(path)])
-    if content.get("ask"):
-        command.extend(["--wait", str(content["wait"]), "--ask", str(content["ask"])])
-    if environment_enabled("TTS_REMOTE_DAEMON_NO_PLAY") and not content.get("ask"):
-        command.append("--no-play")
-    environment = os.environ.copy()
-    environment["TTS_ITEM_ID"] = item_id
-    environment["TTS_FORCE_LOCAL"] = "1"
-    environment["TTS_REMOTE_MATERIALIZATION"] = "1"
-    completed = subprocess.run(command, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    output = json.loads(completed.stdout)
-    item_path = tts_state_dir() / "items" / f"{item_id}.json"
-    item = read_json(item_path, {})
-    if isinstance(item, dict):
-        item["remote_request"] = {"transport": "kind:9", "event_id": event.get("id")}
-        write_json(item_path, item)
-    return output
 
 
 def publish_reply(
