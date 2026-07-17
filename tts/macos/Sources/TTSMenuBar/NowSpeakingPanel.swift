@@ -145,7 +145,10 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             return
         }
         guard let item = playbackController.currentItem else {
-            if let pendingQuestion = PendingQuestionRetention.retainedItem(
+            if let preview = presentation.pendingPreviewItem {
+                sessionOpener.refresh(rawIdentifier: preview.iTermSessionID)
+                if !panel.isVisible { showPlayer(activating: false) }
+            } else if let pendingQuestion = PendingQuestionRetention.retainedItem(
                 currentItem: nil,
                 lingeringItem: presentation.lingeringItem,
                 lastCurrentItem: lastCurrentItem
@@ -161,8 +164,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
             ) {
                 sessionOpener.refresh(rawIdentifier: lastCurrentItem?.iTermSessionID)
                 beginLingerIfNeeded()
-                if !panel.isVisible { showPlayer(activating: false) }
-            } else if presentation.pendingPreviewItem != nil {
                 if !panel.isVisible { showPlayer(activating: false) }
             } else {
                 presentation.lingeringItem = nil
@@ -181,7 +182,6 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         if presentation.lingeringItem != nil {
             presentation.lingeringItem = nil
         }
-        presentation.clearPendingPreview()
         if item.isAttachmentPlayback,
            presentation.selectedAttachmentID == item.attachmentID
         {
@@ -189,7 +189,8 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
         }
         lastCurrentItem = item
         lastDuration = max(playbackController.duration, item.duration ?? 0)
-        sessionOpener.refresh(rawIdentifier: item.iTermSessionID)
+        let displayedItem = presentation.pendingPreviewItem ?? item
+        sessionOpener.refresh(rawIdentifier: displayedItem.iTermSessionID)
 
         if activeItemID != item.id {
             activeItemID = item.id

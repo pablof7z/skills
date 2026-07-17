@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PlayerHistoryRow: View {
     let item: TTSItem
+    let playbackState: PlayerHistoryPlaybackState?
     let entityFilters: HistoryEntityFilters
     let action: () -> Void
     let onRetry: () -> Void
@@ -54,6 +55,13 @@ struct PlayerHistoryRow: View {
                     .font(.system(size: 16, weight: item.unheard ? .bold : .semibold))
                     .foregroundStyle(summaryColor)
                     .lineLimit(1)
+                if let playbackState {
+                    Image(systemName: playbackState.symbolName)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(WorkspaceAccent.color(forWorkspacePath: item.workspacePath))
+                        .help(playbackState.label)
+                        .accessibilityLabel(playbackState.label)
+                }
                 Spacer(minLength: 8)
                 if !item.briefAttachments.isEmpty {
                     Label("\(item.briefAttachments.count)", systemImage: "paperclip")
@@ -146,6 +154,7 @@ struct PlayerHistoryRow: View {
 
     private var accessibilityLabel: String {
         let title = item.subjectLabel ?? item.text
+        if let playbackState { return "\(playbackState.label). \(title)" }
         if item.isPendingQuestion { return "Answer needed for \(title)" }
         if item.questionStatus == .answered { return "Answered question \(title)" }
         if item.isQuestion { return "Question item \(title)" }

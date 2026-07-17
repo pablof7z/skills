@@ -61,6 +61,8 @@ final class NowSpeakingPresentation: ObservableObject {
 
     func revealForDirectSelection(itemID _: String) {
         hiddenItemID = nil
+        pendingPreviewItem = nil
+        selectAttachment(nil)
     }
 
     func revealAutomatically(itemID: String) {

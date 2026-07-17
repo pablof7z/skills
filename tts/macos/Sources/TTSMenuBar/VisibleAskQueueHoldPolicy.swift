@@ -10,7 +10,11 @@ enum VisibleAskQueueHoldPolicy {
         hiddenItemID: String?
     ) -> String? {
         guard isPlayerVisible, isWindowVisible else { return nil }
-        let displayedItem = currentItem ?? pendingPreviewItem ?? lingeringItem
+        let displayedItem = PlayerContentSelection.displayedItem(
+            currentItem: currentItem,
+            pendingPreviewItem: pendingPreviewItem,
+            lingeringItem: lingeringItem
+        )
         guard let displayedItem,
               displayedItem.isPendingQuestion,
               PlayerNavigationPolicy.shouldDisplay(
