@@ -26,11 +26,17 @@ struct PlayerHistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(filteredItems.prefix(60)) { item in
+                    let playbackState = PlayerHistoryPlaybackState(
+                        itemID: item.id,
+                        currentItemID: controller.currentItemID,
+                        status: item.status
+                    )
                     let generationProgress = item.status == .generating
                         ? controller.generationProgress(for: item)
                         : 0
                     PlayerHistoryRow(
                         item: item,
+                        playbackState: playbackState,
                         entityFilters: historyEntityFilters,
                         action: {
                             presentation.registerHistoryInteraction()
@@ -67,9 +73,10 @@ struct PlayerHistoryView: View {
                         ))
                         .listRowSeparator(item.status == .generating ? .hidden : .visible)
                         .listRowBackground(
-                            GenerationProgressRowBackground(
+                            HistoryRowBackground(
                                 item: item,
-                                progress: generationProgress
+                                progress: generationProgress,
+                                playbackState: playbackState
                             )
                         )
                 }
@@ -120,12 +127,21 @@ extension PlayerHistoryView: @MainActor Equatable {
     }
 }
 
-private struct GenerationProgressRowBackground: View {
+private struct HistoryRowBackground: View {
     let item: TTSItem
     let progress: Double
+    let playbackState: PlayerHistoryPlaybackState?
 
     var body: some View {
-        if item.isPendingQuestion {
+        if playbackState != nil {
+            ZStack(alignment: .leading) {
+                WorkspaceAccent.color(forWorkspacePath: item.workspacePath).opacity(0.12)
+                Rectangle()
+                    .fill(WorkspaceAccent.color(forWorkspacePath: item.workspacePath))
+                    .frame(width: 3)
+            }
+            .accessibilityHidden(true)
+        } else if item.isPendingQuestion {
             Color.orange.opacity(0.075)
                 .accessibilityHidden(true)
         } else if item.status == .generating {

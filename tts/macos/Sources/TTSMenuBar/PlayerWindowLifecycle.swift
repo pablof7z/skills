@@ -24,6 +24,9 @@ extension NowSpeakingPanelController {
         updateHistoryNavigation()
         updateHistorySearchToolbar()
         synchronizeVisibleAskQueueHold()
+        if let preview = presentation.pendingPreviewItem {
+            sessionOpener.refresh(rawIdentifier: preview.iTermSessionID)
+        }
         let isHovered = presentation.isHovered
         guard isHovered != observedHover else { return }
         observedHover = isHovered

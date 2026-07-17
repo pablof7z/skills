@@ -166,7 +166,11 @@ extension NowSpeakingHUDView {
     }
 
     var displayedItem: TTSItem? {
-        let item = controller.currentItem ?? pendingPreviewItem ?? presentation.lingeringItem
+        let item = PlayerContentSelection.displayedItem(
+            currentItem: controller.currentItem,
+            pendingPreviewItem: pendingPreviewItem,
+            lingeringItem: presentation.lingeringItem
+        )
         guard PlayerNavigationPolicy.shouldDisplay(
             itemID: item?.id,
             hiddenItemID: presentation.hiddenItemID
@@ -180,11 +184,13 @@ extension NowSpeakingHUDView {
     }
 
     var isPreviewingPending: Bool {
-        controller.currentItem == nil && pendingPreviewItem != nil
+        pendingPreviewItem != nil
     }
 
     var isLingering: Bool {
-        controller.currentItem == nil && presentation.lingeringItem != nil
+        controller.currentItem == nil
+            && pendingPreviewItem == nil
+            && presentation.lingeringItem != nil
     }
 
     var playbackTime: TimeInterval {

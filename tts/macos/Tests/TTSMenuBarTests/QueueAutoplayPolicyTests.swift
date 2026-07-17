@@ -21,7 +21,7 @@ struct QueueAutoplayPolicyTests {
         #expect(heldItemID(current: ask, hiddenItemID: ask.id) == nil)
         #expect(heldItemID(current: ask, isPlayerVisible: false) == nil)
         #expect(heldItemID(current: ask, isWindowVisible: false) == nil)
-        #expect(heldItemID(current: speech, preview: ask) == nil)
+        #expect(heldItemID(current: speech, preview: ask) == ask.id)
         #expect(heldItemID() == nil)
     }
 
@@ -82,6 +82,29 @@ struct QueueAutoplayPolicyTests {
             pendingPreviewItem: preview,
             lingeringItem: lingering,
             hiddenItemID: hiddenItemID
+        )
+    }
+
+    @Test
+    func explicitlyOpenedAskHoldsQueueWhileAnotherItemPlays() {
+        var current = policyItem(id: "playing")
+        current.status = .playing
+        var ask = policyItem(id: "ask")
+        ask.kind = .question
+        ask.questionStatus = .pending
+
+        #expect(heldItemID(current: current, preview: ask) == ask.id)
+    }
+
+    private func policyItem(id: String) -> TTSItem {
+        TTSItem(
+            id: id,
+            text: "Speech",
+            agentName: "codex",
+            voice: "af_heart",
+            outputFile: "/tmp/\(id).mp3",
+            status: .queued,
+            createdAt: 1
         )
     }
 }
