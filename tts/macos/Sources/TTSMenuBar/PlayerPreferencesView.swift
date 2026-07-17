@@ -53,6 +53,13 @@ struct PlayerPreferencesView: View {
         )
     }
 
+    private var maxParallelGenerations: Binding<Int> {
+        Binding(
+            get: { preferencesStore.preferences.maxParallelGenerations },
+            set: { preferencesStore.setMaxParallelGenerations($0) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             GroupBox("Media") {
@@ -94,11 +101,29 @@ struct PlayerPreferencesView: View {
                 .padding(.vertical, 4)
             }
 
+            GroupBox("Generation") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Maximum simultaneous Kokoro requests")
+                        Spacer()
+                        Stepper(value: maxParallelGenerations, in: 1...8) {
+                            Text("\(maxParallelGenerations.wrappedValue)")
+                                .monospacedDigit()
+                        }
+                        .frame(width: 90)
+                    }
+                    Text("Shared by every local TTS agent. New requests wait when all slots are busy.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
             Toggle("Show TTS in the menu bar", isOn: showsMenuBarItem)
             Spacer(minLength: 0)
         }
         .padding(22)
-        .frame(width: 460, height: 370, alignment: .topLeading)
+        .frame(width: 460, height: 450, alignment: .topLeading)
     }
 
     private func delayStepper(title: String, value: Binding<Double>) -> some View {

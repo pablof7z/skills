@@ -13,6 +13,7 @@ struct PlayerPreferences: Codable, Equatable {
     var askDockAttentionMode: AskDockAttentionMode
     var askDockAttentionIntervalMinutes: Int
     var sendsAskNotifications: Bool
+    var maxParallelGenerations: Int
     private var mediaControlVersion: Int
 
     enum CodingKeys: String, CodingKey {
@@ -23,6 +24,7 @@ struct PlayerPreferences: Codable, Equatable {
         case askDockAttentionMode
         case askDockAttentionIntervalMinutes
         case sendsAskNotifications
+        case maxParallelGenerations
         case mediaControlVersion
     }
 
@@ -33,7 +35,8 @@ struct PlayerPreferences: Codable, Equatable {
         showsMenuBarItem: Bool = true,
         askDockAttentionMode: AskDockAttentionMode = .once,
         askDockAttentionIntervalMinutes: Int = 5,
-        sendsAskNotifications: Bool = false
+        sendsAskNotifications: Bool = false,
+        maxParallelGenerations: Int = 2
     ) {
         self.pausesMedia = pausesMedia
         self.mediaHandoffDelay = mediaHandoffDelay
@@ -44,6 +47,7 @@ struct PlayerPreferences: Codable, Equatable {
             askDockAttentionIntervalMinutes
         )
         self.sendsAskNotifications = sendsAskNotifications
+        self.maxParallelGenerations = Self.clampGenerationLimit(maxParallelGenerations)
         mediaControlVersion = Self.mediaControlSafetyVersion
     }
 
@@ -71,6 +75,9 @@ struct PlayerPreferences: Codable, Equatable {
             Bool.self,
             forKey: .sendsAskNotifications
         ) ?? false
+        maxParallelGenerations = Self.clampGenerationLimit(
+            try values.decodeIfPresent(Int.self, forKey: .maxParallelGenerations) ?? 2
+        )
         mediaControlVersion = Self.mediaControlSafetyVersion
     }
 
@@ -80,6 +87,10 @@ struct PlayerPreferences: Codable, Equatable {
 
     static func clampAttentionInterval(_ minutes: Int) -> Int {
         min(max(minutes, 1), 120)
+    }
+
+    static func clampGenerationLimit(_ limit: Int) -> Int {
+        min(max(limit, 1), 8)
     }
 
 }
@@ -122,6 +133,10 @@ final class PlayerPreferencesStore: ObservableObject {
         update { $0.sendsAskNotifications = enabled }
     }
 
+    func setMaxParallelGenerations(_ limit: Int) {
+        update { $0.maxParallelGenerations = PlayerPreferences.clampGenerationLimit(limit) }
+    }
+
     private func update(_ mutation: (inout PlayerPreferences) -> Void) {
         var updated = preferences
         mutation(&updated)
@@ -159,7 +174,7 @@ final class PlayerPreferencesWindowController: NSWindowController, NSWindowDeleg
         let view = PlayerPreferencesView(preferencesStore: preferencesStore)
         let hostingController = NSHostingController(rootView: view)
         let panel = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false

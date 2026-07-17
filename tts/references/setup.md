@@ -19,9 +19,8 @@ uses a paired laptop, because it creates an MP3 without any player side effect.
 - `KOKORO_API_KEY` for bearer-token auth
 - `KOKORO_CAPTIONED_API_ENDPOINT` to override the inferred
   `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
-- `TTS_MAX_PARALLEL_GENERATIONS` to change the machine-wide Kokoro request
-  limit from its default of `2`; all local agent processes using the same TTS
-  state directory share the limit
+- `TTS_MAX_PARALLEL_GENERATIONS` to override the player Settings value for the
+  current process; the shared setting defaults to `2`
 - Swift from Xcode or the Command Line Tools for the macOS app
 - `uv` for the MCP wrapper; its locked project installs the stable MCP Python
   SDK below version 2
@@ -48,10 +47,13 @@ The script loads environment variables from `~/.env.tts` by default. You can set
 ```bash
 KOKORO_API_ENDPOINT=https://<your-host>/v1/audio/speech
 KOKORO_API_KEY=<optional bearer token>
-TTS_MAX_PARALLEL_GENERATIONS=2
 ```
 
 To use a custom file path, set `KOKORO_ENV_FILE`.
+
+The player Settings window controls the machine-wide generation limit from 1
+to 8. All local agents using the same TTS state directory read that setting;
+the environment variable above takes precedence when present.
 
 ## Notes
 

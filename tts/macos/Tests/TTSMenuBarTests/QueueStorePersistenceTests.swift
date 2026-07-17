@@ -100,11 +100,13 @@ extension QueueStoreTests {
         store.setPausesMedia(true)
         store.setMediaHandoffDelay(1.5)
         store.setMediaResumeDelay(4.5)
+        store.setMaxParallelGenerations(6)
 
         let reloaded = PlayerPreferencesStore(stateDirectory: directory)
         #expect(reloaded.preferences.pausesMedia)
         #expect(reloaded.preferences.mediaHandoffDelay == 1.5)
         #expect(reloaded.preferences.mediaResumeDelay == 4.5)
+        #expect(reloaded.preferences.maxParallelGenerations == 6)
     }
 
     @Test @MainActor
@@ -120,6 +122,13 @@ extension QueueStoreTests {
         let migrated = PlayerPreferencesStore(stateDirectory: directory)
 
         #expect(!migrated.preferences.pausesMedia)
+        #expect(migrated.preferences.maxParallelGenerations == 2)
+    }
+
+    @Test
+    func clampsPlayerGenerationLimitToSafeSettingsRange() {
+        #expect(PlayerPreferences(maxParallelGenerations: 0).maxParallelGenerations == 1)
+        #expect(PlayerPreferences(maxParallelGenerations: 99).maxParallelGenerations == 8)
     }
 
     @Test

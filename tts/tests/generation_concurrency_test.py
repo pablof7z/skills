@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from http.server import ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -114,6 +115,14 @@ class GenerationConcurrencyTests(unittest.TestCase):
                 )
             )
 
+    def write_player_limit(self, limit: int) -> None:
+        self.state.mkdir(parents=True, exist_ok=True)
+        preferences = self.state / "player-preferences.json"
+        preferences.write_text(
+            json.dumps({"maxParallelGenerations": limit}),
+            encoding="utf-8",
+        )
+
     def wait_for_request_count(self, expected: int) -> bool:
         with ConcurrencyTrackingKokoroHandler.condition:
             return ConcurrencyTrackingKokoroHandler.condition.wait_for(
@@ -147,6 +156,24 @@ class GenerationConcurrencyTests(unittest.TestCase):
         self.finish_processes()
         self.assertEqual(ConcurrencyTrackingKokoroHandler.request_count, 2)
         self.assertEqual(ConcurrencyTrackingKokoroHandler.peak_requests, 1)
+
+    def test_player_setting_controls_independent_processes(self) -> None:
+        self.write_player_limit(1)
+        self.launch(2)
+        self.assertTrue(self.wait_for_request_count(1))
+        time.sleep(0.25)
+        self.assertEqual(ConcurrencyTrackingKokoroHandler.request_count, 1)
+
+        self.finish_processes()
+        self.assertEqual(ConcurrencyTrackingKokoroHandler.request_count, 2)
+        self.assertEqual(ConcurrencyTrackingKokoroHandler.peak_requests, 1)
+
+    def test_environment_limit_overrides_player_setting(self) -> None:
+        self.write_player_limit(1)
+        self.launch(2, limit=2)
+        self.assertTrue(self.wait_for_request_count(2))
+        self.assertEqual(ConcurrencyTrackingKokoroHandler.peak_requests, 2)
+        self.finish_processes()
 
     def test_dead_process_slot_is_recovered(self) -> None:
         stale_slot = self.state / "generation-slots" / "slot-1"

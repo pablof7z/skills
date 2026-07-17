@@ -5,12 +5,37 @@ TTS_GENERATION_SLOT_DIR=""
 TTS_GENERATION_SLOT_POLL_SECONDS="${TTS_GENERATION_SLOT_POLL_SECONDS:-0.1}"
 
 tts_generation_limit() {
-  local limit="${TTS_MAX_PARALLEL_GENERATIONS:-2}"
+  local limit="${TTS_MAX_PARALLEL_GENERATIONS:-}"
+  if [ -z "$limit" ]; then
+    limit="$(player_generation_limit 2>/dev/null || true)"
+  fi
+  limit="${limit:-2}"
   if [[ ! "$limit" =~ ^[1-9][0-9]*$ ]]; then
     echo "Error: TTS_MAX_PARALLEL_GENERATIONS must be a positive integer." >&2
     return 1
   fi
   printf '%s\n' "$limit"
+}
+
+player_generation_limit() {
+  local preferences_file
+  command -v python3 >/dev/null 2>&1 || return 1
+  preferences_file="$(tts_state_dir)/player-preferences.json"
+  [ -r "$preferences_file" ] || return 1
+  python3 - "$preferences_file" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        value = json.load(handle).get("maxParallelGenerations")
+except (OSError, ValueError, AttributeError):
+    raise SystemExit(1)
+if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 8:
+    print(value)
+else:
+    raise SystemExit(1)
+PY
 }
 
 release_generation_slot() {
