@@ -66,11 +66,13 @@ class RemoteAskProtocolTests(unittest.TestCase):
     def request(self) -> dict[str, object]:
         ask = self.ask()
         title = "Choose the deployment regions"
+        summary = "The release is ready and needs a deployment decision."
         message = "The release is ready for a deployment decision."
         tags = request_tags(
             peer_pubkey=pubkey_for_nsec("laptop-secret"),
             group_id="tts",
             title=title,
+            summary=summary,
             agent_name="remote-agent",
             message=message,
             attachments=[],
@@ -103,16 +105,47 @@ class RemoteAskProtocolTests(unittest.TestCase):
         self.assertIn(["question", "q-01", "multiple", "Where should we deploy?"], request["tags"])
         self.assertIn(["option", "q-01", "Europe"], request["tags"])
         self.assertIn(["option", "q-01", "North America", "Serve US and Canadian users."], request["tags"])
+        self.assertIn(
+            ["summary", "The release is ready and needs a deployment decision."],
+            request["tags"],
+        )
         self.assertFalse({"ask", "product", "request", "reply", "response", "status"}.intersection(
             tag[0] for tag in request["tags"]
         ))
 
         payload = request_payload(request)
         self.assertIsNotNone(payload)
+        self.assertEqual(payload["summary"], "The release is ready and needs a deployment decision.")
         bundle = json.loads(str(payload["ask"]))
         self.assertEqual(bundle["questions"][0]["short_title"], "Regions")
         self.assertEqual(bundle["questions"][0]["type"], "multiple_choice")
         self.assertEqual(bundle["questions"][0]["suggestions"][1]["title"], "North America")
+
+    def test_request_copy_is_normalized_and_rejects_titles_over_ten_words(self) -> None:
+        tags = request_tags(
+            peer_pubkey=pubkey_for_nsec("laptop-secret"),
+            group_id="tts",
+            title="MCP Audio",
+            summary="Hosted audio generation succeeds\nthrough paired delivery.",
+            agent_name="remote-agent",
+            message="The audio is ready.",
+            attachments=[],
+        )
+        self.assertIn(
+            ["summary", "Hosted audio generation succeeds through paired delivery."],
+            tags,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "must not exceed 10 words"):
+            request_tags(
+                peer_pubkey=pubkey_for_nsec("laptop-secret"),
+                group_id="tts",
+                title="MCP audio generation now works across every paired delivery path reliably",
+                summary="This title is too long.",
+                agent_name="remote-agent",
+                message="This request should fail.",
+                attachments=[],
+            )
 
     def test_answer_tags_round_trip_multiple_values_without_ui_metadata(self) -> None:
         request = self.request()

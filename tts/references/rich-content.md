@@ -11,7 +11,8 @@ Use repeatable `--attach "Label" path` pairs and pass the primary body with
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
-  --subject "Supporting artifacts for the implementation update" \
+  --subject "Implementation Artifacts" \
+  --summary "The proposal and mockup provide the supporting implementation context." \
   --message "The implementation is ready. I attached the proposal and mockup." \
   --attach "Architectural proposal" ./proposal.md \
   --attach "Mockup" ./mockup.svg

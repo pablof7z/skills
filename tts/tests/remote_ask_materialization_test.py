@@ -68,6 +68,7 @@ class RemoteAskMaterializationTests(unittest.TestCase):
             "attachments": [],
             "message": "What's your favorite place in the world?",
             "subject": "A simple spoken greeting test",
+            "summary": "A paired question is waiting for an answer.",
             "wait": "0.01s",
         }
 
@@ -79,6 +80,7 @@ class RemoteAskMaterializationTests(unittest.TestCase):
             (self.state / "items" / "paired-question-test.json").read_text()
         )
         self.assertEqual(item["kind"], "question")
+        self.assertEqual(item["summary"], "A paired question is waiting for an answer.")
         self.assertIn(item["status"], {"queued", "playing"})
         self.assertEqual(item["remote_request"]["event_id"], "paired-question-test")
 

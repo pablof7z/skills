@@ -166,12 +166,13 @@ usage() {
   echo "  --message text             Explicit primary message (positional text remains supported)." >&2
   echo "  --attach label path        Attach labeled Markdown, text, image, audio, or another file. Repeatable." >&2
   echo "  --agent-name seed          Required stable agent seed name." >&2
-  echo "  --subject text             Required subject; write 5 to 10 words." >&2
+  echo "  --subject text             Required title; aim for 2 to 5 words, maximum 10." >&2
+  echo "  --summary text             Required one-line player preview; it is not spoken." >&2
   echo "  --ask [json|@file]         Ask one legacy question or a structured question bundle." >&2
   echo "  --wait duration            Required with --ask; block for e.g. 30s, 5m, or 1h." >&2
   echo "  --suggestions json         Suggested answers as JSON [[title, description], ...]." >&2
   echo "  --no-play                  Generate without playback; JSON output includes the MP3 path." >&2
-  echo "Example: ./scripts/tts --agent-name agent-seed --subject 'Finishing the focused TTS implementation update' --message 'The fix is ready.'" >&2
+  echo "Example: ./scripts/tts --agent-name agent-seed --subject 'MCP Audio Verified' --summary 'Hosted audio generation now succeeds through MCP.' --message 'The fix is ready.'" >&2
 }
 
 

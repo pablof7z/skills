@@ -28,6 +28,7 @@ route_ordinary_tts_if_needed() {
     remote speak
     --agent-name "$AGENT_NAME"
     --subject "$SUBJECT"
+    --summary "$SUMMARY"
     --message "$remote_message"
   )
   local index

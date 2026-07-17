@@ -13,18 +13,27 @@ skill directory or that TTS is on `PATH`.
 
 ## Invoke
 
-Every invocation requires a stable agent seed name and subject. For an ordinary
-spoken update, put the words to say in `--message`:
+Every invocation requires a stable agent seed name, title, and one-line preview
+summary. For an ordinary spoken update, put the words to say in `--message`:
 
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
-  --subject "<5-to-10-word subject>" \
+  --subject "<2-to-5-word title>" \
+  --summary "<one-line player preview>" \
   --message "<spoken update>"
 ```
 
-Keep the seed name and subject stable across the same work session. Write the
-subject in 5 to 10 words. Do not repeat the agent identity in the message.
+Keep the seed name and title stable across the same work session. Aim for a
+2-to-5-word title and never exceed 10 words. Use a clean topic label for
+conceptual material. When work has a concrete outcome, combine the specific
+topic with its meaningful state, such as `NMP Boundaries Untangled` or
+`MCP Audio Verified`. Avoid generic workflow labels such as `update`, `recap`,
+`verify`, `implementation`, and `final` unless they are genuinely the subject.
+
+Write the summary as one concise factual sentence stating what changed or why
+it matters. The player shows it as preview text, but it is not synthesized.
+Do not repeat the title in the summary or the agent identity in the message.
 
 When an update has useful supporting material—screenshots, mockups, a proposal,
 detailed findings, or decision context—attach it. Attachments let the user
@@ -36,7 +45,8 @@ an exception:
 ```bash
 <skill-dir>/scripts/tts \
   --agent-name "<seed-name>" \
-  --subject "<5-to-10-word subject>" \
+  --subject "<2-to-5-word title>" \
+  --summary "<one-line player preview>" \
   --message "<spoken update>" \
   --attach "Supporting context" <path>
 ```

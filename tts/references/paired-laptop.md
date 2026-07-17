@@ -81,7 +81,8 @@ From the agent host:
 ```bash
 <skill-dir>/scripts/tts remote speak \
   --agent-name "<seed-name>" \
-  --subject "<5-to-10-word subject>" \
+  --subject "<2-to-5-word title>" \
+  --summary "<one-line player preview>" \
   --message "<spoken update>"
 ```
 
@@ -91,7 +92,8 @@ same structured question bundle and bounded wait used by local TTS:
 ```bash
 <skill-dir>/scripts/tts remote speak \
   --agent-name "<seed-name>" \
-  --subject "<5-to-10-word subject>" \
+  --subject "<2-to-5-word title>" \
+  --summary "<one-line player preview>" \
   --message "<spoken question preamble>" \
   --ask '<question-bundle-json>' \
   --wait 5m
@@ -120,8 +122,8 @@ or unavailable metadata never blocks pairing or speech; the UI safely falls
 back to a shortened pubkey.
 
 For questions, the kind-9 event tags are the authoritative UI model: `title`,
-`message`, optional `preamble`, repeated `question`, `label`, `description`, and
-`option` tags, plus the bounded `wait`. Event content is a deterministic
+non-spoken `summary`, `message`, optional `preamble`, repeated `question`,
+`label`, `description`, and `option` tags, plus the bounded `wait`. Event content is a deterministic
 Markdown rendering of those tags so an ordinary NIP-29 client can read and
 understand the question. The laptop UI ignores that rendering and reconstructs
 its local question bundle from the tags.

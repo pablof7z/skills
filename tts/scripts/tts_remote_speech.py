@@ -43,6 +43,7 @@ def remote_speak(args) -> int:
         peer_pubkey=str(peer["pubkey"]),
         group_id=group_id,
         title=args.subject,
+        summary=args.summary,
         agent_name=args.agent_name,
         message=args.message,
         attachments=attachments,

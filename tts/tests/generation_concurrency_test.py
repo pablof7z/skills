@@ -105,6 +105,8 @@ class GenerationConcurrencyTests(unittest.TestCase):
                         "concurrency-test",
                         "--subject",
                         f"Concurrent generation request number {index} now",
+                        "--summary",
+                        f"Generation request {index} is testing the shared concurrency limit.",
                         "--message",
                         "This request should respect the shared generation limit.",
                     ],

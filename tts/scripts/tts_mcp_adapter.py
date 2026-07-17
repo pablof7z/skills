@@ -29,13 +29,14 @@ class TTSAdapter:
         *,
         agent_name: str,
         subject: str,
+        summary: str,
         message: str,
         attachments: list[AttachmentInput],
     ) -> dict[str, object]:
         paired = self.config.route == "paired"
         if paired and attachments:
             raise TTSCommandError("paired speech does not accept host-local attachment paths")
-        command = self._speech_command(paired, agent_name, subject, message)
+        command = self._speech_command(paired, agent_name, subject, summary, message)
         command.extend(self._attachment_arguments(attachments))
         result = await self._run(command, force_local=self.config.route == "local")
         return self._speech_result(result)
@@ -45,6 +46,7 @@ class TTSAdapter:
         *,
         agent_name: str,
         subject: str,
+        summary: str,
         message: str,
         bundle: QuestionBundleInput,
         wait_seconds: int,
@@ -54,7 +56,7 @@ class TTSAdapter:
         normalized = self._question_bundle(bundle)
         if paired and (attachments or self._bundle_has_attachments(normalized)):
             raise TTSCommandError("paired questions do not accept host-local attachment paths")
-        command = self._speech_command(paired, agent_name, subject, message)
+        command = self._speech_command(paired, agent_name, subject, summary, message)
         command.extend(self._attachment_arguments(attachments))
         command.extend(["--ask", json.dumps(normalized, separators=(",", ":")), "--wait", f"{wait_seconds}s"])
         return sanitize_value(await self._run(command, timeout=wait_seconds + 300, force_local=self.config.route == "local"))
@@ -64,6 +66,7 @@ class TTSAdapter:
         *,
         agent_name: str,
         subject: str,
+        summary: str,
         message: str,
         wait_seconds: int,
     ) -> dict[str, object]:
@@ -75,6 +78,7 @@ class TTSAdapter:
                 "remote", "generate",
                 "--agent-name", agent_name,
                 "--subject", subject,
+                "--summary", summary,
                 "--message", message,
                 "--wait", f"{wait_seconds}s",
             ]
@@ -83,6 +87,7 @@ class TTSAdapter:
             [
                 "--agent-name", agent_name,
                 "--subject", subject,
+                "--summary", summary,
                 "--message", message,
                 "--no-play",
             ],
@@ -163,9 +168,17 @@ class TTSAdapter:
             command.extend(["--actor", actor])
         return sanitize_value(await self._run_menu(command))
 
-    def _speech_command(self, paired: bool, agent: str, subject: str, message: str) -> list[str]:
+    def _speech_command(
+        self, paired: bool, agent: str, subject: str, summary: str, message: str,
+    ) -> list[str]:
         prefix = ["remote", "speak"] if paired else []
-        return [*prefix, "--agent-name", agent, "--subject", subject, "--message", message]
+        return [
+            *prefix,
+            "--agent-name", agent,
+            "--subject", subject,
+            "--summary", summary,
+            "--message", message,
+        ]
 
     def _attachment_arguments(self, attachments: Iterable[AttachmentInput]) -> list[str]:
         result: list[str] = []

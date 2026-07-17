@@ -168,6 +168,7 @@ struct QueueStore {
     static func mergingCoordinationState(_ proposed: TTSItem, with persisted: TTSItem) -> TTSItem {
         var value = proposed
         value.kind = value.kind ?? persisted.kind
+        value.summary = value.summary ?? persisted.summary
         value.suggestions = value.suggestions ?? persisted.suggestions
         value.questionsPreamble = value.questionsPreamble ?? persisted.questionsPreamble
         value.primaryMessage = value.primaryMessage ?? persisted.primaryMessage
