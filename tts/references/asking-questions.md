@@ -104,7 +104,10 @@ else`, `Other`, or an equivalent catch-all suggestion.
   restored when the editor is reopened. Dropped or selected files are accepted.
 - For multiple choice, freeform text becomes an additional note alongside the
   selected suggestions.
-- The user submits the entire bundle atomically. A blank question is skipped.
+- The primary action remains **Next** while any question is pending. Using it or
+  choosing another tab marks the question being left as answered or skipped.
+  Once every optional question has been reviewed, the user submits the entire
+  bundle atomically.
 
 ## Attachments
 

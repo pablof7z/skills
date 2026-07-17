@@ -133,6 +133,17 @@ extension PlaybackController {
         }
     }
 
+    func skipQuestion(_ item: TTSItem) {
+        do {
+            let updated = try store.skipQuestion(id: item.id, actor: "tts-menu")
+            replaceItem(updated)
+            clearVisibleAskQueueHold(for: item.id)
+        } catch {
+            NSLog("Unable to skip TTS question: %@", error.localizedDescription)
+            refresh()
+        }
+    }
+
     func submitBundle(_ item: TTSItem, drafts: [TTSQuestionDraft]) {
         do {
             let updated = try store.submitBundle(
