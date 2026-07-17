@@ -59,6 +59,7 @@ write_macos_item_record() {
   session_id="$(infer_session_id)"
   iterm_session_id="$(infer_iterm_session_id)"
   workspace="${TTS_WORKSPACE:-${WTG_WORKTREE_PATH:-$(pwd -P)}}"
+  [ "$workspace" = "/" ] && workspace=""
   inferred_agent="${AGENT_NAME:-${TTS_AGENT_NAME:-${TENEX_AGENT_NAME:-}}}"
 
   python3 - \
