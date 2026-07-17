@@ -26,6 +26,12 @@ spoken update, put the words to say in `--message`:
 Keep the seed name and subject stable across the same work session. Write the
 subject in 5 to 10 words. Do not repeat the agent identity in the message.
 
+Keep the primary `--message` under 300 words. The runtime permits a 10 percent
+tolerance but rejects a primary message over 330 words. For a longer update,
+keep the concise, automatically played main corpus in `--message`, then split
+the rest into labeled narrated chapter attachments with repeated `--attach`
+pairs. The limit applies only to the primary message, not to those attachments.
+
 When an update has useful supporting material—screenshots, mockups, a proposal,
 detailed findings, or decision context—attach it. Attachments let the user
 expand a concise update in different directions: inspect visuals, open an

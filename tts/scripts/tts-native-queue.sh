@@ -1,9 +1,5 @@
 # shellcheck shell=bash
 
-word_count() {
-  printf '%s\n' "$1" | awk '{ count += NF } END { print count + 0 }'
-}
-
 agent_identity() {
   if [ -n "$AGENT_NAME" ]; then
     printf 'name:%s\n' "$AGENT_NAME"

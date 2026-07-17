@@ -163,7 +163,7 @@ usage() {
   echo "Usage: ./scripts/tts [options] 'Your text here'" >&2
   echo "Generates speech in the foreground, then queues playback in the background." >&2
   echo "Options:" >&2
-  echo "  --message text             Explicit primary message (positional text remains supported)." >&2
+  echo "  --message text             Primary message; aim under 300 words (hard limit 330)." >&2
   echo "  --attach label path        Attach labeled Markdown, text, image, audio, or another file. Repeatable." >&2
   echo "  --agent-name seed          Required stable agent seed name." >&2
   echo "  --subject text             Required subject; write 5 to 10 words." >&2

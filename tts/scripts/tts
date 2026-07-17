@@ -11,6 +11,8 @@ fi
 
 # shellcheck source=tts-common.sh
 source "$SCRIPT_DIR/tts-common.sh"
+# shellcheck source=tts-message-limits.sh
+source "$SCRIPT_DIR/tts-message-limits.sh"
 # shellcheck source=tts-generation-gate.sh
 source "$SCRIPT_DIR/tts-generation-gate.sh"
 # shellcheck source=tts-attachments.sh
@@ -22,7 +24,10 @@ source "$SCRIPT_DIR/tts-synthesis.sh"
 # shellcheck source=tts-routing.sh
 source "$SCRIPT_DIR/tts-routing.sh"
 
-[[ "${1:-}" =~ ^(pair|remote|daemon)$ ]] && exec python3 "$SCRIPT_DIR/tts-remote-cli.py" "$@"
+if [[ "${1:-}" =~ ^(pair|remote|daemon)$ ]]; then
+  validate_forwarded_primary_message_word_limit "$@" || exit 1
+  exec python3 "$SCRIPT_DIR/tts-remote-cli.py" "$@"
+fi
 
 NO_PLAY=0
 ASK=0
@@ -380,6 +385,7 @@ DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
 PRIMARY_MESSAGE=$(normalize_literal_newlines "$PRIMARY_MESSAGE")
 TEXT=$(strip_spoken_code_blocks "$DISPLAY_TEXT")
 TEXT=$(normalize_space "$TEXT")
+PRIMARY_MESSAGE_LIMIT_TEXT=$(primary_message_word_limit_text "${MESSAGE:-${POSITIONAL[0]:-}}")
 SUBJECT=$(normalize_space "$SUBJECT")
 AGENT_NAME=$(normalize_space "$AGENT_NAME")
 INTERNAL_CALL=0
@@ -395,6 +401,9 @@ if [ -z "$PLAY_EXISTING_FILE" ] && [ "$INTERNAL_CALL" -ne 1 ]; then
     echo "Error: --subject is required." >&2
     exit 1
   fi
+fi
+if [ -z "$PLAY_EXISTING_FILE" ] && ! truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
+  validate_primary_message_word_limit "$PRIMARY_MESSAGE_LIMIT_TEXT" || exit 1
 fi
 VOICE_SEED="$(agent_identity)"
 if [ -n "$AGENT_NAME" ]; then
