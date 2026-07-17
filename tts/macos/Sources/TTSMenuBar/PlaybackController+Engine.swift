@@ -34,7 +34,7 @@ extension PlaybackController {
                 loaded = try store.loadItems()
             }
             if let heldID = visibleAskQueueHoldID,
-               loaded.first(where: { $0.id == heldID })?.isPendingQuestion != true {
+               loaded.first(where: { $0.id == heldID && !$0.archived })?.isPendingQuestion != true {
                 visibleAskQueueHoldID = nil
             }
             lastItemsChangeToken = itemsChangeToken
@@ -47,6 +47,7 @@ extension PlaybackController {
                 generationProgressNow = now
             }
             historyTimestampClock.update(items: loaded, at: now, reschedule: historyChanged)
+            reconcileCurrentPlaybackEligibility()
             if let player {
                 let nextTime = player.currentTime
                 let nextDuration = player.duration
@@ -80,7 +81,9 @@ extension PlaybackController {
 
     func automaticPlaybackCandidate(in items: [TTSItem]) -> TTSItem? {
         if let heldID = visibleAskQueueHoldID {
-            guard let held = items.first(where: { $0.id == heldID && $0.status == .queued }) else {
+            guard let held = items.first(where: {
+                $0.id == heldID && QueuePlaybackPolicy.isAutomaticallyPlayable($0, in: items)
+            }) else {
                 return nil
             }
             guard manualQueuePauseBarrier?.allows(held) != false else { return nil }
@@ -101,6 +104,11 @@ extension PlaybackController {
         _ queuedItem: TTSItem,
         initiator: TTSPlaybackInitiator = .automatic
     ) {
+        guard QueuePlaybackPolicy.allowsStart(
+            queuedItem,
+            initiator: initiator,
+            in: items
+        ) else { return }
         let opensPaused = isPlaybackBlocked && initiator == .direct
         guard !isPlaybackBlocked || opensPaused else { return }
         guard FileManager.default.fileExists(atPath: queuedItem.outputFile) else {
@@ -140,6 +148,10 @@ extension PlaybackController {
             try store.save(item)
 
             player = audioPlayer
+            explicitlyOpenedInactiveItemID = initiator == .direct
+                && !QueuePlaybackPolicy.isActive(item, in: items)
+                ? item.id
+                : nil
             isAudioPlaying = false
             currentItemID = item.id
             duration = audioPlayer.duration
@@ -225,6 +237,11 @@ extension PlaybackController {
             guard !Task.isCancelled, self.player === audioPlayer else { return }
             self.playbackStartTask = nil
             guard !self.isPlaybackBlocked else { return }
+            guard self.currentPlaybackRemainsEligible() else {
+                self.retireCurrentFromPlayback()
+                self.refresh()
+                return
+            }
             guard audioPlayer.play() else {
                 self.finishCurrent(success: false, error: "The audio device refused playback.")
                 return

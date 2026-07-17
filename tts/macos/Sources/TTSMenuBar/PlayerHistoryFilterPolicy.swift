@@ -27,7 +27,32 @@ enum HistoryAgeFilter: CaseIterable, Equatable {
     }
 }
 
+struct PlayerHistoryQuery: Equatable {
+    let isViewingArchive: Bool
+    let entityFilters: HistoryEntityFilters
+    let ageFilter: HistoryAgeFilter
+    let hasInteractedWithHistory: Bool
+    let searchQuery: String
+    let now: Date
+}
+
 enum PlayerHistoryFilterPolicy {
+    static func filteredItems(
+        in items: [TTSItem],
+        query: PlayerHistoryQuery,
+        calendar: Calendar = .current
+    ) -> [TTSItem] {
+        filteredItems(
+            in: items.filter { $0.archived == query.isViewingArchive },
+            entityFilters: query.entityFilters,
+            ageFilter: query.ageFilter,
+            hasInteractedWithHistory: query.hasInteractedWithHistory,
+            searchQuery: query.searchQuery,
+            now: query.now,
+            calendar: calendar
+        )
+    }
+
     static func filteredItems(
         in items: [TTSItem],
         entityFilters: HistoryEntityFilters,

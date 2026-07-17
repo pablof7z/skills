@@ -25,6 +25,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     var refreshTimer: Timer?
     var playbackStartTask: Task<Void, Never>?
     var automaticallyPausedItemID: String?
+    var explicitlyOpenedInactiveItemID: String?
     var manualQueuePauseBarrier: ManualQueuePauseBarrier?
     var retryingItemIDs = Set<String>()
     @Published var visibleAskQueueHoldID: String?
@@ -59,7 +60,11 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     var queuedItems: [TTSItem] {
-        items.filter { $0.status.isPending && !$0.isAttachmentPlayback }
+        items.filter {
+            $0.status.isPending
+                && !$0.isAttachmentPlayback
+                && QueuePlaybackPolicy.isActive($0, in: items)
+        }
     }
 
     var nextQueuedItem: TTSItem? {
@@ -158,6 +163,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         isAudioPlaying = false
         currentItemID = nil
         automaticallyPausedItemID = nil
+        explicitlyOpenedInactiveItemID = nil
         manualQueuePauseBarrier = nil
         mediaController.shutdown()
     }

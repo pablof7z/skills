@@ -23,6 +23,7 @@ extension NowSpeakingPanelController {
         updateQuestionInputAvailability()
         updateHistoryNavigation()
         updateHistorySearchToolbar()
+        updateBulkArchiveToolbarItem()
         synchronizeVisibleAskQueueHold()
         if let preview = presentation.pendingPreviewItem {
             sessionOpener.refresh(rawIdentifier: preview.iTermSessionID)

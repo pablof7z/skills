@@ -52,9 +52,9 @@ extension QueueStoreTests {
     func repeatedAttachmentClicksReusePendingPlayback() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let audioFile = directory.appendingPathComponent("why.mp3")
+        let audioFile = directory.appendingPathComponent("why.wav")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data().write(to: audioFile)
+        try writeSilentAudio(to: audioFile)
         var why = attachment()
         why.audioFile = audioFile.path
         var main = item(id: "main", createdAt: 10)
@@ -86,12 +86,13 @@ extension QueueStoreTests {
     @Test @MainActor
     func explicitlyRequestedAttachmentPlaysBeforeOrdinaryQueue() throws {
         let ordinary = item(id: "ordinary", createdAt: 10)
+        let parent = item(id: "main", createdAt: 15)
         var attachmentPlayback = item(id: "attachment", createdAt: 20)
-        attachmentPlayback.parentItemID = "main"
+        attachmentPlayback.parentItemID = parent.id
         attachmentPlayback.attachmentID = "why"
 
         let next = try #require(
-            PlaybackController.nextQueuedItem(in: [ordinary, attachmentPlayback])
+            PlaybackController.nextQueuedItem(in: [ordinary, parent, attachmentPlayback])
         )
 
         #expect(next.id == attachmentPlayback.id)

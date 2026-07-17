@@ -66,6 +66,19 @@ extension NowSpeakingPanelController: NSToolbarDelegate {
             historyFilterToolbarItem = item
             updateHistoryFilterMenu()
             return item
+        case PlayerHistoryToolbarPolicy.bulkArchiveItemIdentifier:
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.label = "Archive All Matching"
+            item.paletteLabel = "Archive All Matching"
+            item.image = NSImage(
+                systemSymbolName: "archivebox",
+                accessibilityDescription: "Archive all matching items"
+            )
+            item.target = self
+            item.action = #selector(confirmArchiveAllMatching)
+            historyBulkArchiveToolbarItem = item
+            updateBulkArchiveToolbarItem()
+            return item
         default:
             return nil
         }

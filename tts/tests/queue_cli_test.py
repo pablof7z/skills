@@ -43,6 +43,17 @@ class QueueCLITests(unittest.TestCase):
         }
         (self.state / "items" / f"{item_id}.json").write_text(json.dumps(value))
 
+    def write_item(self, item_id: str, **overrides: object) -> None:
+        value = {
+            "id": item_id,
+            "created_at": 1,
+            "status": "queued",
+            "kind": "speech",
+            "is_archived": False,
+        }
+        value.update(overrides)
+        (self.state / "items" / f"{item_id}.json").write_text(json.dumps(value))
+
     def run_menu(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [str(self.menu), "queue", *arguments],
@@ -77,6 +88,48 @@ class QueueCLITests(unittest.TestCase):
         waited = json.loads(self.run_menu("wait", "q0", "--timeout", "0.1").stdout)
         self.assertEqual(waited["superseded_by"], ["q2"])
         self.assertEqual(len(list((self.state / "operations").glob("*.json"))), 1)
+
+    def test_archive_terminalizes_requested_items_and_their_attachments(self) -> None:
+        self.write_item("parent", status="playing")
+        self.write_item(
+            "child",
+            status="queued",
+            parent_item_id="parent",
+            attachment_id="attachment-1",
+        )
+        self.write_item("other")
+
+        result = json.loads(
+            self.run_menu("archive", "parent", "--reason", "No longer needed.").stdout
+        )
+
+        self.assertEqual(result["ids"], ["child", "parent"])
+        for item_id in result["ids"]:
+            item = json.loads((self.state / "items" / f"{item_id}.json").read_text())
+            self.assertTrue(item["is_archived"])
+            self.assertEqual(item["status"], "interrupted")
+            self.assertIsNotNone(item["completed_at"])
+        other = json.loads((self.state / "items" / "other.json").read_text())
+        self.assertFalse(other["is_archived"])
+        self.assertEqual(other["status"], "queued")
+
+        operations = list((self.state / "operations").glob("*.json"))
+        self.assertEqual(len(operations), 1)
+        operation = json.loads(operations[0].read_text())
+        self.assertEqual(operation["source_ids"], ["child", "parent"])
+
+    def test_archive_validates_the_whole_batch_before_writing(self) -> None:
+        self.write_item("valid")
+
+        result = self.run_menu(
+            "archive", "valid", "missing", "--reason", "Batch request.", check=False
+        )
+
+        self.assertEqual(result.returncode, 2)
+        valid = json.loads((self.state / "items" / "valid.json").read_text())
+        self.assertFalse(valid["is_archived"])
+        self.assertEqual(valid["status"], "queued")
+        self.assertFalse((self.state / "operations").exists())
 
     def test_wait_includes_the_users_answer(self) -> None:
         self.write_question("answered", 1)

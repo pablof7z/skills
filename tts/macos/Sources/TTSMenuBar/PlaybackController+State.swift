@@ -31,6 +31,7 @@ extension PlaybackController {
         isAudioPlaying = false
         currentItemID = nil
         automaticallyPausedItemID = nil
+        explicitlyOpenedInactiveItemID = nil
         currentTime = 0
         duration = 0
         replaceItem(item)
@@ -51,7 +52,7 @@ extension PlaybackController {
                 if isPlaybackBlocked {
                     refresh()
                 } else {
-                    play(resumed)
+                    play(resumed, initiator: item.playbackInitiator ?? .automatic)
                 }
                 return
             } catch {
@@ -103,6 +104,7 @@ extension PlaybackController {
         isAudioPlaying = false
         currentItemID = nil
         automaticallyPausedItemID = nil
+        explicitlyOpenedInactiveItemID = nil
         currentTime = 0
         duration = 0
         replaceItem(item)
@@ -128,6 +130,7 @@ extension PlaybackController {
         isAudioPlaying = false
         currentItemID = nil
         automaticallyPausedItemID = nil
+        explicitlyOpenedInactiveItemID = nil
         currentTime = 0
         duration = 0
         replaceItem(item)
@@ -140,6 +143,47 @@ extension PlaybackController {
         failed.error = message
         try? store.save(failed)
         replaceItem(failed)
+    }
+
+    func reconcileCurrentPlaybackEligibility() {
+        guard let item = currentItem else {
+            explicitlyOpenedInactiveItemID = nil
+            return
+        }
+        if QueuePlaybackPolicy.isActive(item, in: items) {
+            explicitlyOpenedInactiveItemID = nil
+            return
+        }
+        guard explicitlyOpenedInactiveItemID != item.id else { return }
+        retireCurrentFromPlayback()
+    }
+
+    func currentPlaybackRemainsEligible() -> Bool {
+        guard let item = currentItem,
+              let persisted = try? store.loadItems(),
+              let durable = persisted.first(where: { $0.id == item.id }) else { return false }
+        return QueuePlaybackPolicy.allowsCurrentPlayback(
+            durable,
+            in: persisted,
+            explicitlyOpenedInactiveItemID: explicitlyOpenedInactiveItemID
+        )
+    }
+
+    func retireCurrentFromPlayback() {
+        playbackStartTask?.cancel()
+        playbackStartTask = nil
+        player?.stop()
+        player = nil
+        isAudioPlaying = false
+        currentItemID = nil
+        automaticallyPausedItemID = nil
+        explicitlyOpenedInactiveItemID = nil
+        currentTime = 0
+        duration = 0
+        visibleAskQueueHoldID = nil
+        mediaController.scheduleResume(after: mediaController.mediaResumeDelay) { [weak self] in
+            self?.mediaResumeAllowed() ?? false
+        }
     }
 
     func retryCommand(for item: TTSItem) -> String? {
