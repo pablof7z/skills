@@ -177,16 +177,6 @@ final class InteractiveTranscriptTextView: NSTextView {
             layoutManager.removeTemporaryAttribute(attribute, forCharacterRange: wholeRange)
         }
 
-        if let activeWordIndex = playbackState.activeWordIndex,
-           document.words.indices.contains(activeWordIndex) {
-            for completedWord in document.words[..<activeWordIndex] {
-                layoutManager.addTemporaryAttributes(
-                    [.foregroundColor: NSColor.labelColor.withAlphaComponent(0.86)],
-                    forCharacterRange: completedWord.range
-                )
-            }
-        }
-
         if let activePhraseIndex = playbackState.activePhraseIndex,
            document.phrases.indices.contains(activePhraseIndex) {
             let phrase = document.phrases[activePhraseIndex]
@@ -196,17 +186,6 @@ final class InteractiveTranscriptTextView: NSTextView {
                     .backgroundColor: accent.withAlphaComponent(0.11),
                 ],
                 forCharacterRange: phrase.range
-            )
-        }
-
-        if let activeWordIndex = playbackState.activeWordIndex,
-           document.words.indices.contains(activeWordIndex) {
-            layoutManager.addTemporaryAttributes(
-                [
-                    .foregroundColor: accent,
-                    .backgroundColor: accent.withAlphaComponent(0.28),
-                ],
-                forCharacterRange: document.words[activeWordIndex].range
             )
         }
 

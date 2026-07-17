@@ -51,7 +51,11 @@ struct TranscriptDocument: Equatable {
             return TranscriptDocument(text: text, words: [], phrases: [])
         }
 
-        let aligned = align(sourceRanges: sourceRanges, in: text, timings: timings)
+        let source = text as NSString
+        let aligned = TranscriptTimingAlignment.align(
+            sourceTokens: sourceRanges.map { source.substring(with: $0) },
+            timings: timings
+        )
         let phraseRanges = buildPhrases(sourceRanges: sourceRanges, aligned: aligned, text: text)
         var phraseIndexByWord = Array(repeating: 0, count: sourceRanges.count)
         for (phraseIndex, wordRange) in phraseRanges.enumerated() {
@@ -71,14 +75,15 @@ struct TranscriptDocument: Equatable {
         let phrases = phraseRanges.map { wordRange in
             let first = sourceRanges[wordRange.lowerBound]
             let last = sourceRanges[wordRange.upperBound - 1]
+            let phraseTimings = aligned[wordRange].compactMap { $0 }
             return TranscriptPhrase(
                 range: NSRange(
                     location: first.location,
                     length: NSMaxRange(last) - first.location
                 ),
                 wordRange: wordRange,
-                startTime: aligned[wordRange.lowerBound]?.startTime,
-                endTime: aligned[wordRange.upperBound - 1]?.endTime
+                startTime: phraseTimings.first?.startTime,
+                endTime: phraseTimings.last?.endTime
             )
         }
 
@@ -103,11 +108,14 @@ struct TranscriptDocument: Equatable {
                 return TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
             }
             let resolved = preciseIndices[low - 1]
-            guard let endTime = words[resolved].endTime, time <= endTime else {
-                return TranscriptPlaybackState(activeWordIndex: nil, activePhraseIndex: nil)
+            let activeWordIndex: Int?
+            if let endTime = words[resolved].endTime, time <= endTime {
+                activeWordIndex = resolved
+            } else {
+                activeWordIndex = nil
             }
             return TranscriptPlaybackState(
-                activeWordIndex: resolved,
+                activeWordIndex: activeWordIndex,
                 activePhraseIndex: words[resolved].phraseIndex
             )
         }
@@ -133,11 +141,6 @@ struct TranscriptDocument: Equatable {
         words.firstIndex { NSLocationInRange(characterIndex, $0.range) }
     }
 
-    private struct AlignedTiming: Equatable {
-        var startTime: TimeInterval
-        var endTime: TimeInterval
-    }
-
     private static func sourceWordRanges(in text: NSAttributedString) -> [NSRange] {
         let pattern = #"[\p{L}\p{M}\p{N}]+(?:['’][\p{L}\p{M}\p{N}]+)*"#
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -149,79 +152,9 @@ struct TranscriptDocument: Equatable {
             }
     }
 
-    private static func align(
-        sourceRanges: [NSRange],
-        in text: String,
-        timings: [TTSWordTiming]?
-    ) -> [AlignedTiming?] {
-        guard let timings, !timings.isEmpty else {
-            return Array(repeating: nil, count: sourceRanges.count)
-        }
-
-        var provider: [(normalized: String, timing: AlignedTiming)] = []
-        for timing in timings where timing.startTime.isFinite && timing.endTime.isFinite {
-            let normalized = normalizedToken(timing.word)
-            if normalized.isEmpty {
-                if !provider.isEmpty {
-                    provider[provider.count - 1].timing.endTime = max(
-                        provider[provider.count - 1].timing.endTime,
-                        timing.endTime
-                    )
-                }
-                continue
-            }
-            provider.append((
-                normalized,
-                AlignedTiming(startTime: max(0, timing.startTime), endTime: max(timing.startTime, timing.endTime))
-            ))
-        }
-        guard !provider.isEmpty else {
-            return Array(repeating: nil, count: sourceRanges.count)
-        }
-
-        let source = text as NSString
-        let sourceTokens = sourceRanges.map { normalizedToken(source.substring(with: $0)) }
-        var result = Array<AlignedTiming?>(repeating: nil, count: sourceRanges.count)
-        let candidateStarts = provider.indices.filter {
-            tokensCorrespond(sourceTokens[0], provider[$0].normalized)
-        }
-        var providerIndex = candidateStarts.max { left, right in
-            let leftScore = alignmentScore(sourceTokens: sourceTokens, provider: provider, startingAt: left)
-            let rightScore = alignmentScore(sourceTokens: sourceTokens, provider: provider, startingAt: right)
-            return leftScore == rightScore ? left < right : leftScore < rightScore
-        } ?? 0
-        for (sourceIndex, range) in sourceRanges.enumerated() where providerIndex < provider.count {
-            let normalizedSource = normalizedToken(source.substring(with: range))
-            let match = (providerIndex..<provider.count).first {
-                tokensCorrespond(normalizedSource, provider[$0].normalized)
-            }
-            guard let resolved = match else { continue }
-            result[sourceIndex] = provider[resolved].timing
-            providerIndex = resolved + 1
-        }
-        return result
-    }
-
-    private static func alignmentScore(
-        sourceTokens: [String],
-        provider: [(normalized: String, timing: AlignedTiming)],
-        startingAt start: Int
-    ) -> Int {
-        var providerIndex = start
-        var score = 0
-        for sourceToken in sourceTokens where providerIndex < provider.count {
-            guard let match = (providerIndex..<provider.count).first(where: {
-                tokensCorrespond(sourceToken, provider[$0].normalized)
-            }) else { continue }
-            score += 1
-            providerIndex = match + 1
-        }
-        return score
-    }
-
     private static func buildPhrases(
         sourceRanges: [NSRange],
-        aligned: [AlignedTiming?],
+        aligned: [TranscriptAlignedTiming?],
         text: String
     ) -> [Range<Int>] {
         guard !sourceRanges.isEmpty else { return [] }
@@ -265,19 +198,4 @@ struct TranscriptDocument: Equatable {
         return result
     }
 
-    private static func normalizedToken(_ token: String) -> String {
-        token
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .unicodeScalars
-            .filter { CharacterSet.alphanumerics.contains($0) }
-            .map(String.init)
-            .joined()
-    }
-
-    private static func tokensCorrespond(_ source: String, _ provider: String) -> Bool {
-        guard !source.isEmpty, !provider.isEmpty else { return false }
-        if source == provider { return true }
-        guard min(source.count, provider.count) >= 3 else { return false }
-        return source.contains(provider) || provider.contains(source)
-    }
 }
