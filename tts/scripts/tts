@@ -11,6 +11,8 @@ fi
 
 # shellcheck source=tts-common.sh
 source "$SCRIPT_DIR/tts-common.sh"
+# shellcheck source=tts-generation-gate.sh
+source "$SCRIPT_DIR/tts-generation-gate.sh"
 # shellcheck source=tts-attachments.sh
 source "$SCRIPT_DIR/tts-attachments.sh"
 # shellcheck source=tts-native-queue.sh

@@ -50,6 +50,10 @@ export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
   --attach "Mockup A" ./mockup-a.svg
 ```
 
+Local generation is limited to two concurrent Kokoro requests across all TTS
+processes sharing the same state directory. Set `TTS_MAX_PARALLEL_GENERATIONS`
+in `~/.env.tts` to choose a different positive limit.
+
 On macOS 13 or later with Swift available, the first audible request builds and starts the TTS app. The command returns after the primary message and narrated attachments finish generating and the item has been accepted for playback. Agent harnesses with asynchronous command execution may run the whole command that way, then wait on its execution handle for the final result.
 
 Use `./scripts/tts-menu status` to inspect current playback and queue counts. Use `--no-play` when you only need the generated file; that command returns only after the file exists.
