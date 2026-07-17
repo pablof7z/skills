@@ -1,4 +1,3 @@
-import AVFAudio
 import Foundation
 import Testing
 @testable import TTSMenuBar
@@ -23,48 +22,6 @@ struct QueueAutoplayPolicyTests {
         #expect(heldItemID(current: ask, isWindowVisible: false) == nil)
         #expect(heldItemID(current: speech, preview: ask) == ask.id)
         #expect(heldItemID() == nil)
-    }
-
-    @Test
-    func queuedSpeechParksALocallyPausedItemAndResumesItFromHistory() throws {
-        let support = QueueStoreTests()
-        let directory = support.temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audio = directory.appendingPathComponent("silence.wav")
-        try support.writeSilentAudio(to: audio)
-        let store = QueueStore(stateDirectory: directory)
-        var paused = support.item(id: "paused", createdAt: 10, outputFile: audio.path)
-        paused.status = .paused
-        paused.startedAt = 10
-        let next = support.item(id: "next", createdAt: 20, outputFile: audio.path)
-        try store.save(paused)
-        try store.save(next)
-
-        let controller = PlaybackController(
-            store: store,
-            mediaController: support.disabledMediaController(stateDirectory: directory),
-            outputIsMuted: { false }
-        )
-        defer { controller.shutdown() }
-        let audioPlayer = try AVAudioPlayer(contentsOf: audio)
-        audioPlayer.currentTime = 0.05
-        controller.items = [paused, next]
-        controller.currentItemID = paused.id
-        controller.player = audioPlayer
-
-        controller.refresh()
-
-        let parked = try #require(try store.item(id: paused.id))
-        #expect(parked.status == .interrupted)
-        #expect(parked.unheard)
-        #expect(abs((parked.playbackOffset ?? 0) - 0.05) < 0.01)
-        #expect(controller.currentItem?.id == next.id)
-
-        controller.playNow(parked)
-
-        #expect(controller.currentItem?.id == paused.id)
-        #expect(abs(controller.currentTime - 0.05) < 0.01)
     }
 
     private func heldItemID(

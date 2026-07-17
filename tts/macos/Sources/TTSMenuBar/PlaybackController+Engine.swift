@@ -58,20 +58,15 @@ extension PlaybackController {
                 }
                 if currentItem?.status == .paused,
                    automaticallyPausedItemID == nil,
-                   visibleAskQueueHoldID == nil,
                    !isPlaybackBlocked,
-                   let next = Self.nextQueuedItem(in: loaded)
+                   let next = automaticPlaybackCandidate(in: loaded)
                 {
-                    parkPausedCurrentForQueueAdvance()
-                    play(next)
+                    parkPausedCurrentForIncomingPlayback()
+                    playAutomaticCandidate(next)
                 }
             } else if !isPlaybackBlocked {
-                if let heldID = visibleAskQueueHoldID,
-                   let replay = loaded.first(where: { $0.id == heldID && $0.status == .queued }) {
-                    play(replay)
-                } else if visibleAskQueueHoldID == nil,
-                          let next = Self.nextQueuedItem(in: loaded) {
-                    play(next)
+                if let next = automaticPlaybackCandidate(in: loaded) {
+                    playAutomaticCandidate(next)
                 }
             }
         } catch {
@@ -80,8 +75,26 @@ extension PlaybackController {
     }
 
     static func nextQueuedItem(in items: [TTSItem]) -> TTSItem? {
-        items.first { $0.status == .queued && $0.isAttachmentPlayback }
-            ?? items.first { $0.status == .queued }
+        QueuePlaybackPolicy.nextQueuedItem(in: items)
+    }
+
+    func automaticPlaybackCandidate(in items: [TTSItem]) -> TTSItem? {
+        if let heldID = visibleAskQueueHoldID {
+            guard let held = items.first(where: { $0.id == heldID && $0.status == .queued }) else {
+                return nil
+            }
+            guard manualQueuePauseBarrier?.allows(held) != false else { return nil }
+            return held
+        }
+        if let manualQueuePauseBarrier {
+            return manualQueuePauseBarrier.nextArrival(in: items)
+        }
+        return QueuePlaybackPolicy.nextQueuedItem(in: items)
+    }
+
+    func playAutomaticCandidate(_ item: TTSItem) {
+        manualQueuePauseBarrier?.recordStarted(item)
+        play(item)
     }
 
     func play(

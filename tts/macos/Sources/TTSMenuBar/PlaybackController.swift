@@ -25,6 +25,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     var refreshTimer: Timer?
     var playbackStartTask: Task<Void, Never>?
     var automaticallyPausedItemID: String?
+    var manualQueuePauseBarrier: ManualQueuePauseBarrier?
     var retryingItemIDs = Set<String>()
     @Published var visibleAskQueueHoldID: String?
     var started = false
@@ -62,7 +63,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     }
 
     var nextQueuedItem: TTSItem? {
-        Self.nextQueuedItem(in: items)
+        QueuePlaybackPolicy.nextQueuedItem(in: items)
     }
 
     var recentItems: [TTSItem] {
@@ -157,6 +158,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         isAudioPlaying = false
         currentItemID = nil
         automaticallyPausedItemID = nil
+        manualQueuePauseBarrier = nil
         mediaController.shutdown()
     }
 
@@ -170,6 +172,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
         automaticallyPausedItemID = nil
         markDirectInteraction(on: &item)
         if player.isPlaying {
+            beginManualQueuePauseBarrier()
             player.pause()
             item.status = .paused
             isAudioPlaying = false
@@ -178,6 +181,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
             mediaController.releaseForSpeechPause()
             return
         }
+        manualQueuePauseBarrier = nil
         try? store.save(item)
         replaceItem(item)
         resumeCurrentItem(player)
@@ -208,6 +212,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     func stop() {
         guard player != nil else { return }
+        beginManualQueuePauseBarrier()
         if var item = currentItem, item.isAttachmentPlayback {
             item.returnToPlaybackOffset = nil
             try? store.save(item)
