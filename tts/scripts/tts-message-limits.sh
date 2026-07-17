@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 
-TTS_PRIMARY_MESSAGE_TARGET_WORDS=600
-TTS_PRIMARY_MESSAGE_HARD_LIMIT_WORDS=660
+TTS_PRIMARY_MESSAGE_TARGET_WORDS=300
+TTS_PRIMARY_MESSAGE_HARD_LIMIT_WORDS=330
 
 word_count() {
   printf '%s\n' "$1" | awk '{ count += NF } END { print count + 0 }'
@@ -25,7 +25,7 @@ validate_primary_message_word_limit() {
 
   printf 'Error: primary TTS message contains %s words; the enforced limit is %s words.\n' \
     "$count" "$TTS_PRIMARY_MESSAGE_HARD_LIMIT_WORDS" >&2
-  printf 'Keep the automatically played --message under %s words. Put the concise main corpus there, then split longer output into labeled chapter attachments with repeated --attach pairs.\n' \
+  printf 'Keep the automatically played --message under %s words. Use readable Markdown and move supporting material into clearly labeled attachments with repeated --attach pairs.\n' \
     "$TTS_PRIMARY_MESSAGE_TARGET_WORDS" >&2
   return 1
 }
