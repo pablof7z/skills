@@ -20,9 +20,9 @@ struct QueueArchiveLifecycleTests {
         let items = [archived, parent, child, active]
 
         #expect(PlaybackController.nextQueuedItem(in: items)?.id == active.id)
-        #expect(!QueuePlaybackEligibility.isAutomaticallyPlayable(archived, in: items))
-        #expect(!QueuePlaybackEligibility.isAutomaticallyPlayable(child, in: items))
-        #expect(QueuePlaybackEligibility.allowsStart(archived, initiator: .direct, in: items))
+        #expect(!QueuePlaybackPolicy.isAutomaticallyPlayable(archived, in: items))
+        #expect(!QueuePlaybackPolicy.isAutomaticallyPlayable(child, in: items))
+        #expect(QueuePlaybackPolicy.allowsStart(archived, initiator: .direct, in: items))
     }
 
     @Test

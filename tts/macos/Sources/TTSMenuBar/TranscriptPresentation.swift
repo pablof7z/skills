@@ -24,6 +24,8 @@ struct TranscriptPlaybackState: Equatable {
 }
 
 struct TranscriptDocument: Equatable {
+    private static let maximumUntimedPhraseHold: TimeInterval = 2
+
     let text: String
     let words: [TranscriptWord]
     let phrases: [TranscriptPhrase]
@@ -114,9 +116,14 @@ struct TranscriptDocument: Equatable {
             } else {
                 activeWordIndex = nil
             }
+            let phraseIndex = words[resolved].phraseIndex
+            let phraseEnd = phrases.indices.contains(phraseIndex) ? phrases[phraseIndex].endTime : nil
+            let activePhraseIndex = phraseEnd.flatMap {
+                time <= $0 + Self.maximumUntimedPhraseHold ? phraseIndex : nil
+            }
             return TranscriptPlaybackState(
                 activeWordIndex: activeWordIndex,
-                activePhraseIndex: words[resolved].phraseIndex
+                activePhraseIndex: activePhraseIndex
             )
         }
 

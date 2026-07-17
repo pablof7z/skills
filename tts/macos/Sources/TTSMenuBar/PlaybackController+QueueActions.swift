@@ -16,6 +16,7 @@ extension PlaybackController {
             return
         }
         guard clearGlobalPauseForExplicitPlayback() else { return }
+        manualQueuePauseBarrier = nil
 
         if currentItem?.id == item.id, let player {
             if isPlaybackBlocked {

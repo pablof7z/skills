@@ -60,11 +60,9 @@ extension PlaybackController {
             }
         }
 
-        let persistedItems = (try? store.loadItems()) ?? []
-        let hasQueuedItem = persistedItems.contains {
-            QueuePlaybackEligibility.isAutomaticallyPlayable($0, in: persistedItems)
-        }
-        if hasQueuedItem {
+        let persisted = try? store.loadItems()
+        let hasAutomaticCandidate = persisted.flatMap { automaticPlaybackCandidate(in: $0) } != nil
+        if hasAutomaticCandidate {
             refresh()
         } else {
             mediaController.scheduleResume(after: mediaController.mediaResumeDelay) { [weak self] in
@@ -76,14 +74,16 @@ extension PlaybackController {
     private func mediaResumeAllowed() -> Bool {
         guard player == nil else { return false }
         guard let persisted = try? store.loadItems() else { return false }
-        return !persisted.contains { item in
-            item.status == .playing
-                || (visibleAskQueueHoldID == nil
-                    && QueuePlaybackEligibility.isAutomaticallyPlayable(item, in: persisted))
-        }
+        guard !persisted.contains(where: { $0.status == .playing }) else { return false }
+        return automaticPlaybackCandidate(in: persisted) == nil
     }
 
-    func parkPausedCurrentForQueueAdvance() {
+    func beginManualQueuePauseBarrier() {
+        let persisted = (try? store.loadItems()) ?? items
+        manualQueuePauseBarrier = ManualQueuePauseBarrier(itemsAtPause: persisted)
+    }
+
+    func parkPausedCurrentForIncomingPlayback() {
         guard var item = currentItem, item.status == .paused, let player else { return }
         playbackStartTask?.cancel()
         playbackStartTask = nil
@@ -150,7 +150,7 @@ extension PlaybackController {
             explicitlyOpenedInactiveItemID = nil
             return
         }
-        if QueuePlaybackEligibility.isActive(item, in: items) {
+        if QueuePlaybackPolicy.isActive(item, in: items) {
             explicitlyOpenedInactiveItemID = nil
             return
         }
@@ -162,7 +162,7 @@ extension PlaybackController {
         guard let item = currentItem,
               let persisted = try? store.loadItems(),
               let durable = persisted.first(where: { $0.id == item.id }) else { return false }
-        return QueuePlaybackEligibility.allowsCurrentPlayback(
+        return QueuePlaybackPolicy.allowsCurrentPlayback(
             durable,
             in: persisted,
             explicitlyOpenedInactiveItemID: explicitlyOpenedInactiveItemID
