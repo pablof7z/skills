@@ -94,10 +94,12 @@ class PairingOAuthProvider(
             params, AuthorizationParams
         ):
             raise PairingApprovalError("The authorization request is invalid.")
+        redirect_uri = urlparse(str(params.redirect_uri))
         return {
             "expires_at": expires_at,
             "client_name": client.client_name or "Unnamed MCP caller",
-            "redirect_host": urlparse(str(params.redirect_uri)).hostname or "unknown",
+            "redirect_host": redirect_uri.hostname or "unknown",
+            "redirect_origin": f"{redirect_uri.scheme}://{redirect_uri.netloc}",
         }
 
     async def complete_authorization(self, request_id: str, submitted_code: str) -> str:
