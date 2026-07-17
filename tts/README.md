@@ -55,7 +55,9 @@ export KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"
 Local generation is limited to two concurrent Kokoro requests across all TTS
 processes sharing the same state directory. Change the limit under Generation
 in the player's Settings window. `TTS_MAX_PARALLEL_GENERATIONS` remains
-available as an explicit per-process override.
+available as an explicit per-process override. Each generation attempt has a
+shared 60-second deadline, including time waiting for a slot; set
+`TTS_GENERATION_TIMEOUT_SECONDS` to a positive integer to override it.
 
 On macOS 13 or later with Swift available, the first audible request builds and starts the TTS app. The command returns after the primary message and narrated attachments finish generating and the item has been accepted for playback. Agent harnesses with asynchronous command execution may run the whole command that way, then wait on its execution handle for the final result.
 

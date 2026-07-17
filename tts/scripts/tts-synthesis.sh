@@ -45,6 +45,8 @@ if ! truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
   fi
 fi
 
+configure_generation_deadline || exit 1
+
 if command -v python3 >/dev/null 2>&1; then
   PAYLOAD=$(python3 - "$TEXT" "$VOICE" <<'PY'
 import json
@@ -73,10 +75,16 @@ elif [ -n "${KOKORO_API_USERNAME:-}" ] && [ -n "${KOKORO_API_PASSWORD:-}" ]; the
   AUTH_OPTS+=( -u "$KOKORO_API_USERNAME:$KOKORO_API_PASSWORD" )
 fi
 
-acquire_generation_slot
+acquire_generation_slot || exit 1
+
+if ! REQUEST_TIMEOUT_SECONDS="$(generation_seconds_remaining)"; then
+  generation_timed_out
+  exit 1
+fi
 
 set +e
-HTTP_CODE=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
+HTTP_CODE=$(curl -sS --connect-timeout "$TTS_GENERATION_CONNECT_TIMEOUT_SECONDS" \
+  --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
   ${AUTH_OPTS[@]+"${AUTH_OPTS[@]}"} "$CAPTIONED_API_URL" -w "%{http_code}" -o "$CAPTION_RESPONSE_FILE" 2>"$TMP_ERR")
 CURL_STATUS=$?
 set -e
@@ -138,6 +146,10 @@ PY
 fi
 
 if [ "$CAPTIONED_READY" -ne 1 ]; then
+  if ! REQUEST_TIMEOUT_SECONDS="$(generation_seconds_remaining)"; then
+    generation_timed_out
+    exit 1
+  fi
   echo "Warning: precise TTS timestamps are unavailable; generating audio without word alignment." >&2
   rm -f "$CAPTION_RESPONSE_FILE" "$TIMESTAMPS_FILE" "$OUTPUT_FILE"
   if command -v python3 >/dev/null 2>&1; then
@@ -156,7 +168,8 @@ PY
     PAYLOAD="{\"model\":\"kokoro\",\"input\":\"$TEXT\",\"voice\":\"$VOICE\",\"response_format\":\"mp3\"}"
   fi
   set +e
-  HTTP_CODE=$(curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
+  HTTP_CODE=$(curl -sS --connect-timeout "$TTS_GENERATION_CONNECT_TIMEOUT_SECONDS" \
+    --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
     ${AUTH_OPTS[@]+"${AUTH_OPTS[@]}"} "$API_URL" -w "%{http_code}" -o "$OUTPUT_FILE" 2>"$TMP_ERR")
   CURL_STATUS=$?
   set -e
