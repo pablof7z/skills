@@ -86,19 +86,28 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             accessibilityDescription: state.label
         )
         button.attributedTitle = badgeTitle(count: count)
+        button.toolTip = state.label
         button.setAccessibilityLabel(count > 0 ? "\(state.label), \(count) unplayed" : state.label)
     }
 
-    private var playbackState: (symbol: String, label: String) {
-        if playbackController.isGloballyPaused { return ("pause.circle.fill", "TTS paused") }
-        if playbackController.isSystemOutputMuted { return ("speaker.slash.circle.fill", "Output muted") }
-        if playbackController.currentItem != nil { return ("waveform.circle.fill", "TTS playing") }
-        if playbackController.isGenerating { return ("ellipsis.circle", "TTS generating") }
-        return ("speaker.wave.2", "TTS idle")
+    private var playbackState: MenuBarPlaybackState {
+        MenuBarPresentation.playbackState(
+            blockers: playbackController.queueAutoplayBlockers,
+            hasCurrentItem: playbackController.currentItem != nil,
+            isGenerating: playbackController.isGenerating
+        )
     }
 
     private func rebuild(_ menu: NSMenu) {
         menu.removeAllItems()
+        let blockers = playbackController.queueAutoplayBlockers
+        if !blockers.isEmpty {
+            menu.addItem(disabledItem("Queue autoplay is blocked", symbol: "exclamationmark.triangle.fill"))
+            for blocker in blockers {
+                menu.addItem(disabledItem("  \(blocker.shortLabel) — \(blocker.detail)", symbol: blocker.symbol))
+            }
+            menu.addItem(.separator())
+        }
         let endpoint = endpointMonitor.snapshot
         menu.addItem(disabledItem(
             endpoint.isListening ? "Remote listener connected" : "Remote listener stopped",

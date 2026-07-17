@@ -26,7 +26,7 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
     var playbackStartTask: Task<Void, Never>?
     var automaticallyPausedItemID: String?
     var retryingItemIDs = Set<String>()
-    var visibleAskQueueHoldID: String?
+    @Published var visibleAskQueueHoldID: String?
     var started = false
     var lastItemsChangeToken: Date?
 
@@ -91,6 +91,14 @@ final class PlaybackController: NSObject, ObservableObject, @preconcurrency AVAu
 
     var isPaused: Bool {
         currentItem?.status == .paused
+    }
+
+    var queueAutoplayBlockers: [QueueAutoplayBlocker] {
+        QueueAutoplayBlockerPolicy.blockers(
+            isGloballyPaused: isGloballyPaused,
+            isSystemOutputMuted: isSystemOutputMuted,
+            visibleAskQueueHoldID: visibleAskQueueHoldID
+        )
     }
 
     func generationProgress(for item: TTSItem) -> Double {

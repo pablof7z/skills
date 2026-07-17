@@ -78,6 +78,7 @@ struct NowSpeakingHUDView: View {
             .accessibilityLabel(
                 "\(isPreviewingPending ? "Pending update" : "Now speaking"). \(item.nowSpeakingTitle). \(item.nowSpeakingContext)"
             )
+            .queueAutoplayBlockerBanner(controller.queueAutoplayBlockers)
         } else {
             PlayerQueueView(
                 controller: controller,
@@ -96,6 +97,7 @@ struct NowSpeakingHUDView: View {
                 .equatable()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .background(Color(nsColor: .windowBackgroundColor))
+                .queueAutoplayBlockerBanner(controller.queueAutoplayBlockers)
         }
     }
 
