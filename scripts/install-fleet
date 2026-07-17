@@ -126,13 +126,13 @@ activate_host() {
     command -v swift >/dev/null || fail "Swift is required to build the TTS app"
     swift build -c release --package-path "${tts}/macos"
 
-    local status busy menu_pid
+    local status active menu_pid
     status="$("${tts}/scripts/tts-menu" status --json)"
-    busy="$(
+    active="$(
       printf '%s' "${status}" | python3 -c \
-        'import json,sys; d=json.load(sys.stdin); print("yes" if d.get("current") or d.get("queued") else "no")'
+        'import json,sys; print("yes" if json.load(sys.stdin).get("current") else "no")'
     )"
-    [[ "${busy}" == "no" ]] \
+    [[ "${active}" == "no" ]] \
       || fail "$(hostname -s) has active TTS playback; rerun when its queue is idle"
 
     "${tts}/scripts/tts-menu" restart
