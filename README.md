@@ -101,7 +101,26 @@ Most skill folders contain instructions and reference material only. The excepti
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
 - The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
 
-Installation copies only the skill folders you choose into `~/.agents/skills`. Remove a copied folder to uninstall it. No shared installer or telemetry service is included.
+Installation copies skill folders into `~/.agents/skills`. Remove a copied
+folder to uninstall it. The fleet installer below uses the same copy model and
+adds no telemetry service.
+
+## Install The Catalog Across Computers
+
+`scripts/install-fleet` installs every top-level skill on the current computer
+and any SSH targets you name:
+
+```bash
+scripts/install-fleet customer@23.88.91.234 pablo@157.180.102.242
+```
+
+The command fetches the latest merged `origin/main` and deploys it from a
+temporary archive, so a dirty or behind local checkout is left untouched. It
+overwrites stale catalog files without keeping backups, preserves machine-owned
+state such as TTS sessions, Python environments, Swift build products, and
+skill feedback, then builds or validates host-specific runtime pieces and
+reports the exact commit installed. It stops instead of interrupting active TTS
+playback.
 
 ## License
 

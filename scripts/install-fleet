@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# SSH shells commonly omit user and Homebrew tool directories.
+export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/install-fleet [SSH_TARGET ...]
+
+Install every top-level skill from origin/main on this computer and each named
+SSH target. The local computer is always included.
+
+Examples:
+  scripts/install-fleet
+  scripts/install-fleet customer@23.88.91.234 pablo@157.180.102.242
+
+The command may be run from a dirty or behind checkout. It fetches origin/main,
+installs from a temporary archive, overwrites stale catalog files without
+creating backups, preserves machine-owned runtime state, and stops at the first
+host that cannot be activated or verified.
+EOF
+}
+
+fail() {
+  echo "skill fleet install: $*" >&2
+  exit 1
+}
+
+resolved_dir() {
+  (cd "$1" && pwd -P)
+}
+
+RSYNC_FILTERS=(
+  --exclude '.DS_Store'
+  --exclude 'sessions/'
+  --exclude 'meta-feedback/'
+  --exclude 'macos/.build/'
+  --exclude 'macos/.swiftpm/'
+  --exclude 'macos/Package.resolved'
+  --exclude 'mcp/.venv/'
+  --exclude '__pycache__/'
+  --exclude '*.pyc'
+)
+
+discover_skills() {
+  local stage="$1"
+  find "${stage}" -mindepth 2 -maxdepth 2 -name SKILL.md -print \
+    | sed -e "s#^${stage}/##" -e 's#/SKILL.md$##' \
+    | LC_ALL=C sort
+}
+
+verify_skill() {
+  local source="$1" destination="$2" label="$3" drift
+  drift="$(
+    rsync -acni --delete --omit-dir-times "${RSYNC_FILTERS[@]}" \
+      "${source}/" "${destination}"
+  )"
+  [[ -z "${drift}" ]] || {
+    printf '%s\n' "${drift}" >&2
+    fail "${label} did not match the catalog after installation"
+  }
+}
+
+install_local() {
+  local stage="$1" skills_file="$2"
+  local root="${HOME}/.agents/skills" skill destination
+  mkdir -p "${root}"
+  while IFS= read -r skill; do
+    [[ -n "${skill}" ]] || continue
+    destination="${root}/${skill}"
+    if [[ -L "${destination}" || ( -e "${destination}" && ! -d "${destination}" ) ]]; then
+      rm -f -- "${destination}"
+    fi
+    mkdir -p "${destination}"
+    rsync -a --delete "${RSYNC_FILTERS[@]}" \
+      "${stage}/${skill}/" "${destination}/"
+    verify_skill "${stage}/${skill}" "${destination}/" \
+      "$(hostname -s):${skill}"
+  done <"${skills_file}"
+}
+
+install_remote() {
+  local stage="$1" skills_file="$2" target="$3"
+  local skill remote_skills=()
+  echo "==> ${target}: connecting"
+  while IFS= read -r skill; do
+    [[ -n "${skill}" ]] && remote_skills+=("${skill}")
+  done <"${skills_file}"
+
+  # HOME and the positional skill names must expand on the remote host.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    'set -euo pipefail' \
+    'root="$HOME/.agents/skills"' \
+    'mkdir -p "$root"' \
+    'for skill in "$@"; do' \
+    '  destination="$root/$skill"' \
+    '  if [[ -L "$destination" || ( -e "$destination" && ! -d "$destination" ) ]]; then' \
+    '    rm -f -- "$destination"' \
+    '  fi' \
+    '  mkdir -p "$destination"' \
+    'done' \
+    | ssh "${target}" bash -s -- "${remote_skills[@]}"
+  while IFS= read -r skill; do
+    [[ -n "${skill}" ]] || continue
+    rsync -a --delete "${RSYNC_FILTERS[@]}" \
+      "${stage}/${skill}/" "${target}:.agents/skills/${skill}/"
+    verify_skill "${stage}/${skill}" \
+      "${target}:.agents/skills/${skill}/" "${target}:${skill}"
+  done <"${skills_file}"
+}
+
+activate_host() {
+  local expected="$1"
+  local root="${HOME}/.agents/skills"
+  local tts="${root}/tts" feedback="${root}/meta-feedback"
+
+  [[ -f "${tts}/SKILL.md" ]] || fail "${tts} is not installed"
+  bash -n "${tts}/scripts/tts"
+  if [[ -f "${feedback}/scripts/record_feedback.py" ]]; then
+    python3 -m py_compile "${feedback}/scripts/record_feedback.py"
+  fi
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    command -v swift >/dev/null || fail "Swift is required to build the TTS app"
+    swift build -c release --package-path "${tts}/macos"
+
+    local status busy menu_pid
+    status="$("${tts}/scripts/tts-menu" status --json)"
+    busy="$(
+      printf '%s' "${status}" | python3 -c \
+        'import json,sys; d=json.load(sys.stdin); print("yes" if d.get("current") or d.get("queued") else "no")'
+    )"
+    [[ "${busy}" == "no" ]] \
+      || fail "$(hostname -s) has active TTS playback; rerun when its queue is idle"
+
+    "${tts}/scripts/tts-menu" restart
+    status="$("${tts}/scripts/tts-menu" status --json)"
+    menu_pid="$(
+      printf '%s' "${status}" | python3 -c \
+        'import json,sys; print(json.load(sys.stdin).get("menu_pid") or "")'
+    )"
+    [[ -n "${menu_pid}" ]] || fail "the TTS app did not restart"
+    printf '    tts app: running (pid %s)\n' "${menu_pid}"
+  fi
+
+  echo "==> $(hostname -s): verified ${expected}"
+}
+
+run_stage() {
+  local stage="$1" expected="$2" repo="$3" temp_root current
+  shift 3
+  stage="$(resolved_dir "${stage}")"
+  temp_root="$(resolved_dir "${TMPDIR:-/tmp}")"
+  [[ "${stage}" == "${temp_root}"/skills-fleet.* ]] \
+    || fail "refusing to clean unexpected stage ${stage}"
+  [[ -x "${stage}/scripts/install-fleet" ]] \
+    || fail "staged installer is missing"
+
+  local skills_file="${stage}/.fleet-skills" target script_path script_body
+  trap 'rm -rf -- "${stage}"' EXIT
+
+  discover_skills "${stage}" >"${skills_file}"
+  [[ -s "${skills_file}" ]] || fail "origin/main contains no top-level skills"
+
+  echo "==> $(hostname -s): installing ${expected}"
+  install_local "${stage}" "${skills_file}"
+  activate_host "${expected}"
+
+  script_path="${stage}/scripts/install-fleet"
+  script_body="$(<"${script_path}")"
+  for target in "$@"; do
+    [[ "${target}" != -* ]] || fail "unknown option ${target}"
+    install_remote "${stage}" "${skills_file}" "${target}"
+    printf '%s\n' "${script_body}" \
+      | ssh "${target}" bash -s -- --activate-host "${expected}"
+  done
+
+  git -C "${repo}" fetch origin main
+  current="$(git -C "${repo}" rev-parse refs/remotes/origin/main)"
+  [[ "${current}" == "${expected}" ]] \
+    || fail "origin/main moved from ${expected} to ${current}; rerun the installer"
+
+  echo "==> fleet verified: local + $# remote host(s)"
+  printf '    commit: %s\n' "${expected}"
+  printf '    skills: %s\n' "$(paste -sd, "${skills_file}")"
+}
+
+case "${1:-}" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --activate-host)
+    [[ "$#" -eq 2 ]] || fail "invalid activation worker arguments"
+    activate_host "$2"
+    exit 0
+    ;;
+  --run-stage)
+    [[ "$#" -ge 4 ]] || fail "invalid staged installer arguments"
+    stage="$2"
+    expected="$3"
+    repo="$4"
+    shift 4
+    run_stage "${stage}" "${expected}" "${repo}" "$@"
+    exit 0
+    ;;
+esac
+
+repo="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+git -C "${repo}" fetch --prune origin main
+expected="$(git -C "${repo}" rev-parse refs/remotes/origin/main)"
+stage="$(mktemp -d "${TMPDIR:-/tmp}/skills-fleet.XXXXXX")"
+trap 'rm -rf -- "${stage}"' EXIT
+git -C "${repo}" archive "${expected}" | tar -x -C "${stage}"
+[[ -x "${stage}/scripts/install-fleet" ]] \
+  || fail "origin/main does not contain an executable scripts/install-fleet"
+trap - EXIT
+exec bash "${stage}/scripts/install-fleet" --run-stage \
+  "${stage}" "${expected}" "${repo}" "$@"
