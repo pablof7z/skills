@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
+
+try:
+    from .tts_speech_text import markdown_for_speech
+except ImportError:
+    from tts_speech_text import markdown_for_speech
 
 
 MAX_NARRATED_ATTACHMENT_WORDS = 2_000
@@ -12,16 +16,6 @@ MAX_NARRATED_ATTACHMENT_WORDS = 2_000
 
 class NarratedAttachmentLimitError(ValueError):
     """Raised when an attachment is too large to narrate safely."""
-
-
-def markdown_for_speech(value: str) -> str:
-    value = re.sub(r"```([^\n`]*)\n.*?```", _replace_lang_block_for_speech, value, flags=re.DOTALL)
-    value = re.sub(r"!\[([^]]*)\]\([^)]+\)", r"\1", value)
-    value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
-    value = re.sub(r"^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+", "", value, flags=re.MULTILINE)
-    value = re.sub(r"[`*_~]", "", value)
-    return re.sub(r"\s+", " ", value).strip()
-
 
 def narrated_attachment_speech(label: str, source: Path) -> str:
     speech = markdown_for_speech(source.read_text(encoding="utf-8"))
@@ -36,10 +30,3 @@ def narrated_attachment_speech(label: str, source: Path) -> str:
             "with a non-text extension so it is not narrated."
         )
     return speech
-
-
-def _replace_lang_block_for_speech(match: re.Match[str]) -> str:
-    fence = match.group(1).strip()
-    if not fence:
-        return match.group(0)
-    return " "
