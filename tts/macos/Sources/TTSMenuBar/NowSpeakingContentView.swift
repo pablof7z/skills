@@ -82,6 +82,7 @@ struct NowSpeakingHUDView: View {
             PlayerQueueView(
                 controller: controller,
                 presentation: presentation,
+                sessionOpener: sessionOpener,
                 hiddenItemID: presentation.hiddenItemID,
                 historyClock: controller.historyTimestampClock,
                 historyRevision: controller.historyRevision,

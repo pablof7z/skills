@@ -30,4 +30,10 @@ struct PlayerQueueMiniPlayerTests {
             hiddenItemID: "speaking"
         ))
     }
+
+    @Test
+    func miniPlayerShowsOnlyRemainingPlaybackTime() {
+        #expect(QueueMiniPlayerPresentation.remainingTimeLabel(duration: 125, currentTime: 45) == "-1:20")
+        #expect(QueueMiniPlayerPresentation.remainingTimeLabel(duration: 45, currentTime: 125) == "-0:00")
+    }
 }
