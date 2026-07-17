@@ -32,6 +32,11 @@ class RemoteAskMaterializationTests(unittest.TestCase):
         self.state = self.root / "state"
         self.home = self.root / "home"
         self.home.mkdir()
+        fake_bin = self.root / "bin"
+        fake_bin.mkdir()
+        fake_player = fake_bin / "afplay"
+        fake_player.write_text("#!/bin/sh\nsleep 1\n", encoding="utf-8")
+        fake_player.chmod(0o755)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), KokoroHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -40,6 +45,7 @@ class RemoteAskMaterializationTests(unittest.TestCase):
             "KOKORO_API_ENDPOINT": (
                 f"http://127.0.0.1:{self.server.server_port}/v1/audio/speech"
             ),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "TTS_MACOS_MENU": "0",
             "TTS_REMOTE_DAEMON_NO_PLAY": "1",
             "TTS_SESSIONS_ROOT": str(self.root / "sessions"),

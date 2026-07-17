@@ -16,72 +16,9 @@ cleanup() {
 
 trap cleanup EXIT
 
-update_existing_playback_status() {
-  local status="$1"
-  local state_dir item_file
-  [ -n "${TTS_ITEM_ID:-}" ] || return 0
-  state_dir="$(tts_state_dir)"
-  item_file="$state_dir/items/$TTS_ITEM_ID.json"
-  python3 - "$item_file" "$status" <<'PY'
-import json
-import fcntl
-import os
-import sys
-import tempfile
-import time
-
-path, status = sys.argv[1:]
-state_directory = os.path.dirname(os.path.dirname(path))
-os.makedirs(state_directory, exist_ok=True)
-lock_handle = open(os.path.join(state_directory, "operations.flock"), "a+")
-fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-try:
-    with open(path, encoding="utf-8") as handle:
-        item = json.load(handle)
-except (OSError, ValueError):
-    raise SystemExit(0)
-now = int(time.time())
-item["status"] = status
-if status == "playing":
-    item["started_at"] = now
-elif status in ("played", "failed"):
-    item["completed_at"] = now
-    item["is_unheard"] = status != "played"
-directory = os.path.dirname(path)
-descriptor, temporary = tempfile.mkstemp(prefix=".tts-playback-", dir=directory)
-try:
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        json.dump(item, handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    os.replace(temporary, path)
-finally:
-    if os.path.exists(temporary):
-        os.unlink(temporary)
-    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-    lock_handle.close()
-PY
-}
-
 if [ -n "$PLAY_EXISTING_FILE" ]; then
-  OUTPUT_FILE="$PLAY_EXISTING_FILE"
-  if [ ! -s "$OUTPUT_FILE" ]; then
-    echo "Error: playback file does not exist or is empty: $OUTPUT_FILE" >&2
-    exit 1
-  fi
-
-  acquire_speech_gate
-
-  update_existing_playback_status "playing"
-  if command -v afplay >/dev/null 2>&1; then
-    afplay "$OUTPUT_FILE"
-  elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$OUTPUT_FILE" >/dev/null 2>&1 || true
-  else
-    echo "Tip: open the file manually: $OUTPUT_FILE" >&2
-  fi
-  update_existing_playback_status "played"
-
-  exit 0
+  play_existing_audio
+  exit $?
 fi
 
 if [ -z "${KOKORO_API_ENDPOINT:-}" ]; then
@@ -256,38 +193,5 @@ if [ "$NO_PLAY" -eq 1 ]; then
   exit 0
 fi
 
-echo "Generated TTS audio: $OUTPUT_FILE" >&2
-if macos_menu_enabled && queue_macos_playback; then
-  if [ "$ASK" -eq 1 ]; then
-    wait_for_question_answer
-  else
-    emit_tts_result "queued"
-  fi
-  exit 0
-fi
-
-state_dir="$(tts_state_dir)"
-if ! mkdir -p "$state_dir" 2>/dev/null; then
-  state_dir="/tmp/tts-state"
-  mkdir -p "$state_dir" 2>/dev/null || state_dir="/tmp"
-fi
-log_file="$state_dir/tts-playback-$(date +%Y%m%d-%H%M%S)-$$.log"
-persist_durable_status "queued" || true
-playback_args=(--play-existing "$OUTPUT_FILE")
-if [ -n "$AGENT_NAME" ]; then
-  playback_args+=(--agent-name "$AGENT_NAME")
-fi
-nohup env \
-  TTS_CALLER_PPID="${TTS_CALLER_PPID:-$PPID}" \
-  TTS_ITEM_ID="$ITEM_ID" \
-  "$0" "${playback_args[@]}" \
-  </dev/null >>"$log_file" 2>&1 &
-pid=$!
-disown "$pid" 2>/dev/null || true
-printf 'Queued TTS playback in background: pid %s, log %s\n' "$pid" "$log_file" >&2
-if [ "$ASK" -eq 1 ]; then
-  wait_for_question_answer
-else
-  emit_tts_result "queued"
-fi
+deliver_generated_audio
 }
