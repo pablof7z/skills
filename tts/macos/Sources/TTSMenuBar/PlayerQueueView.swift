@@ -3,6 +3,7 @@ import SwiftUI
 struct PlayerQueueView: View {
     @ObservedObject var controller: PlaybackController
     let presentation: NowSpeakingPresentation
+    @ObservedObject var sessionOpener: AgentSessionOpener
     let hiddenItemID: String?
     @ObservedObject var historyClock: HistoryTimestampClock
     let historyRevision: Int
@@ -28,6 +29,7 @@ struct PlayerQueueView: View {
                 QueueMiniPlayer(
                     controller: controller,
                     item: item,
+                    sessionOpener: sessionOpener,
                     showFullPlayer: {
                         presentation.revealForDirectSelection(itemID: item.id)
                     }
@@ -49,6 +51,7 @@ extension PlayerQueueView: @MainActor Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.controller === rhs.controller
             && lhs.presentation === rhs.presentation
+            && lhs.sessionOpener === rhs.sessionOpener
             && lhs.hiddenItemID == rhs.hiddenItemID
             && lhs.historyClock === rhs.historyClock
             && lhs.historyRevision == rhs.historyRevision
@@ -62,6 +65,7 @@ extension PlayerQueueView: @MainActor Equatable {
 private struct QueueMiniPlayer: View {
     @ObservedObject var controller: PlaybackController
     let item: TTSItem
+    @ObservedObject var sessionOpener: AgentSessionOpener
     let showFullPlayer: () -> Void
 
     var body: some View {
@@ -80,24 +84,20 @@ private struct QueueMiniPlayer: View {
             .accessibilityLabel("Playback position")
 
             HStack(spacing: 12) {
-                Button(action: showFullPlayer) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "waveform")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(accent)
-                            .frame(width: 30, height: 30)
-                            .background(accent.opacity(0.14), in: Circle())
+                controlButton(symbol: "xmark", label: "Stop playback") {
+                    controller.stop()
+                }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.nowSpeakingTitle)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(item.nowSpeakingContext)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                Button(action: showFullPlayer) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.nowSpeakingTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(item.nowSpeakingContext)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                     .contentShape(Rectangle())
                 }
@@ -106,26 +106,25 @@ private struct QueueMiniPlayer: View {
                 .help("Open full player")
                 .accessibilityLabel("Open full player for \(item.nowSpeakingTitle)")
 
-                Text(timeLabel)
+                Text(remainingTimeLabel)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
 
-                controlButton(symbol: "gobackward.15", label: "Back 15 seconds") {
-                    controller.rewind()
+                playbackRateSelector
+
+                if sessionOpener.canOpen(rawIdentifier: item.iTermSessionID) {
+                    controlButton(symbol: "arrow.up.forward.app", label: "Jump to terminal") {
+                        sessionOpener.open(rawIdentifier: item.iTermSessionID)
+                    }
                 }
+
                 controlButton(
                     symbol: controller.isPaused ? "play.fill" : "pause.fill",
                     label: controller.isPaused ? "Resume" : "Pause",
                     prominent: true
                 ) {
                     controller.togglePause()
-                }
-                controlButton(symbol: "goforward.15", label: "Forward 15 seconds") {
-                    controller.forward()
-                }
-                controlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Open full player") {
-                    showFullPlayer()
                 }
             }
             .padding(.horizontal, 14)
@@ -134,15 +133,49 @@ private struct QueueMiniPlayer: View {
         }
         .background(.regularMaterial)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Mini player for \(item.nowSpeakingTitle), \(timeLabel)")
+        .accessibilityLabel("Mini player for \(item.nowSpeakingTitle), \(remainingTimeLabel) remaining")
     }
 
     private var accent: Color {
         WorkspaceAccent.color(forWorkspacePath: item.workspacePath)
     }
 
-    private var timeLabel: String {
-        "\(formatted(controller.currentTime)) / \(formatted(controller.duration))"
+    private var remainingTimeLabel: String {
+        QueueMiniPlayerPresentation.remainingTimeLabel(
+            duration: controller.duration,
+            currentTime: controller.currentTime
+        )
+    }
+
+    private var playbackRateSelector: some View {
+        Menu {
+            ForEach(VoicePlaybackRateStore.availableRates, id: \.self) { rate in
+                Button {
+                    controller.setPlaybackRate(rate, for: item)
+                } label: {
+                    if abs(rate - controller.playbackRate) < 0.001 {
+                        Label(VoicePlaybackRateStore.label(for: rate), systemImage: "checkmark")
+                    } else {
+                        Text(VoicePlaybackRateStore.label(for: rate))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(controller.playbackRateLabel)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .font(.caption.monospacedDigit().weight(.semibold))
+            .foregroundStyle(accent)
+            .frame(height: 30)
+            .padding(.horizontal, 8)
+            .background(accent.opacity(0.14), in: Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .help("Choose playback speed")
+        .accessibilityLabel("Playback speed")
+        .accessibilityValue(controller.playbackRateLabel)
     }
 
     private func controlButton(
@@ -163,7 +196,14 @@ private struct QueueMiniPlayer: View {
         .accessibilityLabel(label)
     }
 
-    private func formatted(_ seconds: TimeInterval) -> String {
+}
+
+enum QueueMiniPlayerPresentation {
+    static func remainingTimeLabel(duration: TimeInterval, currentTime: TimeInterval) -> String {
+        "-\(formatted(max(0, duration - currentTime)))"
+    }
+
+    private static func formatted(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else { return "0:00" }
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
