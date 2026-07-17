@@ -14,6 +14,7 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
     let accent: Color
     let onSeek: (TimeInterval) -> Void
     var onContentHeightChange: ((CGFloat) -> Void)? = nil
+    var allowsVerticalScrolling = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -35,9 +36,10 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
+        scrollView.hasVerticalScroller = allowsVerticalScrolling
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = allowsVerticalScrolling ? .automatic : .none
         scrollView.documentView = textView
         return scrollView
     }
@@ -52,6 +54,8 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
             accent: NSColor(accent),
             onSeek: onSeek
         )
+        scrollView.hasVerticalScroller = allowsVerticalScrolling
+        scrollView.verticalScrollElasticity = allowsVerticalScrolling ? .automatic : .none
         guard let onContentHeightChange else { return }
         let coordinator = context.coordinator
         DispatchQueue.main.async { [weak scrollView, weak textView] in
@@ -68,7 +72,11 @@ struct ReadAlongTranscriptView: NSViewRepresentable {
             }
             layoutManager.ensureLayout(for: textContainer)
             let usedHeight = layoutManager.usedRect(for: textContainer).height
-            onContentHeightChange(ceil(usedHeight + (textView.textContainerInset.height * 2)))
+            let contentHeight = ceil(usedHeight + (textView.textContainerInset.height * 2))
+            if !allowsVerticalScrolling, abs(textView.frame.height - contentHeight) > 0.5 {
+                textView.setFrameSize(NSSize(width: width, height: contentHeight))
+            }
+            onContentHeightChange(contentHeight)
         }
     }
 

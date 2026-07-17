@@ -41,6 +41,16 @@ extension NowSpeakingHUDView {
     }
 
     func controls(item: TTSItem, accent: Color) -> some View {
+        playbackControls(item: item, accent: accent) {
+            nextInQueueIndicator
+        }
+    }
+
+    func playbackControls<Trailing: View>(
+        item: TTSItem,
+        accent: Color,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
                 playbackRateButton(item: item, accent: accent)
@@ -84,7 +94,7 @@ extension NowSpeakingHUDView {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            nextInQueueIndicator
+            trailing()
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .frame(maxWidth: .infinity)
