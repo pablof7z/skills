@@ -21,7 +21,7 @@ uses a paired laptop, because it creates an MP3 without any player side effect.
   `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
 - `TTS_MAX_PARALLEL_GENERATIONS` to override the player Settings value for the
   current process; the shared setting defaults to `2`
-- `TTS_GENERATION_TIMEOUT_SECONDS` to override the 60-second end-to-end
+- `TTS_GENERATION_TIMEOUT_SECONDS` to override the 120-second end-to-end
   deadline for waiting and synthesis
 - `TTS_GENERATION_CONNECT_TIMEOUT_SECONDS` to override the 10-second endpoint
   connection timeout
