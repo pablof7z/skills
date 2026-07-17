@@ -33,52 +33,11 @@ struct QueuePlaybackPolicy {
         allowsStart(item, initiator: .automatic, in: items)
     }
 
-    static func nextQueuedItem(in items: [TTSItem]) -> TTSItem? {
-        nextQueuedItem(in: items, where: { _ in true })
-    }
-
-    static func nextQueuedItem(
-        in items: [TTSItem],
-        where includes: @escaping (TTSItem) -> Bool
-    ) -> TTSItem? {
-        let itemsByID = Dictionary(
-            items.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let isPlayable = { (item: TTSItem) in
-            includes(item)
-                && item.status == .queued
-                && isActive(item, itemsByID: itemsByID)
-        }
-        return items.first { $0.isAttachmentPlayback && isPlayable($0) }
-            ?? items.first(where: isPlayable)
-    }
-
     static func allowsCurrentPlayback(
         _ item: TTSItem,
         in items: [TTSItem],
         explicitlyOpenedInactiveItemID: String?
     ) -> Bool {
         isActive(item, in: items) || explicitlyOpenedInactiveItemID == item.id
-    }
-}
-
-struct ManualQueuePauseBarrier {
-    private var suppressedItemIDs: Set<String>
-
-    init(itemsAtPause: [TTSItem]) {
-        suppressedItemIDs = Set(itemsAtPause.map(\.id))
-    }
-
-    func allows(_ item: TTSItem) -> Bool {
-        !suppressedItemIDs.contains(item.id)
-    }
-
-    func nextArrival(in items: [TTSItem]) -> TTSItem? {
-        QueuePlaybackPolicy.nextQueuedItem(in: items, where: allows)
-    }
-
-    mutating func recordStarted(_ item: TTSItem) {
-        suppressedItemIDs.insert(item.id)
     }
 }

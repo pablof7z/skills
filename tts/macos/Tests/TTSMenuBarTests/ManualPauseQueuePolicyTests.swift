@@ -8,8 +8,8 @@ struct ManualPauseQueuePolicyTests {
     private let support = QueueStoreTests()
 
     @Test
-    func manualPauseLeavesExistingBacklogQueuedAcrossRefreshes() throws {
-        let context = try makeContext(backlogIDs: ["old-a", "old-b"])
+    func manualPauseCancelsWaitingAdmissionsAndLeavesBacklogInert() throws {
+        let context = try makeContext(backlogIDs: ["old-a", "old-b"], admitBacklog: true)
         defer { context.cleanup() }
 
         context.pauseCurrent()
@@ -20,6 +20,7 @@ struct ManualPauseQueuePolicyTests {
         #expect(context.controller.currentItem?.status == .paused)
         #expect(try context.store.item(id: "old-a")?.status == .queued)
         #expect(try context.store.item(id: "old-b")?.status == .queued)
+        #expect(try context.store.pendingPlaybackAdmissions().isEmpty)
     }
 
     @Test
@@ -30,6 +31,7 @@ struct ManualPauseQueuePolicyTests {
         let arrival = support.item(id: "arrival", createdAt: 40, outputFile: context.audio.path)
 
         try context.store.save(arrival)
+        try context.store.admitPlayback(of: arrival.id, requestedAtNanoseconds: 40)
         context.controller.refresh()
 
         #expect(context.controller.currentItem?.id == arrival.id)
@@ -48,6 +50,7 @@ struct ManualPauseQueuePolicyTests {
         context.pauseCurrent()
         let arrival = support.item(id: "arrival", createdAt: 30, outputFile: context.audio.path)
         try context.store.save(arrival)
+        try context.store.admitPlayback(of: arrival.id, requestedAtNanoseconds: 30)
         context.controller.refresh()
         let arrivalPlayer = try #require(context.controller.player)
 
@@ -59,7 +62,7 @@ struct ManualPauseQueuePolicyTests {
     }
 
     @Test
-    func onlyPostPauseArrivalsAdvanceWhileBarrierRemainsActive() throws {
+    func postPauseAdmissionsAdvanceInRequestOrder() throws {
         let context = try makeContext(backlogIDs: ["old"])
         defer { context.cleanup() }
         context.pauseCurrent()
@@ -67,6 +70,8 @@ struct ManualPauseQueuePolicyTests {
         let second = support.item(id: "arrival-b", createdAt: 40, outputFile: context.audio.path)
         try context.store.save(first)
         try context.store.save(second)
+        try context.store.admitPlayback(of: first.id, requestedAtNanoseconds: 30)
+        try context.store.admitPlayback(of: second.id, requestedAtNanoseconds: 40)
         context.controller.refresh()
         let firstPlayer = try #require(context.controller.player)
 
@@ -80,7 +85,7 @@ struct ManualPauseQueuePolicyTests {
     }
 
     @Test
-    func explicitResumeReleasesBarrierAndRestoresNormalAdvancement() throws {
+    func explicitResumeDoesNotReactivateStoredBacklog() throws {
         let context = try makeContext(backlogIDs: ["old"])
         defer { context.cleanup() }
         context.pauseCurrent()
@@ -89,12 +94,13 @@ struct ManualPauseQueuePolicyTests {
         let resumedPlayer = try #require(context.controller.player)
         context.controller.audioPlayerDidFinishPlaying(resumedPlayer, successfully: true)
 
-        #expect(context.controller.currentItem?.id == "old")
+        #expect(context.controller.currentItem == nil)
+        #expect(try context.store.item(id: "old")?.status == .queued)
     }
 
     @Test
     func stopDoesNotAdvanceExistingBacklog() throws {
-        let context = try makeContext(backlogIDs: ["old"])
+        let context = try makeContext(backlogIDs: ["old"], admitBacklog: true)
         defer { context.cleanup() }
 
         context.controller.stop()
@@ -102,9 +108,13 @@ struct ManualPauseQueuePolicyTests {
         #expect(context.controller.currentItem == nil)
         #expect(try context.store.item(id: "old")?.status == .queued)
         #expect(try context.store.item(id: context.current.id)?.status == .interrupted)
+        #expect(try context.store.pendingPlaybackAdmissions().isEmpty)
     }
 
-    private func makeContext(backlogIDs: [String]) throws -> ManualPauseContext {
+    private func makeContext(
+        backlogIDs: [String],
+        admitBacklog: Bool = false
+    ) throws -> ManualPauseContext {
         let directory = support.temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let audio = directory.appendingPathComponent("silence.wav")
@@ -122,6 +132,12 @@ struct ManualPauseQueuePolicyTests {
                 outputFile: audio.path
             )
             try store.save(queued)
+            if admitBacklog {
+                try store.admitPlayback(
+                    of: queued.id,
+                    requestedAtNanoseconds: Int64(20 + index)
+                )
+            }
             persistedItems.append(queued)
         }
         let controller = PlaybackController(

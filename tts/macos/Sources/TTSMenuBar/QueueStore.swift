@@ -90,6 +90,10 @@ struct QueueStore {
         stateDirectory.appendingPathComponent("operations", isDirectory: true)
     }
 
+    var playbackAdmissionsDirectory: URL {
+        stateDirectory.appendingPathComponent("playback-admissions", isDirectory: true)
+    }
+
     var operationsLockFile: URL {
         stateDirectory.appendingPathComponent("operations.flock")
     }
@@ -101,6 +105,10 @@ struct QueueStore {
         )
         try FileManager.default.createDirectory(
             at: operationsDirectory,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: playbackAdmissionsDirectory,
             withIntermediateDirectories: true
         )
     }

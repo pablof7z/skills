@@ -53,6 +53,7 @@ write_macos_item_record() {
   local completed_at="${3:-}"
   local error_message="${4:-}"
   local generation_duration="${5:-}"
+  local request_playback="${6:-0}"
   local harness session_id iterm_session_id workspace inferred_agent
 
   harness="$(infer_harness)"
@@ -88,12 +89,14 @@ write_macos_item_record() {
     "$NO_PLAY" \
     "$SUGGESTIONS_JSON" \
     "$QUESTION_BUNDLE_FILE" \
-    "$PRIMARY_MESSAGE" <<'PY'
+    "$PRIMARY_MESSAGE" \
+    "$request_playback" <<'PY'
 import json
 import fcntl
 import os
 import sys
 import tempfile
+import time
 
 (
     destination,
@@ -122,6 +125,7 @@ import tempfile
     suggestions_json,
     question_bundle_file,
     primary_message,
+    request_playback,
 ) = sys.argv[1:]
 
 def optional(value):
@@ -165,6 +169,8 @@ lock_handle = open(os.path.join(state_directory, "operations.flock"), "a+")
 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
 generation_owners_directory = os.path.join(state_directory, "generation-owners")
 generation_owner = os.path.join(generation_owners_directory, f"{item_id}.owner")
+playback_admissions_directory = os.path.join(state_directory, "playback-admissions")
+playback_admission = os.path.join(playback_admissions_directory, f"{item_id}.json")
 
 existing = {}
 existing_path = os.path.join(os.path.dirname(destination), f"{item_id}.json")
@@ -240,6 +246,31 @@ try:
         json.dump(item, handle, indent=2, sort_keys=True)
         handle.write("\n")
     os.replace(temporary, destination)
+
+    if request_playback == "1" and status == "queued":
+        os.makedirs(playback_admissions_directory, exist_ok=True)
+        if not os.path.exists(playback_admission):
+            admission_descriptor, admission_temporary = tempfile.mkstemp(
+                prefix=f".{item_id}.", suffix=".tmp", dir=playback_admissions_directory
+            )
+            try:
+                admission = {
+                    "id": item_id,
+                    "item_id": item_id,
+                    "requested_at_ns": time.time_ns(),
+                }
+                with os.fdopen(admission_descriptor, "w", encoding="utf-8") as handle:
+                    json.dump(admission, handle, indent=2, sort_keys=True)
+                    handle.write("\n")
+                os.replace(admission_temporary, playback_admission)
+            finally:
+                if os.path.exists(admission_temporary):
+                    os.unlink(admission_temporary)
+    elif status in ("failed", "generated"):
+        try:
+            os.unlink(playback_admission)
+        except FileNotFoundError:
+            pass
 
     if status == "generating":
         os.makedirs(generation_owners_directory, exist_ok=True)

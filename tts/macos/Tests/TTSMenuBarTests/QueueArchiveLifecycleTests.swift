@@ -19,9 +19,9 @@ struct QueueArchiveLifecycleTests {
         child.attachmentID = "detail"
         let items = [archived, parent, child, active]
 
-        #expect(PlaybackController.nextQueuedItem(in: items)?.id == active.id)
         #expect(!QueuePlaybackPolicy.isAutomaticallyPlayable(archived, in: items))
         #expect(!QueuePlaybackPolicy.isAutomaticallyPlayable(child, in: items))
+        #expect(QueuePlaybackPolicy.isAutomaticallyPlayable(active, in: items))
         #expect(QueuePlaybackPolicy.allowsStart(archived, initiator: .direct, in: items))
     }
 
@@ -91,7 +91,7 @@ struct QueueArchiveLifecycleTests {
 
         #expect(context.controller.currentItem == nil)
         #expect(context.controller.player == nil)
-        #expect(context.controller.nextQueuedItem == nil)
+        #expect(context.controller.nextPlaybackRequestItem == nil)
         let items = try context.store.loadItems()
         #expect(items.allSatisfy { $0.archived && $0.status == .interrupted })
     }
@@ -186,6 +186,7 @@ struct QueueArchiveLifecycleTests {
         let store = QueueStore(stateDirectory: directory)
         for (index, id) in itemIDs.enumerated() {
             try store.save(support.item(id: id, createdAt: Int64(index + 1), outputFile: audio.path))
+            try store.admitPlayback(of: id, requestedAtNanoseconds: Int64(index + 1))
         }
         let controller = PlaybackController(
             store: store,

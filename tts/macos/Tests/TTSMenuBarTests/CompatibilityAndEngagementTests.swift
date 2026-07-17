@@ -255,6 +255,7 @@ extension QueueStoreTests {
         try writeSilentAudio(to: audio)
         let store = QueueStore(stateDirectory: directory)
         try store.save(item(id: "automatic", createdAt: 10, outputFile: audio.path))
+        try store.admitPlayback(of: "automatic", requestedAtNanoseconds: 10)
         let controller = PlaybackController(
             store: store,
             mediaController: disabledMediaController(stateDirectory: directory),

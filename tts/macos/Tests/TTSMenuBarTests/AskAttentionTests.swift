@@ -155,6 +155,7 @@ struct AskAttentionTests {
         let next = QueueStoreTests().item(id: "next", createdAt: 20, outputFile: nextAudio.path)
         try context.controller.store.save(question)
         try context.controller.store.save(next)
+        try context.controller.store.admitPlayback(of: next.id, requestedAtNanoseconds: 20)
         context.controller.items = [question, next]
         context.controller.currentItemID = question.id
         return (question, next)

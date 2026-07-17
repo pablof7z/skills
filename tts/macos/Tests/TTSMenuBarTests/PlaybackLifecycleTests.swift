@@ -30,7 +30,7 @@ struct PlaybackLifecycleTests {
     }
 
     @Test
-    func recoversCrashedPlayingItemIntoQueue() throws {
+    func recoversCrashedPlayingItemAsInertBacklog() throws {
         let directory = support.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -47,6 +47,7 @@ struct PlaybackLifecycleTests {
         let recovered = try #require(store.loadItems().first)
         #expect(recovered.status == .queued)
         #expect(recovered.startedAt == nil)
+        #expect(try store.pendingPlaybackAdmissions().isEmpty)
     }
 
     @Test
