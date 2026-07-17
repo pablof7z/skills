@@ -34,7 +34,7 @@ extension PlaybackController {
                 loaded = try store.loadItems()
             }
             if let heldID = visibleAskQueueHoldID,
-               loaded.first(where: { $0.id == heldID })?.isPendingQuestion != true {
+               loaded.first(where: { $0.id == heldID && !$0.archived })?.isPendingQuestion != true {
                 visibleAskQueueHoldID = nil
             }
             lastItemsChangeToken = itemsChangeToken
@@ -47,6 +47,7 @@ extension PlaybackController {
                 generationProgressNow = now
             }
             historyTimestampClock.update(items: loaded, at: now, reschedule: historyChanged)
+            reconcileCurrentPlaybackEligibility()
             if let player {
                 let nextTime = player.currentTime
                 let nextDuration = player.duration
@@ -67,7 +68,10 @@ extension PlaybackController {
                 }
             } else if !isPlaybackBlocked {
                 if let heldID = visibleAskQueueHoldID,
-                   let replay = loaded.first(where: { $0.id == heldID && $0.status == .queued }) {
+                   let replay = loaded.first(where: {
+                       $0.id == heldID
+                           && QueuePlaybackEligibility.isAutomaticallyPlayable($0, in: loaded)
+                   }) {
                     play(replay)
                 } else if visibleAskQueueHoldID == nil,
                           let next = Self.nextQueuedItem(in: loaded) {
@@ -80,14 +84,18 @@ extension PlaybackController {
     }
 
     static func nextQueuedItem(in items: [TTSItem]) -> TTSItem? {
-        items.first { $0.status == .queued && $0.isAttachmentPlayback }
-            ?? items.first { $0.status == .queued }
+        QueuePlaybackEligibility.nextAutomaticallyPlayable(in: items)
     }
 
     func play(
         _ queuedItem: TTSItem,
         initiator: TTSPlaybackInitiator = .automatic
     ) {
+        guard QueuePlaybackEligibility.allowsStart(
+            queuedItem,
+            initiator: initiator,
+            in: items
+        ) else { return }
         let opensPaused = isPlaybackBlocked && initiator == .direct
         guard !isPlaybackBlocked || opensPaused else { return }
         guard FileManager.default.fileExists(atPath: queuedItem.outputFile) else {
@@ -127,6 +135,10 @@ extension PlaybackController {
             try store.save(item)
 
             player = audioPlayer
+            explicitlyOpenedInactiveItemID = initiator == .direct
+                && !QueuePlaybackEligibility.isActive(item, in: items)
+                ? item.id
+                : nil
             isAudioPlaying = false
             currentItemID = item.id
             duration = audioPlayer.duration
@@ -212,6 +224,11 @@ extension PlaybackController {
             guard !Task.isCancelled, self.player === audioPlayer else { return }
             self.playbackStartTask = nil
             guard !self.isPlaybackBlocked else { return }
+            guard self.currentPlaybackRemainsEligible() else {
+                self.retireCurrentFromPlayback()
+                self.refresh()
+                return
+            }
             guard audioPlayer.play() else {
                 self.finishCurrent(success: false, error: "The audio device refused playback.")
                 return

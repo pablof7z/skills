@@ -90,6 +90,38 @@ def all_items():
     return result
 
 
+def archive_affected_items(requested_ids):
+    requested = sorted(set(requested_ids))
+    requested_items = [read_item(item_id) for item_id in requested]
+    by_id = {item["id"]: item for item in all_items()}
+    by_id.update({item["id"]: item for item in requested_items})
+    affected = set(requested)
+    changed = True
+    while changed:
+        changed = False
+        for item in by_id.values():
+            if item.get("parent_item_id") in affected and item["id"] not in affected:
+                affected.add(item["id"])
+                changed = True
+    return [by_id[item_id] for item_id in sorted(affected)]
+
+
+def apply_archive_state(item, archived, reason, operation_actor, now):
+    item["is_archived"] = archived
+    item["archived_at"] = now if archived else None
+    item["archive_reason"] = reason if archived else None
+    item["archived_by"] = operation_actor if archived else None
+    if archived and item.get("status") in ("queued", "playing", "paused"):
+        item["status"] = "interrupted"
+        item["completed_at"] = now
+        item["playback_offset"] = None
+        item["return_to_playback_offset"] = None
+        item["playback_initiator"] = None
+        if not (item.get("parent_item_id") and item.get("attachment_id")):
+            item["is_unheard"] = True
+    return item
+
+
 def atomic_write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".tmp", dir=path.parent)
@@ -321,28 +353,24 @@ operation_actor = actor(args)
 
 if args.command == "archive":
     with operation_lock():
-        items = [read_item(item_id) for item_id in args.ids]
+        items = archive_affected_items(args.ids)
         for item in items:
-            item["is_archived"] = True
-            item["archived_at"] = now
-            item["archive_reason"] = args.reason
-            item["archived_by"] = operation_actor
+            apply_archive_state(item, True, args.reason, operation_actor, now)
             atomic_write(items_dir / f"{item['id']}.json", item)
-        operation_id = audit("archive", args.ids, [], args.reason, operation_actor)
-    emit({"operation_id": operation_id, "status": "archived", "ids": args.ids, "reason": args.reason})
+        affected_ids = [item["id"] for item in items]
+        operation_id = audit("archive", affected_ids, [], args.reason, operation_actor)
+    emit({"operation_id": operation_id, "status": "archived", "ids": affected_ids, "reason": args.reason})
     raise SystemExit(0)
 
 if args.command == "restore":
     with operation_lock():
-        items = [read_item(item_id) for item_id in args.ids]
+        items = archive_affected_items(args.ids)
         for item in items:
-            item["is_archived"] = False
-            item["archived_at"] = None
-            item["archive_reason"] = None
-            item["archived_by"] = None
+            apply_archive_state(item, False, None, operation_actor, now)
             atomic_write(items_dir / f"{item['id']}.json", item)
-        operation_id = audit("restore", args.ids, [], args.reason, operation_actor)
-    emit({"operation_id": operation_id, "status": "restored", "ids": args.ids})
+        affected_ids = [item["id"] for item in items]
+        operation_id = audit("restore", affected_ids, [], args.reason, operation_actor)
+    emit({"operation_id": operation_id, "status": "restored", "ids": affected_ids})
     raise SystemExit(0)
 
 if args.command == "supersede":
@@ -380,10 +408,7 @@ if args.command == "supersede":
         for item in sources:
             item["question_status"] = "superseded"
             item["superseded_by"] = args.replacements
-            item["is_archived"] = True
-            item["archived_at"] = now
-            item["archive_reason"] = args.reason
-            item["archived_by"] = operation_actor
+            apply_archive_state(item, True, args.reason, operation_actor, now)
             atomic_write(items_dir / f"{item['id']}.json", item)
         operation_id = audit("supersede", args.ids, args.replacements, args.reason, operation_actor)
     emit({

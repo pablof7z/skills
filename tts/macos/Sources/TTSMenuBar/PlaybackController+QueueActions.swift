@@ -5,13 +5,7 @@ import Foundation
 extension PlaybackController {
     func replay(_ item: TTSItem, startingAt time: TimeInterval? = nil) {
         guard FileManager.default.fileExists(atPath: item.outputFile) else { return }
-        do {
-            let offset = time.map { max(0, $0) }
-            try store.save(item.requeuedForReplay(startingAt: offset))
-            refresh()
-        } catch {
-            NSLog("Unable to queue replay: %@", error.localizedDescription)
-        }
+        playNow(item.requeuedForReplay(startingAt: time.map { max(0, $0) }))
     }
 
     func playNow(_ item: TTSItem) {
@@ -109,13 +103,27 @@ extension PlaybackController {
     }
 
     func setArchived(_ archived: Bool, for item: TTSItem) {
-        guard !item.isAttachmentPlayback else { return }
+        setArchived(archived, for: [item])
+    }
+
+    func setArchived(_ archived: Bool, for items: [TTSItem]) {
+        let ids = items.filter { !$0.isAttachmentPlayback }.map(\.id)
+        setArchived(archived, ids: ids)
+    }
+
+    func setArchived(_ archived: Bool, ids: [String]) {
+        guard !ids.isEmpty else { return }
         do {
-            let updated = try store.setArchived(archived, id: item.id, actor: "tts-menu")
-            replaceItem(updated)
+            let updated = try store.setArchived(archived, ids: ids, actor: "tts-menu")
+            for item in updated { replaceItem(item) }
             if archived {
-                clearVisibleAskQueueHold(for: item.id)
+                let archivedIDs = Set(updated.map(\.id))
+                if visibleAskQueueHoldID.map(archivedIDs.contains) == true {
+                    visibleAskQueueHoldID = nil
+                }
             }
+            reconcileCurrentPlaybackEligibility()
+            refresh()
         } catch {
             NSLog("Unable to update TTS archive state: %@", error.localizedDescription)
         }

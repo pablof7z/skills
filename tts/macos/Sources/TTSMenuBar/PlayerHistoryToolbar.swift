@@ -40,24 +40,31 @@ extension NowSpeakingPanelController {
         let historyItems = presentation.isViewingArchive
             ? playbackController.archivedHistoryItems
             : playbackController.activeHistoryItems
-        let projects = PlayerHistoryFilterPolicy.availableProjects(
+        let availableProjects = PlayerHistoryFilterPolicy.availableProjects(
             in: historyItems,
             ageFilter: presentation.historyAgeFilter,
             hasInteractedWithHistory: presentation.hasInteractedWithHistory,
             searchQuery: presentation.historySearchQuery,
             now: playbackController.historyTimestampClock.now
         )
-        let agents = PlayerHistoryFilterPolicy.availableAgents(
+        let availableAgents = PlayerHistoryFilterPolicy.availableAgents(
             in: historyItems,
             ageFilter: presentation.historyAgeFilter,
             hasInteractedWithHistory: presentation.hasInteractedWithHistory,
             searchQuery: presentation.historySearchQuery,
             now: playbackController.historyTimestampClock.now
         )
+        let projects = Array(
+            Set(availableProjects).union(presentation.historyEntityFilters.projects)
+        ).sorted()
+        let agents = Array(
+            Set(availableAgents).union(presentation.historyEntityFilters.agents)
+        ).sorted { $0.displayName < $1.displayName }
         presentation.retainAvailableHistoryFilters(
             projects: Set(projects),
             agents: Set(agents)
         )
+        updateBulkArchiveToolbarItem()
 
         let menu = NSMenu(title: "Filter History")
         let recentItems = NSMenuItem(
@@ -212,6 +219,7 @@ extension NowSpeakingPanelController {
     @objc func historySearchChanged(_ sender: NSSearchField) {
         presentation.registerHistoryInteraction()
         presentation.historySearchQuery = sender.stringValue
+        updateBulkArchiveToolbarItem()
     }
 
     func updateHistorySearchToolbar() {

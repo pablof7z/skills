@@ -32,6 +32,7 @@ final class NowSpeakingPanelController: NSObject, ObservableObject {
     var historyFilterToolbarItem: NSMenuToolbarItem?
     var historySearchToolbarItem: NSSearchToolbarItem?
     var historyBackToolbarItem: NSToolbarItem?
+    var historyBulkArchiveToolbarItem: NSToolbarItem?
 
     init(
         controller: PlaybackController,

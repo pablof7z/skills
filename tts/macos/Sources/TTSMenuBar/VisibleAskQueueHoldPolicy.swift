@@ -16,6 +16,7 @@ enum VisibleAskQueueHoldPolicy {
             lingeringItem: lingeringItem
         )
         guard let displayedItem,
+              !displayedItem.archived,
               displayedItem.isPendingQuestion,
               PlayerNavigationPolicy.shouldDisplay(
                   itemID: displayedItem.id,

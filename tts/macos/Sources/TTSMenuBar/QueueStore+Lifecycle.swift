@@ -3,33 +3,6 @@ import Foundation
 
 extension QueueStore {
     @discardableResult
-    func setArchived(
-        _ archived: Bool,
-        id: String,
-        reason: String? = nil,
-        actor: String? = nil,
-        now: Int64 = Int64(Date().timeIntervalSince1970)
-    ) throws -> TTSItem {
-        try withOperationsLock {
-            guard var value = try itemUnlocked(id: id) else { throw QueueOperationError.itemNotFound(id) }
-            value.isArchived = archived
-            value.archivedAt = archived ? now : nil
-            value.archiveReason = archived ? reason : nil
-            value.archivedBy = archived ? actor : nil
-            try saveUnlocked(value)
-            try saveOperation(QueueOperation(
-                kind: archived ? .archive : .restore,
-                sourceIDs: [id],
-                replacementIDs: [],
-                reason: reason,
-                actor: actor,
-                createdAt: now
-            ))
-            return value
-        }
-    }
-
-    @discardableResult
     func supersede(
         sourceIDs: [String],
         with replacementIDs: [String],
@@ -68,13 +41,15 @@ extension QueueStore {
 
             var updated: [TTSItem] = []
             for source in sources {
-                var item = byID[source]!
+                var item = Self.applyingArchiveState(
+                    true,
+                    to: byID[source]!,
+                    reason: trimmedReason,
+                    actor: actor,
+                    now: now
+                )
                 item.questionStatus = .superseded
                 item.supersededBy = replacements
-                item.isArchived = true
-                item.archivedAt = now
-                item.archiveReason = trimmedReason
-                item.archivedBy = actor
                 try saveUnlocked(item)
                 updated.append(item)
             }

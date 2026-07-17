@@ -35,7 +35,7 @@ extension PlaybackController {
                 try? store.save(pendingChild)
                 replaceItem(pendingChild)
             }
-            play(pendingChild)
+            play(pendingChild, initiator: .direct)
             return
         }
 
@@ -46,7 +46,7 @@ extension PlaybackController {
         do {
             try store.save(child)
             replaceItem(child)
-            play(child)
+            play(child, initiator: .direct)
         } catch {
             NSLog("Unable to play TTS attachment: %@", error.localizedDescription)
         }
@@ -72,7 +72,7 @@ extension PlaybackController {
             if isPlaybackBlocked {
                 refresh()
             } else {
-                play(resumed)
+                play(resumed, initiator: .direct)
             }
         } catch {
             NSLog("Unable to return to parent TTS item: %@", error.localizedDescription)

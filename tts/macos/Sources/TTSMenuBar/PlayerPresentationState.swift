@@ -167,6 +167,7 @@ enum PlayerHistoryToolbarPolicy {
     static let toolbarIdentifier = NSToolbar.Identifier("TTSHistoryToolbar")
     static let backItemIdentifier = NSToolbarItem.Identifier("TTSHistoryBack")
     static let filterItemIdentifier = NSToolbarItem.Identifier("TTSHistoryProjectFilter")
+    static let bulkArchiveItemIdentifier = NSToolbarItem.Identifier("TTSHistoryBulkArchive")
     static let searchButtonItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearchButton")
     static let searchFieldItemIdentifier = NSToolbarItem.Identifier("TTSHistorySearchField")
 
@@ -174,6 +175,7 @@ enum PlayerHistoryToolbarPolicy {
         .flexibleSpace,
         searchButtonItemIdentifier,
         filterItemIdentifier,
+        bulkArchiveItemIdentifier,
     ]
 
     static let allowedItemIdentifiers: [NSToolbarItem.Identifier] = [
@@ -182,6 +184,7 @@ enum PlayerHistoryToolbarPolicy {
         searchButtonItemIdentifier,
         searchFieldItemIdentifier,
         filterItemIdentifier,
+        bulkArchiveItemIdentifier,
     ]
 }
 

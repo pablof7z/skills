@@ -103,7 +103,9 @@ final class AskAttentionController {
     func start() {
         guard itemsObservation == nil else { return }
         seenItemIDs = Set(playbackController.items.map(\.id))
-        pendingQuestionIDs = Set(playbackController.items.filter(\.isPendingQuestion).map(\.id))
+        pendingQuestionIDs = Set(playbackController.items.filter {
+            $0.isPendingQuestion && !$0.archived
+        }.map(\.id))
         notificationsWereEnabled = preferencesStore.preferences.sendsAskNotifications
         itemsObservation = playbackController.$items.dropFirst().sink { [weak self] items in
             self?.itemsDidChange(items)
@@ -124,9 +126,13 @@ final class AskAttentionController {
     }
 
     private func itemsDidChange(_ items: [TTSItem]) {
-        let newQuestions = items.filter { $0.isPendingQuestion && !seenItemIDs.contains($0.id) }
+        let newQuestions = items.filter {
+            $0.isPendingQuestion && !$0.archived && !seenItemIDs.contains($0.id)
+        }
         seenItemIDs.formUnion(items.map(\.id))
-        pendingQuestionIDs = Set(items.filter(\.isPendingQuestion).map(\.id))
+        pendingQuestionIDs = Set(items.filter {
+            $0.isPendingQuestion && !$0.archived
+        }.map(\.id))
 
         for question in newQuestions {
             if preferencesStore.preferences.sendsAskNotifications {

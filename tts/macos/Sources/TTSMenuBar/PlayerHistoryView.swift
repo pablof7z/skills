@@ -85,18 +85,17 @@ struct PlayerHistoryView: View {
         }
     }
 
-    private var historyItems: [TTSItem] {
-        isViewingArchive ? controller.archivedHistoryItems : controller.activeHistoryItems
-    }
-
     private var filteredItems: [TTSItem] {
         PlayerHistoryFilterPolicy.filteredItems(
-            in: historyItems,
-            entityFilters: historyEntityFilters,
-            ageFilter: historyAgeFilter,
-            hasInteractedWithHistory: hasInteractedWithHistory,
-            searchQuery: historySearchQuery,
-            now: historyClock.now
+            in: controller.playerListItems,
+            query: PlayerHistoryQuery(
+                isViewingArchive: isViewingArchive,
+                entityFilters: historyEntityFilters,
+                ageFilter: historyAgeFilter,
+                hasInteractedWithHistory: hasInteractedWithHistory,
+                searchQuery: historySearchQuery,
+                now: historyClock.now
+            )
         )
     }
 
