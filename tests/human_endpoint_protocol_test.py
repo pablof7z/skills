@@ -228,19 +228,5 @@ class HumanEndpointProtocolTests(unittest.TestCase):
         self.assertIn("relay", vector)
         self.assertNotIn("relay_url", vector)
 
-    def test_tts_adapter_matches_pairing_code_contract(self) -> None:
-        repository = Path(__file__).resolve().parents[1]
-        vector = json.loads((repository / "human_endpoint_protocol" / "test_vectors.json").read_text())["pairing_code_v1"]
-        adapter = repository / "tts" / "scripts" / "tts-human-endpoint"
-        result = subprocess.run(
-            [str(adapter), "validate-pairing-code", json.dumps(vector), "--product", "tts"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True,
-        )
-        self.assertEqual(json.loads(result.stdout)["pairing_id"], vector["pairing_id"])
-
-
 if __name__ == "__main__":
     unittest.main()

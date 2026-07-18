@@ -1,0 +1,4 @@
+interface:
+  display_name: "TTS29 Spoken Updates"
+  short_description: "Publish durable cross-device spoken updates"
+  default_prompt: "Use $tts to publish a concise spoken update through my standalone TTS29 daemon."

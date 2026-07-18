@@ -1,76 +1,42 @@
-# TTS Setup
+# TTS29 adapter setup
 
-Set up your own hosted Kokoro FastAPI instance (for example, a CPU-friendly self-hosted endpoint) and point the script to it.
+Install and start the standalone product from
+<https://github.com/pablof7z-agent/tts29>. The skill does not build it on first
+use.
 
 ## Required
 
-For local synthesis, set this environment variable before running
-`<skill-dir>/scripts/tts`:
+- Put the standalone `tts29` local producer CLI on `PATH`, or set
+  `TTS29_CLI` to its executable path.
+- Set `TTS29_SOCKET` to the private Unix socket owned by the running `tts29d`.
+- Set `TTS29_GROUP_ID` to the daemon's configured NIP-29 group.
 
-- `KOKORO_API_ENDPOINT="https://<your-host>/v1/audio/speech"`
+```bash
+export TTS29_SOCKET="$HOME/.local/state/tts29/daemon.sock"
+export TTS29_GROUP_ID="tts"
+```
 
-It is not required on a host with an approved paired laptop. Ordinary speech
-uses that laptop automatically when no local endpoint is configured.
-`--no-play` is intentionally different: it requires a local endpoint and never
-uses a paired laptop, because it creates an MP3 without any player side effect.
+The daemon separately owns its NMP identity, Kokoro endpoint, Blossom endpoint,
+journal, and store configuration. Do not copy those settings or secrets into
+the skill directory.
 
 ## Optional
 
-- `KOKORO_API_KEY` for bearer-token auth
-- `KOKORO_CAPTIONED_API_ENDPOINT` to override the inferred
-  `https://<your-host>/dev/captioned_speech` endpoint used for precise transcript timing
-- `TTS_MAX_PARALLEL_GENERATIONS` to override the player Settings value for the
-  current process; the shared setting defaults to `2`
-- `TTS_GENERATION_TIMEOUT_SECONDS` to override the 120-second end-to-end
-  deadline for waiting and synthesis
-- `TTS_GENERATION_CONNECT_TIMEOUT_SECONDS` to override the 10-second endpoint
-  connection timeout
-- Swift from Xcode or the Command Line Tools for the macOS app
-- `uv` for the MCP wrapper; its locked project installs the stable MCP Python
-  SDK below version 2
-- `nak` for real Nostr signing and paired transport, including the short-lived
-  Blossom authorization event used by `tts_generate`
+- `TTS29_VOICE` selects the Kokoro voice. Without it, the adapter derives one
+  stable voice from `--agent-name`.
+- `TTS29_REQUEST_ID` supplies a caller-owned retry key. Prefer the adapter's
+  deterministic content-derived ID unless another system already owns one.
+- `AGENT_NSEC` asks the daemon to publish this request as the agent identity.
+  The adapter passes the environment through without reading or printing it.
+- `--socket`, `--voice`, and `--request-id` override their corresponding
+  process values for one invocation.
 
-## MCP and Blossom
+The configured group must match the daemon. The daemon identity must have
+authority to add request-scoped agent publishers; TTS29 observes and repairs
+membership through NMP before publication.
 
-The MCP wrapper defaults to `https://blossom.primal.net` for generation-only
-MP3 uploads. Optional overrides are:
+## Hosted assistants
 
-- `TTS_BLOSSOM_SERVER` for another HTTPS Blossom origin
-- `TTS_BLOSSOM_TIMEOUT_SECONDS` for the upload timeout
-- `TTS_BLOSSOM_MAX_BYTES` for the maximum generated MP3 size
-- `TTS_BLOSSOM_AUTH_SECONDS` for the short-lived upload authorization window
-
-Public HTTP MCP mode uses pairing-code OAuth when `--public-url` identifies its
-external HTTPS origin. Without `--public-url`, local HTTP retains the static
-bearer token in `TTS_MCP_TOKEN`. Read [mcp.md](mcp.md) for route, OAuth, ngrok,
-and header-monitoring configuration.
-
-## Suggested local env file
-
-The script loads environment variables from `~/.env.tts` by default. You can set:
-
-```bash
-KOKORO_API_ENDPOINT=https://<your-host>/v1/audio/speech
-KOKORO_API_KEY=<optional bearer token>
-```
-
-To use a custom file path, set `KOKORO_ENV_FILE`.
-
-The player Settings window controls the machine-wide generation limit from 1
-to 8. All local agents using the same TTS state directory read that setting;
-the environment variable above takes precedence when present.
-
-## Notes
-
-The script first requests captioned speech with word timestamps. If that route
-is unavailable or returns an invalid response, it warns and falls back to the
-standard audio endpoint so speech generation still succeeds; legacy items then
-show phrase progress without claiming exact timing within the focused phrase.
-
-Media handoff is disabled by default. Users can opt in from Preferences to let
-TTS pause Music and Spotify through their app-specific automation interfaces.
-TTS never changes system volume, mute, or audio output routing.
-
-See this guide for a self-hosted Kokoro setup reference:
-https://ariya.io/2026/03/local-cpu-friendly-high-quality-tts-text-to-speech-with-kokoro/
+Deploy the standalone `tts29-mcp` HTTPS/OAuth process. Do not run an MCP server
+from the installed skill. Both local CLI and hosted MCP ingress converge on the
+same daemon request lifecycle.

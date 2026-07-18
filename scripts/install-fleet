@@ -35,10 +35,6 @@ RSYNC_FILTERS=(
   --exclude '.DS_Store'
   --exclude 'sessions/'
   --exclude 'meta-feedback/'
-  --exclude 'macos/.build/'
-  --exclude 'macos/.swiftpm/'
-  --exclude 'macos/Package.resolved'
-  --exclude 'mcp/.venv/'
   --exclude '__pycache__/'
   --exclude '*.pyc'
 )
@@ -117,32 +113,11 @@ activate_host() {
   local tts="${root}/tts" feedback="${root}/meta-feedback"
 
   [[ -f "${tts}/SKILL.md" ]] || fail "${tts} is not installed"
-  bash -n "${tts}/scripts/tts"
+  python3 -m py_compile \
+    "${tts}/scripts/tts" \
+    "${tts}/scripts/tts29_request.py"
   if [[ -f "${feedback}/scripts/record_feedback.py" ]]; then
     python3 -m py_compile "${feedback}/scripts/record_feedback.py"
-  fi
-
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    command -v swift >/dev/null || fail "Swift is required to build the TTS app"
-    swift build -c release --package-path "${tts}/macos"
-
-    local status active menu_pid
-    status="$("${tts}/scripts/tts-menu" status --json)"
-    active="$(
-      printf '%s' "${status}" | python3 -c \
-        'import json,sys; print("yes" if json.load(sys.stdin).get("current") else "no")'
-    )"
-    [[ "${active}" == "no" ]] \
-      || fail "$(hostname -s) has active TTS playback; rerun when its queue is idle"
-
-    "${tts}/scripts/tts-menu" restart
-    status="$("${tts}/scripts/tts-menu" status --json)"
-    menu_pid="$(
-      printf '%s' "${status}" | python3 -c \
-        'import json,sys; print(json.load(sys.stdin).get("menu_pid") or "")'
-    )"
-    [[ -n "${menu_pid}" ]] || fail "the TTS app did not restart"
-    printf '    tts app: running (pid %s)\n' "${menu_pid}"
   fi
 
   echo "==> $(hostname -s): verified ${expected}"

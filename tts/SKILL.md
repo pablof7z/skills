@@ -1,104 +1,64 @@
 ---
 name: tts
-description: Generate spoken updates, hosted MP3 files, and answerable spoken questions through local or paired playback and MCP. Use when the user requests narration, voice updates, generated audio, spoken progress, audio playback, or TTS questions with suggestions or attachments.
+description: Publish durable spoken updates and answerable spoken questions through a standalone TTS29 daemon. Use when the user requests narration, a voice update, spoken progress, cross-device speech, or a bounded spoken question. The skill is a producer adapter only; it does not synthesize, pair devices, own playback, or run Nostr.
 ---
 
 # TTS
 
-## Script location
+## Invoke the standalone producer
 
-Resolve `<skill-dir>` to the directory containing this `SKILL.md`. Run
-`<skill-dir>/scripts/tts`; do not assume the current working directory is the
-skill directory or that TTS is on `PATH`.
+Resolve `<skill-dir>` to the directory containing this file and run
+`<skill-dir>/scripts/tts`. Do not assume the current directory or `PATH` contains
+the skill.
 
-## Invoke
-
-Every invocation requires a stable agent seed name, title, and one-line preview
-summary. For an ordinary spoken update, put the words to say in `--message`:
+Every request needs a stable agent name, concise subject, factual preview, and
+the words to speak:
 
 ```bash
 <skill-dir>/scripts/tts \
-  --agent-name "<seed-name>" \
+  --agent-name "<stable-agent-name>" \
   --subject "<2-to-5-word title>" \
-  --summary "<one-line player preview>" \
+  --summary "<one factual preview sentence>" \
   --message "<spoken update>"
 ```
 
-Keep the seed name and title stable across the same work session. Aim for a
-2-to-5-word title and never exceed 10 words. Use a clean topic label for
-conceptual material. When work has a concrete outcome, combine the specific
-topic with its meaningful state, such as `NMP Boundaries Untangled` or
-`MCP Audio Verified`. Avoid generic workflow labels such as `update`, `recap`,
-`verify`, `implementation`, and `final` unless they are genuinely the subject.
+Keep the same agent name during one workstream. Keep the subject under 10 words
+and 80 UTF-8 bytes. Keep the summary under 280 UTF-8 bytes and the primary
+message under 300 words; the adapter rejects more than 330 words. Write for
+listening: short plain-language paragraphs, no raw logs, and no code that would
+be painful to hear.
 
-Write the summary as one concise factual sentence stating what changed or why
-it matters. The player shows it as preview text, but it is not synthesized.
-Do not repeat the title in the summary or the agent identity in the message.
+The command shapes one stable TTS29 producer request and invokes the standalone
+`tts29` CLI. It returns durable publication evidence as JSON. It never starts a
+player or claims that any device played the item.
 
-Keep the primary `--message` under 300 words. The runtime permits a 10 percent
-tolerance but rejects a primary message over 330 words. Make the automatically
-played message easy to scan with Markdown when useful: use short paragraphs,
-headings, or lists instead of a wall of prose. Proactively move supporting
-material into clearly labeled attachments and organize those branches in
-whatever way best fits the content (for example, progressive disclosure, a
-table of contents, chaptered deep dives, per-decision context, or a
-walkthrough). Do not force every update into one presentation template.
+## Questions
 
-Each Markdown or text attachment may contain up to 2,000 narrated words after
-formatting-only content is removed. Split longer narration into focused labeled
-attachments. Attach raw logs and diagnostic captures with a non-text extension
-when they should remain available to open without being narrated.
+Before using `--ask`, read
+[asking-questions.md](references/asking-questions.md). Every ask requires an
+explicit wait no longer than five minutes. A timeout does not undo publication.
 
-When an update has useful supporting material—screenshots, mockups, a proposal,
-detailed findings, or decision context—attach it. Attachments let the user
-expand a concise update in different directions: inspect visuals, open an
-auxiliary artifact, or hear expanded Markdown or text as a deeper narrated
-branch. Treat supporting material as a normal part of a substantive update, not
-an exception. Link directly to an attachment from the primary message with
-`[Attachment label](attachment:)`; the visible label must exactly match one
-`--attach` label. The player presents that full label as one inline attachment
-action rather than a transcript seek target:
+## Durable attachments
 
-```bash
-<skill-dir>/scripts/tts \
-  --agent-name "<seed-name>" \
-  --subject "<2-to-5-word title>" \
-  --summary "<one-line player preview>" \
-  --message "Open the [Supporting context](attachment:)." \
-  --attach "Supporting context" <path>
-```
+Before adding supporting artifacts, read
+[durable-artifacts.md](references/durable-artifacts.md). The adapter accepts
+only complete HTTPS artifact descriptors. It deliberately refuses local file
+paths because artifact upload belongs to the standalone daemon/product, not the
+installed skill.
 
-Generation runs in the foreground. If the execution environment supports
-asynchronous commands, it can keep the command running while you do other work.
-Use the environment's execution handle and completion-wait mechanism; do not
-detach the command with shell process-management syntax.
+## Setup and failures
 
-The ordinary command selects local synthesis or an approved paired laptop
-automatically; agents do not choose a playback transport. A `--no-play`
-request always uses a configured local Kokoro endpoint: it never traverses a
-paired connection or appears in the player. Local synthesis returns the TTS
-`id`, output path, and `queued` status after generation and attachment
-preparation; `--no-play` returns `generated`. Paired delivery returns its
-request identifier and delivery status without exposing files on the laptop.
+- Read [setup.md](references/setup.md) when the CLI, socket, group, or identity
+  is not configured.
+- Read [results-and-troubleshooting.md](references/results-and-troubleshooting.md)
+  when publication or an answer wait fails.
+- Hosted HTTPS MCP is owned and deployed by the standalone
+  [TTS29 product](https://github.com/pablof7z-agent/tts29), not this skill.
 
-## Conditional guidance
+## Product boundary
 
-- **Pairing administration or diagnostics**: Read
-  [paired-laptop.md](references/paired-laptop.md) only when the user asks to
-  pair, inspect, target, or manage a remote computer. Ordinary speech routes
-  automatically.
-- **Questions**: Before using `--ask`, read
-  [asking-questions.md](references/asking-questions.md). Both bare and structured
-  asks require `--message` for the main spoken update and `--wait` for an
-  agent-chosen bounded blocking interval.
-  Submitted answers, selected-suggestion details, and answer-attachment paths
-  return in the TTS tool output.
-- **Attachments, Markdown structure, or formatted code**: Read
-  [rich-content.md](references/rich-content.md).
-- **No-play generation, status inspection, or failures**: Read
-  [results-and-troubleshooting.md](references/results-and-troubleshooting.md).
-- **Endpoint configuration**: Read [setup.md](references/setup.md).
-- **MCP clients or HTTP deployment**: Read [mcp.md](references/mcp.md). The MCP
-  wrapper supports stdio, pairing-code OAuth over loopback Streamable HTTP,
-  redacted inbound-header diagnostics, explicit paired routing, and
-  generation-only MP3 results hosted on Blossom.
+The skill owns only request validation and shaping. `tts29d` owns Kokoro,
+Blossom, durable jobs, membership repair, NMP publication, receipts, and bounded
+answer observation. Apple and compatible NIP-29 clients independently project
+and play the durable queue. Do not add pairing, local synthesis, queue state,
+playback policy, Nostr code, or an MCP server to this skill.

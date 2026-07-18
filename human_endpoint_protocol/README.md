@@ -3,11 +3,10 @@
 Issue #191 establishes a shared contract for pairing an attended laptop with a
 persistent backend over Nostr.
 
-The TTS skill can be copied as an independent folder, so this package is the
-canonical contract, executable fixture source, and local development runtime.
-The artifact-local `tts/scripts/tts-human-endpoint` entrypoint delegates here
-when the repository checkout is present and otherwise fails with structured
-JSON.
+This package remains the canonical contract, executable fixture source, and
+local development runtime for products that still use the attended-endpoint
+model. TTS29 does not: its user-controlled NIP-29 group replaces paired-device
+authority, and the installed TTS skill contains no adapter for this protocol.
 
 ## Pairing
 

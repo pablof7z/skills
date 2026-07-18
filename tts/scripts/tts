@@ -1,506 +1,142 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env python3
+"""Thin installed-skill adapter for the standalone TTS29 local CLI."""
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${KOKORO_ENV_FILE:-$HOME/.env.tts}"
-if [ -f "$ENV_FILE" ]; then
-  # shellcheck source=/dev/null
-  source "$ENV_FILE"
-fi
+from __future__ import annotations
 
-
-# shellcheck source=tts-common.sh
-source "$SCRIPT_DIR/tts-common.sh"
-# shellcheck source=tts-message-limits.sh
-source "$SCRIPT_DIR/tts-message-limits.sh"
-# shellcheck source=tts-generation-gate.sh
-source "$SCRIPT_DIR/tts-generation-gate.sh"
-# shellcheck source=tts-attachments.sh
-source "$SCRIPT_DIR/tts-attachments.sh"
-# shellcheck source=tts-native-queue.sh
-source "$SCRIPT_DIR/tts-native-queue.sh"
-# shellcheck source=tts-playback.sh
-source "$SCRIPT_DIR/tts-playback.sh"
-# shellcheck source=tts-synthesis.sh
-source "$SCRIPT_DIR/tts-synthesis.sh"
-# shellcheck source=tts-routing.sh
-source "$SCRIPT_DIR/tts-routing.sh"
-
-if [[ "${1:-}" =~ ^(pair|remote|daemon)$ ]]; then
-  validate_forwarded_primary_message_word_limit "$@" || exit 1
-  exec python3 "$SCRIPT_DIR/tts-remote-cli.py" "$@"
-fi
-
-NO_PLAY=0
-ASK=0
-ASK_WAIT=""
-ASK_PAYLOAD_SOURCE=""
-SUGGESTIONS_JSON="[]"
-RAW_BUNDLE_JSON=""
-QUESTION_BUNDLE_FILE=""
-PRIMARY_MESSAGE=""
-SUBJECT=""
-SUMMARY=""
-AGENT_NAME=""
-PLAY_EXISTING_FILE=""
-MESSAGE=""
-DETERMINISTIC_VOICES=(af_bella af_heart af_kore af_nova af_sarah am_michael am_puck)
-POSITIONAL=()
-ATTACHMENT_LABELS=()
-ATTACHMENT_PATHS=()
-
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --message)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --message requires text." >&2
-        exit 1
-      fi
-      if [ -n "$MESSAGE" ]; then
-        echo "Error: --message may be passed only once." >&2
-        exit 1
-      fi
-      MESSAGE="$2"
-      shift 2
-      ;;
-    --attach)
-      if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
-        echo "Error: --attach requires a label and file path." >&2
-        exit 1
-      fi
-      ATTACHMENT_LABELS+=( "$2" )
-      ATTACHMENT_PATHS+=( "$3" )
-      shift 3
-      ;;
-    --no-play)
-      NO_PLAY=1
-      shift
-      ;;
-    --ask)
-      ASK=1
-      if [[ "${2:-}" == \{* ]] || [[ "${2:-}" == @* ]]; then
-        ASK_PAYLOAD_SOURCE="$2"
-        shift 2
-      else
-        shift
-      fi
-      ;;
-    --wait)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --wait requires a duration such as 30s, 5m, or 1h." >&2
-        exit 1
-      fi
-      ASK_WAIT="$2"
-      shift 2
-      ;;
-    --suggestions)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --suggestions requires a JSON value." >&2
-        exit 1
-      fi
-      SUGGESTIONS_JSON="$2"
-      shift 2
-      ;;
-    --agent-name)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --agent-name requires a value." >&2
-        exit 1
-      fi
-      AGENT_NAME="$2"
-      shift 2
-      ;;
-    --subject)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --subject requires a value." >&2
-        exit 1
-      fi
-      SUBJECT="$2"
-      shift 2
-      ;;
-    --summary)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --summary requires a value." >&2
-        exit 1
-      fi
-      SUMMARY="$2"
-      shift 2
-      ;;
-    --play-existing)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --play-existing requires a file path." >&2
-        exit 1
-      fi
-      PLAY_EXISTING_FILE="$2"
-      shift 2
-      ;;
-    --help|-h)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      while [ "$#" -gt 0 ]; do
-        POSITIONAL+=( "$1" )
-        shift
-      done
-      break
-      ;;
-    -*)
-      echo "Error: unknown option: $1" >&2
-      usage
-      exit 1
-      ;;
-    *)
-      POSITIONAL+=( "$1" )
-      shift
-      ;;
-  esac
-done
-
-if [ "$ASK" -eq 1 ] && [ "$NO_PLAY" -eq 1 ]; then
-  echo "Error: --ask is not compatible with --no-play." >&2
-  exit 1
-fi
-
-if [ "$ASK" -eq 1 ] && [ -z "$ASK_WAIT" ]; then
-  echo "Error: --ask requires --wait with a positive duration such as 30s, 5m, or 1h." >&2
-  exit 1
-fi
-
-if [ "$ASK" -eq 0 ] && [ -n "$ASK_WAIT" ]; then
-  echo "Error: --wait may only be used with --ask." >&2
-  exit 1
-fi
-
-if [ -n "$ASK_WAIT" ] && ! python3 - "$ASK_WAIT" <<'PY'
-import re
-import sys
-
-match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([smh]?)", sys.argv[1], re.IGNORECASE)
-raise SystemExit(0 if match and float(match.group(1)) > 0 else 1)
-PY
-then
-  echo "Error: --wait requires a positive duration such as 30s, 5m, or 1h." >&2
-  exit 1
-fi
-
-if [ "$ASK" -ne 1 ] && [ "$SUGGESTIONS_JSON" != "[]" ]; then
-  echo "Error: --suggestions requires --ask." >&2
-  exit 1
-fi
-
-if [ -n "$ASK_PAYLOAD_SOURCE" ] && [ "$SUGGESTIONS_JSON" != "[]" ]; then
-  echo "Error: --suggestions is only supported with legacy bare --ask; put suggestions on each JSON question." >&2
-  exit 1
-fi
-
-if ! SUGGESTIONS_JSON="$(python3 - "$SUGGESTIONS_JSON" <<'PY'
+import argparse
 import json
+import os
+import subprocess
 import sys
 
-try:
-    value = json.loads(sys.argv[1])
-except json.JSONDecodeError as error:
-    print(f"Error: --suggestions must be valid JSON: {error.msg}", file=sys.stderr)
-    raise SystemExit(1)
-if not isinstance(value, list):
-    print("Error: --suggestions must be a JSON array.", file=sys.stderr)
-    raise SystemExit(1)
-result = []
-for index, entry in enumerate(value):
-    if not isinstance(entry, list) or len(entry) != 2:
-        print(f"Error: suggestion {index + 1} must be [title, description].", file=sys.stderr)
-        raise SystemExit(1)
-    title, description = entry
-    if not isinstance(title, str) or not title.strip():
-        print(f"Error: suggestion {index + 1} title must be a non-empty string.", file=sys.stderr)
-        raise SystemExit(1)
-    if not isinstance(description, str):
-        print(f"Error: suggestion {index + 1} description must be a string.", file=sys.stderr)
-        raise SystemExit(1)
-    result.append({"title": title.strip(), "description": description.strip()})
-print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
-PY
-)"; then
-  exit 1
-fi
+from tts29_request import (
+    RequestError,
+    build_artifacts,
+    build_questions,
+    build_request,
+    parse_duration,
+    select_voice,
+)
 
-if [ -n "$ASK_PAYLOAD_SOURCE" ]; then
-  if ! RAW_BUNDLE_JSON="$(python3 - "$ASK_PAYLOAD_SOURCE" <<'PY'
-import json
-from pathlib import Path
-import sys
 
-source = sys.argv[1]
-base_directory = Path.cwd()
-try:
-    if source.startswith("@"):
-        path = Path(source[1:]).expanduser()
-        if not path.is_file():
-            raise ValueError(f"question bundle file does not exist: {path}")
-        base_directory = path.resolve().parent
-        value = json.loads(path.read_text(encoding="utf-8"))
-    else:
-        value = json.loads(source)
-except (OSError, json.JSONDecodeError, ValueError) as error:
-    print(f"Error: invalid --ask question bundle: {error}", file=sys.stderr)
-    raise SystemExit(1)
+LEGACY_COMMANDS = {"pair", "remote", "daemon"}
+LEGACY_FLAGS = {
+    "--attach": "local attachment paths are retired; upload the artifact through TTS29 and pass --artifact with its durable descriptor",
+    "--no-play": "generation-only playback control is retired; TTS29 producers publish durable items and players decide playback independently",
+    "--play-existing": "skill-owned playback is retired; open the durable item in a TTS29 player",
+}
 
-def optional_text(owner, key, context):
-    if key not in owner or owner[key] is None:
-        return None
-    if not isinstance(owner[key], str):
-        raise ValueError(f"{context} {key} must be a string")
-    return owner[key].strip() or None
 
-def attachments(owner, context):
-    raw = owner.get("attachments") or []
-    if not isinstance(raw, list):
-        raise ValueError(f"{context} attachments must be an array")
-    result = []
-    def resolved_path(raw_path):
-        path = Path(raw_path).expanduser()
-        if not path.is_absolute():
-            path = base_directory / path
-        return str(path.resolve())
-    for index, attachment in enumerate(raw, 1):
-        if isinstance(attachment, str):
-            if not attachment.strip():
-                raise ValueError(f"{context} attachment {index} path cannot be empty")
-            result.append({"path": resolved_path(attachment.strip()), "label": None, "description": None})
-            continue
-        if not isinstance(attachment, dict) or not isinstance(attachment.get("path"), str) or not attachment["path"].strip():
-            raise ValueError(f"{context} attachment {index} must be a path string or an object with path")
-        result.append({
-            "path": resolved_path(attachment["path"].strip()),
-            "label": optional_text(attachment, "label", f"{context} attachment {index}"),
-            "description": optional_text(attachment, "description", f"{context} attachment {index}"),
-        })
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        description="Publish one durable spoken item through a standalone TTS29 daemon."
+    )
+    result.add_argument("--agent-name", required=True)
+    result.add_argument("--subject", required=True)
+    result.add_argument("--summary", required=True)
+    result.add_argument("--message", required=True)
+    result.add_argument("--ask", nargs="?", const="", metavar="JSON_OR_@FILE")
+    result.add_argument("--suggestions", metavar="JSON")
+    result.add_argument("--wait", metavar="DURATION")
+    result.add_argument("--artifact", action="append", default=[], metavar="JSON_OR_@FILE")
+    result.add_argument("--request-id")
+    result.add_argument("--voice")
+    result.add_argument("--socket")
     return result
 
-try:
-    if not isinstance(value, dict):
-        raise ValueError("question bundle root must be an object")
-    if "required" in value or "response_mode" in value:
-        raise ValueError("required and response_mode are not supported; every question is optional")
-    unsupported_root_fields = [key for key in ("title", "description", "attachments") if key in value]
-    if unsupported_root_fields:
-        fields = ", ".join(unsupported_root_fields)
-        raise ValueError(
-            f"question bundle root no longer supports {fields}; use questions_preamble and question-level attachments"
+
+def refuse_legacy(arguments: list[str]) -> None:
+    if arguments and arguments[0] in LEGACY_COMMANDS:
+        raise RequestError(
+            f"legacy {arguments[0]} administration is retired; configure the standalone TTS29 product"
         )
-    raw_questions = value.get("questions")
-    if not isinstance(raw_questions, list) or not raw_questions:
-        raise ValueError("questions must be a non-empty array")
-    questions = []
-    for question_index, question in enumerate(raw_questions, 1):
-        context = f"question {question_index}"
-        if not isinstance(question, dict):
-            raise ValueError(f"{context} must be an object")
-        if "required" in question or "response_mode" in question:
-            raise ValueError(f"{context} cannot set required or response_mode")
-        title = optional_text(question, "title", context)
-        if not title:
-            raise ValueError(f"{context} title must be a non-empty string")
-        short_title = optional_text(question, "short_title", context)
-        if not short_title:
-            raise ValueError(f"{context} short_title must be a non-empty string")
-        question_type = question.get("type", "single_choice")
-        if question_type not in ("single_choice", "multiple_choice"):
-            raise ValueError(f"{context} type must be single_choice or multiple_choice")
-        raw_suggestions = question.get("suggestions") or []
-        if not isinstance(raw_suggestions, list):
-            raise ValueError(f"{context} suggestions must be an array")
-        suggestions = []
-        for suggestion_index, suggestion in enumerate(raw_suggestions, 1):
-            suggestion_context = f"{context} suggestion {suggestion_index}"
-            if not isinstance(suggestion, dict):
-                raise ValueError(f"{suggestion_context} must be an object")
-            suggestion_title = optional_text(suggestion, "title", suggestion_context)
-            if not suggestion_title:
-                raise ValueError(f"{suggestion_context} title must be a non-empty string")
-            suggestions.append({
-                "title": suggestion_title,
-                "description": optional_text(suggestion, "description", suggestion_context),
-                "attachments": attachments(suggestion, suggestion_context),
-            })
-        questions.append({
-            "short_title": short_title,
-            "title": title,
-            "type": question_type,
-            "description": optional_text(question, "description", context),
-            "attachments": attachments(question, context),
-            "suggestions": suggestions,
-        })
-    normalized = {
-        "questions_preamble": optional_text(value, "questions_preamble", "bundle"),
-        "questions": questions,
-    }
-except ValueError as error:
-    print(f"Error: invalid --ask question bundle: {error}", file=sys.stderr)
-    raise SystemExit(1)
-
-print(json.dumps(normalized, ensure_ascii=False, separators=(",", ":")))
-PY
-)"; then
-    exit 1
-  fi
-fi
-
-if [ -n "$PLAY_EXISTING_FILE" ] && { [ "${#POSITIONAL[@]}" -gt 0 ] || [ -n "$MESSAGE" ] || [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; }; then
-  echo "Error: --play-existing does not accept message or attachment arguments." >&2
-  usage
-  exit 1
-fi
-
-if [ -n "$MESSAGE" ] && [ "${#POSITIONAL[@]}" -gt 0 ]; then
-  echo "Error: pass the message either with --message or positionally, not both." >&2
-  usage
-  exit 1
-fi
-
-if [ "${#POSITIONAL[@]}" -gt 1 ]; then
-  echo "Error: too many arguments." >&2
-  usage
-  exit 1
-fi
-
-if [ -z "$PLAY_EXISTING_FILE" ] && [ -z "$MESSAGE" ] && [ -z "${POSITIONAL[0]:-}" ] && [ -z "$ASK_PAYLOAD_SOURCE" ]; then
-  usage
-  exit 1
-fi
-
-if [ -n "$RAW_BUNDLE_JSON" ]; then
-  if [ -z "$MESSAGE" ]; then
-    echo "Error: structured --ask JSON requires --message with the primary spoken update." >&2
-    exit 1
-  fi
-  if [ "${#POSITIONAL[@]}" -gt 0 ]; then
-    echo "Error: structured --ask JSON requires --message; positional message text is not supported." >&2
-    exit 1
-  fi
-  PRIMARY_MESSAGE="$MESSAGE"
-  DISPLAY_TEXT="$(python3 - "$MESSAGE" "$RAW_BUNDLE_JSON" <<'PY'
-import json
-import sys
-message = sys.argv[1]
-value = json.loads(sys.argv[2])
-parts = [message, value.get("questions_preamble")]
-print("\n\n".join(part for part in parts if part))
-PY
-)"
-else
-  DISPLAY_TEXT="${MESSAGE:-${POSITIONAL[0]:-}}"
-fi
-DISPLAY_TEXT=$(normalize_literal_newlines "$DISPLAY_TEXT")
-PRIMARY_MESSAGE=$(normalize_literal_newlines "$PRIMARY_MESSAGE")
-TEXT=$(speech_text_for_markdown "$DISPLAY_TEXT")
-PRIMARY_MESSAGE_LIMIT_TEXT=$(primary_message_word_limit_text "${MESSAGE:-${POSITIONAL[0]:-}}")
-SUBJECT=$(normalize_space "$SUBJECT")
-SUMMARY=$(normalize_space "$SUMMARY")
-AGENT_NAME=$(normalize_space "$AGENT_NAME")
-INTERNAL_CALL=0
-if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}" \
-  || truthy "${TTS_INTERNAL_RETRY:-0}" \
-  || truthy "${TTS_INTERNAL_PLAYBACK:-0}"; then
-  INTERNAL_CALL=1
-fi
-if [ "$INTERNAL_CALL" -ne 1 ]; then
-  if [ -z "$AGENT_NAME" ]; then
-    echo "Error: --agent-name is required." >&2
-    exit 1
-  fi
-  if [ -z "$SUBJECT" ]; then
-    echo "Error: --subject is required." >&2
-    exit 1
-  fi
-  if [ -z "$SUMMARY" ]; then
-    echo "Error: --summary is required." >&2
-    exit 1
-  fi
-fi
-if [ -z "$PLAY_EXISTING_FILE" ] && ! truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
-  validate_primary_message_word_limit "$PRIMARY_MESSAGE_LIMIT_TEXT" || exit 1
-fi
-VOICE_SEED="$(agent_identity)"
-if [ -n "$AGENT_NAME" ]; then
-  VOICE_SEED="$AGENT_NAME"
-fi
-VOICE="${TTS_INTERNAL_VOICE_ID:-}"
-if [ -z "$VOICE" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
-  VOICE="$(select_voice_from_seed "$VOICE_SEED")"
-fi
-if [ -n "$SUBJECT" ]; then
-  SUBJECT_WORDS=$(word_count "$SUBJECT")
-  if [ "$SUBJECT_WORDS" -gt 10 ]; then
-    echo "Error: --subject must not exceed 10 words." >&2
-    exit 1
-  fi
-fi
-if [ -n "$SUBJECT" ] && [ -z "$PLAY_EXISTING_FILE" ]; then
-  TEXT=$(prepend_spoken_segment "$SUBJECT" "$TEXT")
-fi
-
-if [ "$ASK" -eq 1 ] && [ -z "$RAW_BUNDLE_JSON" ]; then
-  RAW_BUNDLE_JSON="$(python3 - "$DISPLAY_TEXT" "$SUGGESTIONS_JSON" <<'PY'
-import json
-import sys
-print(json.dumps({
-    "questions_preamble": None,
-    "questions": [{
-        "short_title": sys.argv[1],
-        "title": sys.argv[1],
-        "type": "single_choice",
-        "description": None,
-        "attachments": [],
-        "suggestions": json.loads(sys.argv[2]),
-    }],
-}, ensure_ascii=False, separators=(",", ":")))
-PY
-)"
-fi
-
-route_ordinary_tts_if_needed
-
-SESSION_ID="$(infer_session_id)"
-SESSION_STORAGE_SOURCE="${TTS_SESSION_STORAGE_ID:-$SESSION_ID}"
-if [ -z "$SESSION_STORAGE_SOURCE" ]; then
-  SESSION_STORAGE_SOURCE="standalone-$(date +%Y%m%d-%H%M%S)-$$"
-fi
-SESSION_STORAGE_ID="$(safe_path_component "$SESSION_STORAGE_SOURCE")"
-SESSIONS_ROOT="${TTS_SESSIONS_ROOT:-$HOME/.agents/skills/tts/sessions}"
-ITEM_CREATED_AT="$(date +%s)"
-ITEM_ID="${TTS_ITEM_ID:-$ITEM_CREATED_AT-$$-$RANDOM}"
-if truthy "${TTS_INTERNAL_ATTACHMENT_GENERATION:-0}"; then
-  ITEM_DIRECTORY="$(dirname -- "${TTS_OUTPUT_FILE:?TTS_OUTPUT_FILE is required for attachment generation}")"
-else
-  ITEM_DIRECTORY="$SESSIONS_ROOT/$SESSION_STORAGE_ID/briefs/$ITEM_ID"
-fi
-ATTACHMENT_MANIFEST=""
-mkdir -p "$ITEM_DIRECTORY"
-if [ "${#ATTACHMENT_PATHS[@]}" -gt 0 ]; then
-  ATTACHMENT_MANIFEST="$ITEM_DIRECTORY/attachments/manifest.json"
-  ATTACHMENT_ARGUMENTS=()
-  for index in "${!ATTACHMENT_PATHS[@]}"; do
-    ATTACHMENT_ARGUMENTS+=( "${ATTACHMENT_LABELS[$index]}" "${ATTACHMENT_PATHS[$index]}" )
-  done
-  prepare_attachment_manifest "$ATTACHMENT_MANIFEST" "${ATTACHMENT_ARGUMENTS[@]}"
-fi
-
-if [ "$ASK" -eq 1 ]; then
-  QUESTION_BUNDLE_FILE="$ITEM_DIRECTORY/question-bundle.json"
-  if [ -z "$ATTACHMENT_MANIFEST" ]; then
-    ATTACHMENT_MANIFEST="$ITEM_DIRECTORY/attachments/manifest.json"
-  fi
-  prepare_question_bundle "$QUESTION_BUNDLE_FILE" "$RAW_BUNDLE_JSON" "$ATTACHMENT_MANIFEST" "$ITEM_DIRECTORY"
-  prepare_scoped_attachment_narrations "$QUESTION_BUNDLE_FILE" "$VOICE"
-fi
-
-OUTPUT_FILE="${TTS_OUTPUT_FILE:-$ITEM_DIRECTORY/message.mp3}"
-TMP_ERR="/tmp/tts_error_${RANDOM}.log"
-CAPTION_RESPONSE_FILE="/tmp/tts_caption_${RANDOM}.json"
-TIMESTAMPS_FILE="${TTS_TIMESTAMPS_FILE:-$ITEM_DIRECTORY/message-timings.json}"
-mkdir -p "$(dirname -- "$OUTPUT_FILE")" "$(dirname -- "$TIMESTAMPS_FILE")"
+    for flag, guidance in LEGACY_FLAGS.items():
+        if flag in arguments:
+            raise RequestError(guidance)
 
 
-run_tts_synthesis
+def configured(name: str) -> str | None:
+    value = os.environ.get(name)
+    return value if value and value.strip() else None
+
+
+def run(arguments: list[str]) -> int:
+    refuse_legacy(arguments)
+    options = parser().parse_args(arguments)
+    group_id = configured("TTS29_GROUP_ID")
+    if group_id is None:
+        raise RequestError("TTS29_GROUP_ID is required; configure the standalone product group")
+    socket = options.socket if options.socket is not None else configured("TTS29_SOCKET")
+    if not socket:
+        raise RequestError("TTS29_SOCKET or --socket is required for the standalone daemon")
+    if options.ask is None and options.wait is not None:
+        raise RequestError("--wait requires --ask")
+    if options.ask is not None and options.wait is None:
+        raise RequestError("--ask requires --wait between 1 second and 5 minutes")
+
+    questions, preamble = build_questions(
+        options.ask, options.suggestions, options.message, options.subject
+    )
+    body = options.message.strip()
+    if preamble:
+        body = f"{body}\n\n{preamble}"
+    request = build_request(
+        request_id=(
+            options.request_id
+            if options.request_id is not None
+            else configured("TTS29_REQUEST_ID")
+        ),
+        group_id=group_id,
+        voice=(
+            options.voice
+            if options.voice is not None
+            else configured("TTS29_VOICE") or select_voice(options.agent_name)
+        ),
+        agent_name=options.agent_name,
+        subject=options.subject,
+        summary=options.summary,
+        body=body,
+        artifacts=build_artifacts(options.artifact),
+        questions=questions,
+    )
+    command = [configured("TTS29_CLI") or "tts29", "--socket", socket]
+    if options.wait is not None:
+        command.extend(["--wait-seconds", str(parse_duration(options.wait))])
+    try:
+        completed = subprocess.run(
+            command,
+            input=json.dumps(request, ensure_ascii=False, separators=(",", ":")),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except (FileNotFoundError, PermissionError) as error:
+        raise RequestError(
+            "the standalone tts29 CLI is unavailable; install it or set TTS29_CLI"
+        ) from error
+
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "unknown daemon error"
+        print(f"TTS29 publication failed: {detail}", file=sys.stderr)
+        return completed.returncode
+    try:
+        response = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise RequestError("the standalone tts29 CLI returned invalid JSON") from error
+    if not isinstance(response, dict) or response.get("status") != "published":
+        raise RequestError("the standalone tts29 CLI returned an unexpected response")
+    print(json.dumps(response, ensure_ascii=False, separators=(",", ":")))
+    return 0
+
+
+def main() -> int:
+    try:
+        return run(sys.argv[1:])
+    except RequestError as error:
+        print(f"tts: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
