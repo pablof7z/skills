@@ -25,17 +25,14 @@ The agent should inspect the repository before it writes, identify the real audi
 
 ## The Skills
 
-### [TTS: Hear What Your Agents Are Doing](tts/README.md)
+### [TTS: Publish to a Durable Spoken Queue](tts/README.md)
 
-Agents already produce useful status updates. `tts` turns them into a shared audio queue you can follow without watching every terminal or letting concurrent sessions speak over each other.
+The `tts` skill is a thin producer adapter for the standalone
+[TTS29](https://github.com/pablof7z-agent/tts29) product. An agent publishes one
+durable spoken item or bounded question; iPhone, macOS, and compatible NIP-29
+clients independently reconstruct and play the shared queue.
 
-On macOS, it becomes a menu-bar player with optional spoken subjects, a readable transcript, agent and session identity, timeline scrubbing, pause, seek, and replay. Generation failures stay visible to the calling agent before playback moves into the background.
-
-<p align="center">
-  <a href="tts/README.md"><img src="assets/tts-menu-player.png" alt="The TTS skill showing a subject, transcript progress, session metadata, and podcast controls" width="240"></a>
-</p>
-
-[See the player, workflow, and first spoken update →](tts/README.md)
+[See the adapter boundary and first publication →](tts/README.md)
 
 ### [Repo Marketing: Make the Value Visible](repo-marketing/README.md)
 
@@ -94,7 +91,9 @@ The repository includes a WorktreeGuard plugin for keeping agent mutations out o
 
 Most skill folders contain instructions and reference material only. The exceptions are explicit:
 
-- `tts` sends supplied text to the Kokoro-compatible endpoint you configure, writes generated audio under `/tmp`, stores queue state under `~/.local/state/tts`, and may control Music or Spotify on macOS unless disabled.
+- `tts` sends one validated request to the private Unix socket of a separately
+  installed TTS29 daemon. It does not read daemon credentials, synthesize or
+  store audio, pair devices, own playback, or implement Nostr.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
 - `design-exploration-capture` may create or update local exploration notes while a design session is active.
 - `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
@@ -116,11 +115,9 @@ scripts/install-fleet customer@23.88.91.234 pablo@157.180.102.242
 
 The command fetches the latest merged `origin/main` and deploys it from a
 temporary archive, so a dirty or behind local checkout is left untouched. It
-overwrites stale catalog files without keeping backups, preserves machine-owned
-state such as TTS sessions, Python environments, Swift build products, and
-skill feedback, then builds or validates host-specific runtime pieces and
-reports the exact commit installed. It stops instead of interrupting active TTS
-playback.
+overwrites stale catalog files without keeping backups, preserves explicitly
+excluded machine-owned state such as legacy TTS sessions and skill feedback,
+then validates installed skill entrypoints and reports the exact commit.
 
 ## License
 

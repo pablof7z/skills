@@ -1,57 +1,28 @@
-# Results And Troubleshooting
+# Results and troubleshooting
 
-Read this reference only when the task requires no-play generation, delivery or
-queue inspection, or failure diagnosis.
+## Successful publication
 
-## Generate without playback
+The adapter prints the standalone CLI's JSON response. A successful result has
+`status: published`, the stable request ID, NMP receipt ID, signed event ID, and
+the bounded answer-wait result. These prove durable publication; they do not
+prove that a player was open or that a person heard the item.
 
-Use `--no-play` to generate an MP3 without queueing playback:
+## Common failures
 
-```bash
-<skill-dir>/scripts/tts \
-  --agent-name "<seed-name>" \
-  --subject "Standalone Audio" \
-  --summary "The requested audio is being generated without player playback." \
-  --no-play \
-  --message "<spoken content>"
-```
+- `TTS29_CLI` unavailable: install the standalone product or correct the
+  executable path.
+- `TTS29_SOCKET` missing or connection refused: configure and start `tts29d`.
+- `TTS29_GROUP_ID` rejected: make the adapter group match the daemon group.
+- request conflict: reuse a request ID only with byte-for-byte equivalent
+  immutable input and the same author.
+- membership or receipt rejection: inspect the daemon's retained NMP evidence;
+  do not add a raw Nostr fallback to the skill.
+- synthesis, Blossom, or journal failure: diagnose the standalone daemon
+  capability and retry the same immutable request.
+- `timed_out` answer wait: publication succeeded. Continue useful work or issue
+  a new explicit observation through a supported TTS29 surface; do not infer an
+  answer.
 
-The command returns only after the file exists. Its tool output includes the
-stable item ID and output path. With a configured local Kokoro endpoint, it
-generates on the invoking computer and neither sends a paired Nostr request nor
-queues player playback. `--no-play` cannot be combined with `--ask`.
-
-## Inspect status when needed
-
-```bash
-<skill-dir>/scripts/tts-menu status
-<skill-dir>/scripts/tts-menu status --json
-<skill-dir>/scripts/tts-menu queue list --mine
-<skill-dir>/scripts/tts-menu queue get <id>
-<skill-dir>/scripts/tts-menu queue wait <id> --timeout 5m
-```
-
-Treat engagement as evidence, not proof that the user heard an update.
-Automatic playback without activity can be unattended; general activity shows
-presence; direct player interaction is the strongest listening signal short of
-an answer.
-
-If command output reports paused playback or muted system audio, relay that
-state accurately rather than claiming the update was heard.
-
-## Diagnose failures
-
-- Endpoint or authentication failure: if no approved paired laptop is
-  available, read [setup.md](setup.md) and verify the configured Kokoro
-  endpoint.
-- Generation failure: use the command's standard-error diagnostics.
-- Queue or playback failure: inspect `tts-menu status` and the item by ID.
-- State inspection: queue records and logs normally live under
-  `~/.local/state/tts/`.
-- Music or Spotify handoff failure: inspect
-  `~/.local/state/tts/media-interventions.jsonl` and its single rotated file,
-  `media-interventions.jsonl.1`. Filter by `itemID` or `leaseID` to reconstruct
-  the observed session, pause and resume verification, cancellation reason,
-  and terminal ownership decision.
-- Durable brief inspection: generated audio, timings, and copied attachments
-  live under `~/.agents/skills/tts/sessions/<session-id>/briefs/<item-id>/`.
+The retired `tts-menu`, pairing, local queue, playback, generation-only, and
+skill-hosted MCP commands are not diagnostic fallbacks. Use standalone TTS29
+client and daemon tooling instead.

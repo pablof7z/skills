@@ -28,16 +28,17 @@ git -C "${SEED}" config user.name 'Skill Fleet Test'
 git -C "${SEED}" remote add origin "${ORIGIN}"
 
 mkdir -p "${SEED}/scripts" "${SEED}/alpha" \
-  "${SEED}/tts/scripts" "${SEED}/tts/mcp" \
+  "${SEED}/tts/scripts" \
   "${SEED}/meta-feedback/scripts"
 cp "${SCRIPT}" "${SEED}/scripts/install-fleet"
 chmod +x "${SEED}/scripts/install-fleet"
 printf '%s\n' '---' 'name: alpha' '---' >"${SEED}/alpha/SKILL.md"
 printf 'version one\n' >"${SEED}/alpha/content.txt"
 printf '%s\n' '---' 'name: tts' '---' >"${SEED}/tts/SKILL.md"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${SEED}/tts/scripts/tts"
+printf '%s\n' '#!/usr/bin/env python3' 'raise SystemExit(0)' \
+  >"${SEED}/tts/scripts/tts"
+printf '%s\n' 'VALUE = 1' >"${SEED}/tts/scripts/tts29_request.py"
 chmod +x "${SEED}/tts/scripts/tts"
-printf 'tts mcp\n' >"${SEED}/tts/mcp/pyproject.toml"
 printf '%s\n' '---' 'name: meta-feedback' '---' \
   >"${SEED}/meta-feedback/SKILL.md"
 printf 'value = 1\n' >"${SEED}/meta-feedback/scripts/record_feedback.py"
@@ -61,12 +62,16 @@ LOG="${TMP}/commands.log"
 mkdir -p "${LOCAL_HOME}/.agents/skills/alpha/meta-feedback" \
   "${LOCAL_HOME}/.agents/skills/tts/sessions" \
   "${LOCAL_HOME}/.agents/skills/tts/mcp/.venv" \
+  "${LOCAL_HOME}/.agents/skills/tts/macos/.build" \
+  "${LOCAL_HOME}/.agents/skills/tts/scripts" \
   "${REMOTE_HOME}/.agents/skills/alpha" "${FAKE_BIN}"
 printf 'stale\n' >"${LOCAL_HOME}/.agents/skills/alpha/stale.txt"
 printf 'local feedback\n' \
   >"${LOCAL_HOME}/.agents/skills/alpha/meta-feedback/report.md"
 printf 'session\n' >"${LOCAL_HOME}/.agents/skills/tts/sessions/item"
-printf 'venv\n' >"${LOCAL_HOME}/.agents/skills/tts/mcp/.venv/state"
+printf 'retired mcp\n' >"${LOCAL_HOME}/.agents/skills/tts/mcp/.venv/state"
+printf 'retired app\n' >"${LOCAL_HOME}/.agents/skills/tts/macos/.build/state"
+printf 'retired queue\n' >"${LOCAL_HOME}/.agents/skills/tts/scripts/tts-menu"
 mkdir -p "${REMOTE_HOME}/old-alpha"
 printf 'remote stale\n' >"${REMOTE_HOME}/old-alpha/stale.txt"
 rmdir "${REMOTE_HOME}/.agents/skills/alpha"
@@ -130,8 +135,13 @@ assert_file "${LOCAL_HOME}/.agents/skills/alpha/meta-feedback/report.md" \
   'local feedback' 'meta-feedback preserved'
 assert_file "${LOCAL_HOME}/.agents/skills/tts/sessions/item" \
   'session' 'TTS sessions preserved'
-assert_file "${LOCAL_HOME}/.agents/skills/tts/mcp/.venv/state" \
-  'venv' 'TTS environment preserved'
+[[ ! -e "${LOCAL_HOME}/.agents/skills/tts/mcp" ]] \
+  || fail 'retired skill MCP environment survived'
+[[ ! -e "${LOCAL_HOME}/.agents/skills/tts/macos" ]] \
+  || fail 'retired skill macOS app survived'
+[[ ! -e "${LOCAL_HOME}/.agents/skills/tts/scripts/tts-menu" ]] \
+  || fail 'retired skill queue command survived'
+echo 'ok: retired TTS product payload removed'
 [[ ! -e "${LOCAL_HOME}/.agents/skill-backups" ]] \
   || fail 'installer created a backup directory'
 [[ ! -e "${REMOTE_HOME}/.agents/skill-backups" ]] \
@@ -149,56 +159,26 @@ echo 'ok: dirty checkout stayed untouched and fleet verified'
 
 DARWIN_HOME="${TMP}/darwin-home"
 mkdir -p "${DARWIN_HOME}/.agents/skills/tts/scripts" \
-  "${DARWIN_HOME}/.agents/skills/tts/macos" \
   "${DARWIN_HOME}/.agents/skills/meta-feedback/scripts"
 cp "${SEED}/tts/SKILL.md" "${DARWIN_HOME}/.agents/skills/tts/SKILL.md"
 cp "${SEED}/tts/scripts/tts" \
   "${DARWIN_HOME}/.agents/skills/tts/scripts/tts"
+cp "${SEED}/tts/scripts/tts29_request.py" \
+  "${DARWIN_HOME}/.agents/skills/tts/scripts/tts29_request.py"
 cp "${SEED}/meta-feedback/scripts/record_feedback.py" \
   "${DARWIN_HOME}/.agents/skills/meta-feedback/scripts/record_feedback.py"
-cat >"${DARWIN_HOME}/.agents/skills/tts/scripts/tts-menu" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'tts-menu %s\n' "$*" >>"${FLEET_TEST_LOG}"
-case "${1:-}" in
-  status)
-    if [[ -n "${FLEET_TEST_STATUS:-}" ]]; then
-      printf '%s\n' "${FLEET_TEST_STATUS}"
-    else
-      printf '%s\n' '{"current":null,"queued":[{"id":"parked","status":"queued"}],"menu_pid":42}'
-    fi
-    ;;
-  restart) ;;
-  *) exit 2 ;;
-esac
-EOF
 cat >"${FAKE_BIN}/uname" <<'EOF'
 #!/usr/bin/env bash
 echo Darwin
 EOF
 cat >"${FAKE_BIN}/swift" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
-[[ "$*" == build\ -c\ release\ --package-path* ]]
-printf 'swift %s\n' "$*" >>"${FLEET_TEST_LOG}"
+echo 'Swift must not be invoked for the TTS adapter' >&2
+exit 91
 EOF
-chmod +x "${DARWIN_HOME}/.agents/skills/tts/scripts/tts-menu" \
-  "${FAKE_BIN}/swift"
+chmod +x "${FAKE_BIN}/swift"
 HOME="${DARWIN_HOME}" PATH="${FAKE_BIN}:${PATH}" FLEET_TEST_LOG="${LOG}" \
   bash "${SCRIPT}" --activate-host test-commit >"${TMP}/darwin-output"
-grep -Fq 'swift build -c release --package-path' "${LOG}" \
-  || fail 'Darwin TTS app was not built'
-grep -Fq 'tts-menu restart' "${LOG}" \
-  || fail 'idle Darwin TTS app was not restarted'
-echo 'ok: Darwin TTS app built and restarted'
-
-if HOME="${DARWIN_HOME}" PATH="${FAKE_BIN}:${PATH}" FLEET_TEST_LOG="${LOG}" \
-  FLEET_TEST_STATUS='{"current":{"id":"active","status":"playing"},"queued":[],"menu_pid":42}' \
-  bash "${SCRIPT}" --activate-host test-commit >"${TMP}/darwin-busy-output" 2>&1; then
-  fail 'Darwin activation interrupted active playback'
-fi
-grep -Fq 'has active TTS playback' "${TMP}/darwin-busy-output" \
-  || fail 'active playback refusal was not explained'
-[[ "$(grep -Fc 'tts-menu restart' "${LOG}")" -eq 1 ]] \
-  || fail 'active playback restarted the TTS app'
-echo 'ok: Darwin TTS app preserves active playback'
+grep -Fq 'verified test-commit' "${TMP}/darwin-output" \
+  || fail 'Darwin adapter validation did not complete'
+echo 'ok: Darwin validates the producer adapter without Swift or playback'
