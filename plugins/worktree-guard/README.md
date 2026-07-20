@@ -9,10 +9,16 @@ Code. It has two narrow policies:
 > Recognize ordinary native `apply_patch`, `Edit`, `Write`, `MultiEdit`, and
 > `NotebookEdit` operations when their target is inside a base checkout.
 
-Native base edits are auto-granted by default. WorktreeGuard shows one macOS
-notification per harness session and base checkout so the user knows the agent
-granted itself temporary edit permission. Turning auto-grant off restores the
-blocking behavior. Native edits are always allowed in linked worktrees.
+Both are blocked in a base checkout until the agent explicitly asks for access
+with `wtg request-base-access`. A write never grants itself permission; only a
+request does. Once a request is granted, that harness session may both edit
+files and run the six Git commands in that base checkout until the grant
+expires. Everything is always allowed in linked worktrees.
+
+`auto-grant-edits` controls how a *request* is answered, not whether the guard
+applies. With it on (the default), a request is granted immediately and you get
+one macOS notification telling you it happened. With it off, the request puts a
+macOS approval dialog in front of you first.
 
 That is the entire boundary. Every other Git command, non-Git shell command,
 and MCP tool is outside WorktreeGuard's policy.
@@ -34,27 +40,30 @@ malicious or deliberately obfuscated caller.
 python3 <plugin-root>/scripts/probe_worktreeguard.py
 ```
 
-`request-base-access` uses a local macOS dialog. There is no remote approval,
-pairing, daemon, relay, MCP integration, automatic branch repair, session cwd
-tracking, or full allow-action audit.
+`request-base-access` is the only way to obtain a grant. It is auto-granted with
+a notification when `auto-grant-edits` is on, and asks through a local macOS
+dialog when it is off. There is no remote approval, pairing, daemon, relay, MCP
+integration, automatic branch repair, session cwd tracking, or full allow-action
+audit.
 
 `config auto-grant-edits` prints the current preference when no value is
-provided. `on` is the default; `off` makes native base edits deny again and
-leaves the explicit `request-base-access` override available.
+provided. `on` is the default.
 
 ## Architecture
 
 The shared `lib/worktreeguard/` package owns the policy and CLI. The Codex and
 Claude shims only translate their hook entrypoints into the shared command.
 `hooks/hooks.json` matches `Bash|Shell` and the five native write tool names for
-`PreToolUse` and `PermissionRequest`. It installs no other lifecycle hooks.
+`PreToolUse` only. It installs no other lifecycle hooks. WorktreeGuard takes no
+part in the harness's own permission system; base access is requested through
+`wtg`, not through a Claude or Codex prompt.
 
 All Git main worktrees are guarded by default. No repository registration or
 protection database is required. Local grants are stored in
-`~/.local/state/worktreeguard/state.json` alongside the auto-grant preference
-and short session markers; denials are appended to
-`~/worktreeguard-denied-actions.jsonl`. Notifications are local, non-interactive,
-and best-effort; notification delivery failure does not block the edit.
+`~/.local/state/worktreeguard/state.json` alongside the auto-grant preference;
+denials are appended to `~/worktreeguard-denied-actions.jsonl`. Notifications are
+local, non-interactive, and best-effort; notification delivery failure does not
+block the grant.
 
 ## Install
 

@@ -60,7 +60,8 @@ def main() -> int:
 
         failures.extend(auto_grant_setting_failures(base, env))
         expected_denials += 2
-        failures.extend(notification_failures(Path(env["WTG_NOTIFICATION_LOG_FILE"])))
+        failures.extend(request_grant_failures(base, env))
+        expected_denials += 1
         failures.extend(once_override_failures(base, env))
         expected_denials += 1
         records = read_jsonl(Path(env["WTG_DENY_LOG_FILE"]))
@@ -74,7 +75,7 @@ def main() -> int:
         if failures:
             print("\n".join(f"FAIL {failure}" for failure in failures), file=sys.stderr)
             return 1
-        print(f"PASS {len(cases) * 2 + 4} decisions; denials logged={len(records)}")
+        print(f"PASS {len(cases) * 2 + 7} decisions; denials logged={len(records)}")
         return 0
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -117,14 +118,14 @@ def contract_cases(temp: Path, base: Path, linked: Path) -> list[Case]:
             "allow",
             {"cwd": str(base), "tool_name": "mcp__anything", "tool_input": {"command": "git reset"}},
         ),
-        Case("auto-grants Edit target in base", "allow", native(base, "Edit", file_path=base / "README.md")),
-        Case("auto-grants Write target in base", "allow", native(base, "Write", path=base / "created.txt")),
-        Case("auto-grants MultiEdit target in base", "allow", native(base, "MultiEdit", file_path="README.md")),
-        Case("auto-grants NotebookEdit target in base", "allow", native(base, "NotebookEdit", notebook_path=base / "notes.ipynb")),
-        Case("auto-grants apply_patch target in base", "allow", patch(base, "*** Update File: README.md")),
+        Case("blocks unrequested Edit target in base", "deny", native(base, "Edit", file_path=base / "README.md")),
+        Case("blocks unrequested Write target in base", "deny", native(base, "Write", path=base / "created.txt")),
+        Case("blocks unrequested MultiEdit target in base", "deny", native(base, "MultiEdit", file_path="README.md")),
+        Case("blocks unrequested NotebookEdit target in base", "deny", native(base, "NotebookEdit", notebook_path=base / "notes.ipynb")),
+        Case("blocks unrequested apply_patch target in base", "deny", patch(base, "*** Update File: README.md")),
         Case(
-            "auto-grants raw apply_patch input in base",
-            "allow",
+            "blocks unrequested raw apply_patch input in base",
+            "deny",
             {
                 "cwd": str(base),
                 "tool_name": "apply_patch",
@@ -134,10 +135,10 @@ def contract_cases(temp: Path, base: Path, linked: Path) -> list[Case]:
         Case("allows Edit target in linked worktree", "allow", native(base, "Edit", file_path=linked / "README.md")),
         Case("allows Write target outside checkout", "allow", native(base, "Write", path=temp / "outside.txt")),
         Case("allows apply_patch target in linked worktree", "allow", patch(linked, "*** Add File: linked.txt")),
-        Case("auto-grants targetless native write from base", "allow", native(base, "Write")),
+        Case("blocks targetless native write from base", "deny", native(base, "Write")),
         Case("allows targetless native write from worktree", "allow", native(linked, "Write")),
         Case("malformed shell fails open", "allow", shell(base, "git 'reset")),
-        Case("permission hook explicitly auto-grants", "allow", native(base, "Edit", file_path=base / "README.md"), "permission-request"),
+        Case("ignores harness permission events", "allow", native(base, "Edit", file_path=base / "README.md"), "permission-request"),
     ]
     return cases
 
@@ -164,12 +165,11 @@ def patch(cwd: Path, body: str) -> dict[str, Any]:
 def manifest_failures() -> list[str]:
     hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     failures: list[str] = []
-    if set(hooks) != {"PreToolUse", "PermissionRequest"}:
+    if set(hooks) != {"PreToolUse"}:
         failures.append(f"unexpected hook events: {sorted(hooks)}")
     matcher = "Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
-    for event in ("PreToolUse", "PermissionRequest"):
-        if hooks[event][0].get("matcher") != matcher:
-            failures.append(f"{event} matcher does not cover the native write tools")
+    if hooks["PreToolUse"][0].get("matcher") != matcher:
+        failures.append("PreToolUse matcher does not cover the native write tools")
     return failures
 
 
@@ -197,6 +197,8 @@ def shim_failures(temp: Path) -> list[str]:
 
 
 def once_override_failures(base: Path, env: dict[str, str]) -> list[str]:
+    """With auto-grant off, the request falls back to asking the local human."""
+    set_auto_grant(env, "off")
     approval_env = {**env, "WTG_APPROVAL_RESPONSE": "once"}
     result = subprocess.run(
         [str(WTG), "request-base-access", "--repo", str(base), "--reason", "probe"],
@@ -238,15 +240,54 @@ def auto_grant_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
     return failures
 
 
+def request_grant_failures(base: Path, env: dict[str, str]) -> list[str]:
+    """An explicit request is what auto-grants; the write alone never does."""
+    set_auto_grant(env, "on")
+    request_env = {**env, "WTG_SESSION_ID": "granted-session"}
+    result = subprocess.run(
+        [str(WTG), "request-base-access", "--repo", str(base), "--reason", "probe grant"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=request_env, check=False,
+    )
+    if result.returncode != 0:
+        return [f"auto-granted request failed: {result.stderr}"]
+
+    failures = notification_failures(Path(env["WTG_NOTIFICATION_LOG_FILE"]))
+    for name, payload in (
+        ("native edit", native(base, "Edit", file_path=base / "README.md")),
+        ("git reset", shell(base, "git reset --hard")),
+    ):
+        actual, details = decision(
+            "claude", "pre-tool-use", {"session_id": "granted-session", **payload}, env
+        )
+        print(f"{actual.upper():5} [claude] granted session permits {name} in base")
+        if actual != "allow":
+            failures.append(f"granted session {name} expected allow, got {actual}: {details}")
+
+    actual, details = decision(
+        "claude", "pre-tool-use",
+        {"session_id": "other-session", **native(base, "Edit", file_path=base / "README.md")},
+        env,
+    )
+    print(f"{actual.upper():5} [claude] grant does not leak to another session")
+    if actual != "deny":
+        failures.append(f"grant leaked to another session: {actual}: {details}")
+    return failures
+
+
+def set_auto_grant(env: dict[str, str], value: str) -> None:
+    subprocess.run(
+        [str(WTG), "config", "auto-grant-edits", value],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, check=False,
+    )
+
+
 def notification_failures(path: Path) -> list[str]:
     records = read_jsonl(path)
-    sessions = {record.get("session_id") for record in records}
-    expected = {"probe-codex", "probe-claude"}
-    print(f"NOTIFY native base-edit auto grants: {len(records)} session notices")
-    if len(records) != 2 or sessions != expected:
-        return [f"notifications expected one per harness session, got {records}"]
-    if any("granted itself" not in str(record.get("message")) for record in records):
-        return ["notification does not explain that the agent granted itself permission"]
+    print(f"NOTIFY auto-granted base access requests: {len(records)} notices")
+    if len(records) != 1 or records[0].get("session_id") != "granted-session":
+        return [f"expected one notice for the granted request, got {records}"]
+    if "requested and was auto-granted" not in str(records[0].get("message")):
+        return ["notification does not explain that the agent requested the grant"]
     return []
 
 

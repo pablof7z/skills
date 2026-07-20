@@ -1,4 +1,4 @@
-"""Tests for configurable native base-edit auto grants and notifications."""
+"""Tests that base access is granted only by an explicit request, never by a write."""
 
 from __future__ import annotations
 
@@ -17,14 +17,15 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 
+from worktreeguard.cli import main  # noqa: E402
 from worktreeguard.hooks import run_harness_hook  # noqa: E402
 from worktreeguard.storage import (  # noqa: E402
-    active_auto_grants, auto_grant_base_edits_enabled, load_state,
+    active_grants, auto_grant_base_edits_enabled, load_state,
     set_auto_grant_base_edits,
 )
 
 
-class AutoGrantTests(unittest.TestCase):
+class BaseAccessTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="wtg-auto-grant-")
         root = Path(self.temporary.name).resolve()
@@ -42,6 +43,7 @@ class AutoGrantTests(unittest.TestCase):
             "WTG_STATE_FILE": str(self.state),
             "WTG_NOTIFICATION_LOG_FILE": str(self.notifications),
             "WTG_DENY_LOG_FILE": str(self.denials),
+            "WTG_SESSION_ID": "session-one",
         })
         self.environment.start()
 
@@ -59,50 +61,44 @@ class AutoGrantTests(unittest.TestCase):
         self.assertEqual(state["grants"], [{"id": "existing"}])
         self.assertTrue(auto_grant_base_edits_enabled())
 
-    def test_pre_tool_edit_auto_grants_and_notifies_once(self) -> None:
-        payload = native_payload(self.base, "session-one")
-        self.assertEqual(hook_output("pre-tool-use", payload), "")
-        self.assertEqual(hook_output("pre-tool-use", payload), "")
+    def test_unrequested_base_edit_is_denied_even_with_auto_grant_on(self) -> None:
+        self.assertTrue(auto_grant_base_edits_enabled())
+        output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
+        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(len(read_jsonl(self.denials)), 1)
+        self.assertEqual(active_grants(), [])
+        self.assertFalse(self.notifications.exists())
+
+    def test_harness_permission_events_are_not_wtg_business(self) -> None:
+        self.assertEqual(hook_output("permission-request", native_payload(self.base, "s")), "")
+        self.assertEqual(read_jsonl(self.denials), [])
+
+    def test_request_auto_grants_and_notifies_then_edits_pass(self) -> None:
+        self.assertEqual(request_access(self.base, "user asked for a base edit"), 0)
         notices = read_jsonl(self.notifications)
         self.assertEqual(len(notices), 1)
         self.assertEqual(notices[0]["base_path"], str(self.base))
-        self.assertIn("granted itself", notices[0]["message"])
-        self.assertEqual(len(active_auto_grants()), 1)
+        self.assertIn("requested and was auto-granted", notices[0]["message"])
+        self.assertEqual(len(active_grants()), 1)
+        self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
+
+    def test_granted_session_also_unblocks_git(self) -> None:
+        self.assertEqual(request_access(self.base, "rebasing on purpose"), 0)
+        self.assertEqual(hook_output("pre-tool-use", git_payload(self.base, "session-one")), "")
+
+    def test_request_with_auto_grant_off_prompts_and_can_be_denied(self) -> None:
         set_auto_grant_base_edits(False)
-        self.assertEqual(active_auto_grants(), [])
-        self.assertFalse(self.denials.exists())
-
-    def test_permission_request_is_explicitly_allowed(self) -> None:
-        output = json.loads(hook_output(
-            "permission-request", native_payload(self.base, "permission-session")
-        ))
-        decision = output["hookSpecificOutput"]["decision"]
-        self.assertEqual(decision["behavior"], "allow")
-
-    def test_turning_auto_grant_off_restores_denial(self) -> None:
-        set_auto_grant_base_edits(False)
-        self.assertFalse(auto_grant_base_edits_enabled())
-        output = json.loads(hook_output(
-            "pre-tool-use", native_payload(self.base, "blocked-session")
-        ))
-        self.assertEqual(
-            output["hookSpecificOutput"]["permissionDecision"], "deny"
-        )
-        self.assertEqual(len(read_jsonl(self.denials)), 1)
+        with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "deny"}):
+            self.assertEqual(request_access(self.base, "should be refused"), 1)
+        self.assertEqual(active_grants(), [])
         self.assertFalse(self.notifications.exists())
+        output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
+        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_auto_grant_does_not_allow_blocked_git(self) -> None:
-        payload = {
-            "cwd": str(self.base),
-            "session_id": "git-session",
-            "tool_name": "Bash",
-            "tool_input": {"command": "git reset --hard"},
-        }
-        output = json.loads(hook_output("pre-tool-use", payload))
-        self.assertEqual(
-            output["hookSpecificOutput"]["permissionDecision"], "deny"
-        )
-        self.assertFalse(self.notifications.exists())
+    def test_grant_does_not_leak_to_another_session(self) -> None:
+        self.assertEqual(request_access(self.base, "scoped to session-one"), 0)
+        output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-two")))
+        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
 def native_payload(base: Path, session_id: str) -> dict[str, object]:
@@ -112,6 +108,20 @@ def native_payload(base: Path, session_id: str) -> dict[str, object]:
         "tool_name": "Edit",
         "tool_input": {"file_path": str(base / "tracked.txt")},
     }
+
+
+def git_payload(base: Path, session_id: str) -> dict[str, object]:
+    return {
+        "cwd": str(base),
+        "session_id": session_id,
+        "tool_name": "Bash",
+        "tool_input": {"command": "git reset --hard"},
+    }
+
+
+def request_access(base: Path, reason: str) -> int:
+    with redirect_stdout(io.StringIO()):
+        return main(["request-base-access", "--repo", str(base), "--reason", reason])
 
 
 def hook_output(event: str, payload: dict[str, object]) -> str:

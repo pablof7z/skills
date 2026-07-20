@@ -1,4 +1,4 @@
-"""Non-blocking user awareness for native base-edit auto grants."""
+"""Non-blocking user awareness for auto-granted base-access requests."""
 
 from __future__ import annotations
 
@@ -9,24 +9,22 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .policy import BlockedFileOperation
 
-
-def notify_auto_grant(operation: BlockedFileOperation, *, session_id: str) -> None:
-    target = f" Target: {operation.target}." if operation.target is not None else ""
+def notify_auto_grant(base_path: Path, *, reason: str, session_id: str) -> None:
     message = (
-        "An agent granted itself temporary permission to edit the base checkout "
-        f"{operation.base_path}.{target} Disable with: wtg config auto-grant-edits off."
+        "An agent requested and was auto-granted temporary permission to mutate the "
+        f"base checkout {base_path}. Reason: {reason}. "
+        "Require approval with: wtg config auto-grant-edits off."
     )
     test_log = os.environ.get("WTG_NOTIFICATION_LOG_FILE")
     if test_log:
-        write_test_notification(Path(test_log), operation, session_id, message)
+        write_test_notification(Path(test_log), base_path, reason, session_id, message)
         return
     if sys.platform != "darwin":
         return
     script = (
         f'display notification "{apple_script_string(message)}" '
-        'with title "WorktreeGuard" subtitle "Base edit auto-granted"'
+        'with title "WorktreeGuard" subtitle "Base access auto-granted"'
     )
     try:
         subprocess.run(
@@ -42,16 +40,15 @@ def apple_script_string(value: str) -> str:
 
 
 def write_test_notification(
-    path: Path, operation: BlockedFileOperation, session_id: str, message: str
+    path: Path, base_path: Path, reason: str, session_id: str, message: str
 ) -> None:
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "title": "WorktreeGuard",
-        "subtitle": "Base edit auto-granted",
+        "subtitle": "Base access auto-granted",
         "message": message,
-        "base_path": str(operation.base_path),
-        "target": str(operation.target) if operation.target is not None else None,
-        "tool_name": operation.tool_name,
+        "base_path": str(base_path),
+        "reason": reason,
         "session_id": session_id,
     }
     try:
