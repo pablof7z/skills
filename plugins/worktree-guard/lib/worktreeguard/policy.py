@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
 from .core import BLOCKED_GIT_COMMANDS, Repo, resolve_path
 from .git import is_main_worktree
@@ -32,7 +33,7 @@ class BlockedFileOperation:
     target: Path | None
 
 
-BlockedOperation = BlockedGitOperation | BlockedFileOperation
+BlockedOperation = Union[BlockedGitOperation, BlockedFileOperation]
 
 
 def blocked_operation(operation: dict[str, object], cwd: Path) -> BlockedOperation | None:
