@@ -58,11 +58,21 @@ working directory, `git -C <path> ...`, `git --work-tree <path> ...`, and a
 simple `cd <path> && git ...` sequence. It need not defeat aliases, nested shell
 evaluation, deliberate obfuscation, or other bypass attempts.
 
-A native mutation is denied when its ordinary target-path field, or an
-`apply_patch` file header, resolves inside a repository's main/base worktree.
-Targets in linked worktrees and outside the base checkout are allowed. If a
-recognized native mutation supplies no target, its hook working directory is
-used as the conservative fallback.
+A native mutation enters the base-edit permission policy when its ordinary
+target-path field, or an `apply_patch` file header, resolves inside a
+repository's main/base worktree. Targets in linked worktrees and outside the
+base checkout are allowed. If a recognized native mutation supplies no target,
+its hook working directory is used as the conservative fallback.
+
+Base-edit permission is auto-granted by default. The first auto-grant for a
+harness session and base checkout emits a non-interactive macOS notification
+stating that the agent granted itself temporary edit permission. Later native
+edits in that grant window remain quiet. The auto grant applies only to native
+edit tools; it never permits the six blocked Git commands.
+
+The persisted `auto-grant-edits` preference controls this behavior. When it is
+off, native base edits are denied through the normal hook decision. The CLI must
+support inspecting and changing it with `wtg config auto-grant-edits [on|off]`.
 
 WorktreeGuard does not parse shell commands to discover file writes. An agent
 could write through `rm`, `sed`, Python, an indirect shell, or another tool; that
@@ -80,9 +90,10 @@ request is denied. There is no remote fallback.
 
 ## State and diagnostics
 
-Only active local overrides require durable state. They are stored at
-`~/.local/state/worktreeguard/state.json` unless `WTG_STATE_FILE` overrides the
-path.
+Preferences, active local overrides, and short native-edit auto-grant markers
+are stored at `~/.local/state/worktreeguard/state.json` unless `WTG_STATE_FILE`
+overrides the path. Existing state defaults `auto-grant-edits` to on when the
+preference is absent.
 
 Denied commands are logged to `~/worktreeguard-denied-actions.jsonl` unless
 `WTG_DENY_LOG_FILE` overrides the path. Allowed actions are not logged.
@@ -97,9 +108,11 @@ The shared hook manifest installs only `PreToolUse` and `PermissionRequest`,
 both matching `Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit`. It
 installs no other lifecycle hooks.
 
-A denial uses the harness's normal hook decision JSON and exits successfully;
-the hook decision, not the process exit status, carries allow/deny behavior.
-Failures to parse payloads or discover repositories fail open.
+A denial uses the harness's normal hook decision JSON and exits successfully.
+An auto-granted `PermissionRequest` emits an explicit allow decision; an
+auto-granted `PreToolUse` remains silent. Hook decisions, not process exit
+status, carry behavior. Failures to parse payloads or discover repositories
+fail open.
 
 ## Acceptance tests
 
@@ -110,7 +123,10 @@ prove:
 - all six are allowed in linked worktrees;
 - representative normal Git and non-Git commands are allowed in a base;
 - `git -C`, hook workdir, and simple `cd && git` resolve the correct checkout;
-- all recognized native mutation tools are denied for base-checkout targets;
+- all recognized native mutation tools are auto-granted for base targets by
+  default and notify once per harness session;
+- turning auto-grant off restores native base-edit denials;
+- auto-grant never permits the six blocked Git commands;
 - native mutations remain allowed in linked worktrees and outside the base;
 - MCP and unrecognized non-shell tool payloads are ignored;
 - the hook manifest contains only policy events and matches the explicit shell

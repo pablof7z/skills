@@ -9,7 +9,7 @@
     {
       "name": "worktree-guard",
       "source": "./plugins/worktree-guard",
-      "description": "Block risky Git commands and harness-native file writes in base checkouts."
+      "description": "Block risky Git commands and notify on configurable native-edit auto-grants."
     }
   ]
 }

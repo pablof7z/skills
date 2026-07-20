@@ -1,8 +1,8 @@
 {
   "name": "worktree-guard",
   "displayName": "WorktreeGuard",
-  "version": "0.3.1",
-  "description": "Lightweight Git and native-edit accident prevention for base checkouts.",
+  "version": "0.3.2",
+  "description": "Configurable Git and native-edit awareness for base checkouts.",
   "author": {
     "name": "Pablo Fernandez",
     "url": "https://github.com/pablof7z"

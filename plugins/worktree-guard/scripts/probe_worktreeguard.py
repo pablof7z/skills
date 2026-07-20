@@ -35,6 +35,7 @@ def main() -> int:
         env = os.environ.copy()
         env["WTG_STATE_FILE"] = str(temp / "state.json")
         env["WTG_DENY_LOG_FILE"] = str(temp / "denials.jsonl")
+        env["WTG_NOTIFICATION_LOG_FILE"] = str(temp / "notifications.jsonl")
         base, linked = make_repo(temp)
         failures.extend(manifest_failures())
         failures.extend(shim_failures(temp))
@@ -57,6 +58,9 @@ def main() -> int:
                         f"{harness} {case.name}: expected {case.expected}, got {actual}: {details}"
                     )
 
+        failures.extend(auto_grant_setting_failures(base, env))
+        expected_denials += 2
+        failures.extend(notification_failures(Path(env["WTG_NOTIFICATION_LOG_FILE"])))
         failures.extend(once_override_failures(base, env))
         expected_denials += 1
         records = read_jsonl(Path(env["WTG_DENY_LOG_FILE"]))
@@ -70,7 +74,7 @@ def main() -> int:
         if failures:
             print("\n".join(f"FAIL {failure}" for failure in failures), file=sys.stderr)
             return 1
-        print(f"PASS {len(cases) * 2 + 2} decisions; denials logged={len(records)}")
+        print(f"PASS {len(cases) * 2 + 4} decisions; denials logged={len(records)}")
         return 0
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -113,14 +117,14 @@ def contract_cases(temp: Path, base: Path, linked: Path) -> list[Case]:
             "allow",
             {"cwd": str(base), "tool_name": "mcp__anything", "tool_input": {"command": "git reset"}},
         ),
-        Case("blocks Edit target in base", "deny", native(base, "Edit", file_path=base / "README.md")),
-        Case("blocks Write target in base", "deny", native(base, "Write", path=base / "created.txt")),
-        Case("blocks MultiEdit target in base", "deny", native(base, "MultiEdit", file_path="README.md")),
-        Case("blocks NotebookEdit target in base", "deny", native(base, "NotebookEdit", notebook_path=base / "notes.ipynb")),
-        Case("blocks apply_patch target in base", "deny", patch(base, "*** Update File: README.md")),
+        Case("auto-grants Edit target in base", "allow", native(base, "Edit", file_path=base / "README.md")),
+        Case("auto-grants Write target in base", "allow", native(base, "Write", path=base / "created.txt")),
+        Case("auto-grants MultiEdit target in base", "allow", native(base, "MultiEdit", file_path="README.md")),
+        Case("auto-grants NotebookEdit target in base", "allow", native(base, "NotebookEdit", notebook_path=base / "notes.ipynb")),
+        Case("auto-grants apply_patch target in base", "allow", patch(base, "*** Update File: README.md")),
         Case(
-            "blocks raw apply_patch input in base",
-            "deny",
+            "auto-grants raw apply_patch input in base",
+            "allow",
             {
                 "cwd": str(base),
                 "tool_name": "apply_patch",
@@ -130,10 +134,10 @@ def contract_cases(temp: Path, base: Path, linked: Path) -> list[Case]:
         Case("allows Edit target in linked worktree", "allow", native(base, "Edit", file_path=linked / "README.md")),
         Case("allows Write target outside checkout", "allow", native(base, "Write", path=temp / "outside.txt")),
         Case("allows apply_patch target in linked worktree", "allow", patch(linked, "*** Add File: linked.txt")),
-        Case("blocks targetless native write from base", "deny", native(base, "Write")),
+        Case("auto-grants targetless native write from base", "allow", native(base, "Write")),
         Case("allows targetless native write from worktree", "allow", native(linked, "Write")),
         Case("malformed shell fails open", "allow", shell(base, "git 'reset")),
-        Case("permission hook uses same policy", "deny", native(base, "Edit", file_path=base / "README.md"), "permission-request"),
+        Case("permission hook explicitly auto-grants", "allow", native(base, "Edit", file_path=base / "README.md"), "permission-request"),
     ]
     return cases
 
@@ -208,6 +212,42 @@ def once_override_failures(base: Path, env: dict[str, str]) -> list[str]:
     return [] if (first, second) == ("allow", "deny") else [
         f"once override expected allow then deny, got {first} then {second}"
     ]
+
+
+def auto_grant_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
+    failures: list[str] = []
+    for value in ("off", "on"):
+        result = subprocess.run(
+            [str(WTG), "config", "auto-grant-edits", value],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=env, check=False,
+        )
+        if result.returncode != 0 or f"auto-grant-edits: {value}" not in result.stdout:
+            failures.append(f"config auto-grant-edits {value} failed: {result.stderr}")
+        if value == "off":
+            for harness in ("codex", "claude"):
+                payload = {"session_id": f"disabled-{harness}", **native(
+                    base, "Edit", file_path=base / "README.md"
+                )}
+                actual, details = decision(harness, "pre-tool-use", payload, env)
+                print(f"{actual.upper():5} [{harness}] disabled auto-grant blocks base edit")
+                if actual != "deny":
+                    failures.append(
+                        f"{harness} disabled auto-grant expected deny, got {actual}: {details}"
+                    )
+    return failures
+
+
+def notification_failures(path: Path) -> list[str]:
+    records = read_jsonl(path)
+    sessions = {record.get("session_id") for record in records}
+    expected = {"probe-codex", "probe-claude"}
+    print(f"NOTIFY native base-edit auto grants: {len(records)} session notices")
+    if len(records) != 2 or sessions != expected:
+        return [f"notifications expected one per harness session, got {records}"]
+    if any("granted itself" not in str(record.get("message")) for record in records):
+        return ["notification does not explain that the agent granted itself permission"]
+    return []
 
 
 def decision(

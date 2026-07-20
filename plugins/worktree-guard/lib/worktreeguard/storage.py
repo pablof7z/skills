@@ -1,4 +1,4 @@
-"""Local grants and denial-log storage."""
+"""Preferences, local grants, and denial-log storage."""
 
 from __future__ import annotations
 
@@ -10,7 +10,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .core import DEFAULT_DENY_LOG_FILE, Repo, resolve_path
+from .core import DEFAULT_DENY_LOG_FILE, DEFAULT_GRANT_TTL_SECONDS, Repo, resolve_path
+
+
+STATE_VERSION = 3
+AUTO_GRANT_PREFERENCE = "auto_grant_base_edits"
 
 
 def load_hook_payload(stdin: bytes) -> dict[str, Any]:
@@ -39,9 +43,22 @@ def load_state() -> dict[str, Any]:
     try:
         payload = json.loads(state_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": 2, "grants": []}
-    grants = payload.get("grants", []) if isinstance(payload, dict) else []
-    return {"version": 2, "grants": grants if isinstance(grants, list) else []}
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    grants = payload.get("grants", [])
+    auto_grants = payload.get("auto_grants", [])
+    preferences = payload.get("preferences", {})
+    if not isinstance(preferences, dict):
+        preferences = {}
+    return {
+        "version": STATE_VERSION,
+        "grants": grants if isinstance(grants, list) else [],
+        "auto_grants": auto_grants if isinstance(auto_grants, list) else [],
+        "preferences": {
+            AUTO_GRANT_PREFERENCE: bool(preferences.get(AUTO_GRANT_PREFERENCE, True)),
+        },
+    }
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -108,6 +125,56 @@ def active_grants() -> list[dict[str, Any]]:
     return [
         grant
         for grant in load_state()["grants"]
+        if isinstance(grant, dict) and int(grant.get("expires_at", 0)) > now
+    ]
+
+
+def auto_grant_base_edits_enabled() -> bool:
+    return bool(load_state()["preferences"][AUTO_GRANT_PREFERENCE])
+
+
+def set_auto_grant_base_edits(enabled: bool) -> None:
+    state = load_state()
+    state["preferences"][AUTO_GRANT_PREFERENCE] = enabled
+    if not enabled:
+        state["auto_grants"] = []
+    save_state(state)
+
+
+def ensure_auto_grant(base_path: Path, *, session_id: str) -> bool:
+    """Persist an edit-only auto grant and return whether it was newly created."""
+    if not session_id:
+        return True
+    state = load_state()
+    now = int(time.time())
+    base = str(resolve_path(base_path))
+    active = [
+        grant for grant in state["auto_grants"]
+        if isinstance(grant, dict) and int(grant.get("expires_at", 0)) > now
+    ]
+    if any(
+        grant.get("base_path") == base and grant.get("session_id") == session_id
+        for grant in active
+    ):
+        if active != state["auto_grants"]:
+            state["auto_grants"] = active
+            save_state(state)
+        return False
+    active.append({
+        "base_path": base,
+        "session_id": session_id,
+        "created_at": now,
+        "expires_at": now + DEFAULT_GRANT_TTL_SECONDS,
+    })
+    state["auto_grants"] = active
+    save_state(state)
+    return True
+
+
+def active_auto_grants() -> list[dict[str, Any]]:
+    now = int(time.time())
+    return [
+        grant for grant in load_state()["auto_grants"]
         if isinstance(grant, dict) and int(grant.get("expires_at", 0)) > now
     ]
 

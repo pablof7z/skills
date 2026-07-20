@@ -9,9 +9,13 @@ from typing import Any
 
 from .audit import denial_message, denial_record
 from .core import emit, resolve_path
+from .notifications import notify_auto_grant
 from .operations import extract_operation, operation_cwd, payload_string, recover_codex_exec_workdir
-from .policy import blocked_operation
-from .storage import consume_valid_grant, load_hook_payload, write_denial
+from .policy import BlockedFileOperation, blocked_operation
+from .storage import (
+    auto_grant_base_edits_enabled, consume_valid_grant, ensure_auto_grant,
+    load_hook_payload, write_denial,
+)
 
 
 def cmd_hook_harness(args: argparse.Namespace) -> int:
@@ -37,6 +41,18 @@ def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
         "thread_id", "threadId",
     )
     if consume_valid_grant(blocked.base_path, session_id=session_id):
+        return 0
+    if isinstance(blocked, BlockedFileOperation) and auto_grant_base_edits_enabled():
+        if ensure_auto_grant(blocked.base_path, session_id=session_id):
+            notify_auto_grant(blocked, session_id=session_id)
+        if event == "permission-request":
+            emit({"hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "allow",
+                    "message": "WorktreeGuard auto-granted native base-edit permission.",
+                },
+            }})
         return 0
 
     message = denial_message(blocked)
