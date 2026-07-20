@@ -1,7 +1,7 @@
 # TTS producer adapter
 
 This installable skill lets an agent publish a spoken update or bounded question
-through a separately installed [TTS29](https://github.com/pablof7z-agent/tts29)
+through a separately installed [TTS29](https://github.com/pablof7z/tts29)
 daemon.
 
 The skill no longer bundles a player, synthesizer, paired-device transport,

@@ -53,7 +53,7 @@ installed skill.
 - Read [results-and-troubleshooting.md](references/results-and-troubleshooting.md)
   when publication or an answer wait fails.
 - Hosted HTTPS MCP is owned and deployed by the standalone
-  [TTS29 product](https://github.com/pablof7z-agent/tts29), not this skill.
+  [TTS29 product](https://github.com/pablof7z/tts29), not this skill.
 
 ## Product boundary
 

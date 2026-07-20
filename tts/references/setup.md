@@ -1,7 +1,7 @@
 # TTS29 adapter setup
 
 Install and start the standalone product from
-<https://github.com/pablof7z-agent/tts29>. The skill does not build it on first
+<https://github.com/pablof7z/tts29>. The skill does not build it on first
 use.
 
 ## Required
