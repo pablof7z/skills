@@ -1,4 +1,4 @@
-"""Extract shell commands and working directories from hook payloads."""
+"""Extract harness operations, working directories, and native write targets."""
 
 from __future__ import annotations
 
@@ -8,6 +8,18 @@ from pathlib import Path
 from typing import Any
 
 from .core import resolve_path
+
+
+NATIVE_WRITE_TOOLS = frozenset(
+    {"applypatch", "edit", "write", "multiedit", "notebookedit"}
+)
+PATH_INPUT_KEYS = ("file_path", "filepath", "path", "filename", "notebook_path")
+PATCH_PATH_PREFIXES = (
+    "*** Add File: ",
+    "*** Delete File: ",
+    "*** Update File: ",
+    "*** Move to: ",
+)
 
 
 def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
@@ -20,15 +32,19 @@ def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
         or payload.get("tool")
         or ""
     )
-    tool_input = payload.get("tool_input")
-    if not isinstance(tool_input, dict):
-        tool_input = event.get("tool_input")
-    if not isinstance(tool_input, dict):
-        tool_input = tool.get("input")
-    if not isinstance(tool_input, dict):
-        tool_input = {}
+    raw_input = payload.get("tool_input")
+    if not isinstance(raw_input, (dict, str)):
+        raw_input = event.get("tool_input")
+    if not isinstance(raw_input, (dict, str)):
+        raw_input = tool.get("input")
+    tool_input = raw_input if isinstance(raw_input, dict) else {}
     command = tool_input.get("command") or tool_input.get("cmd") or payload.get("command") or ""
-    return {"tool_name": str(tool_name), "command": str(command), "tool_input": tool_input}
+    return {
+        "tool_name": str(tool_name),
+        "command": str(command),
+        "tool_input": tool_input,
+        "raw_input": raw_input if isinstance(raw_input, str) else "",
+    }
 
 
 def operation_cwd(operation: dict[str, Any], fallback: Path) -> Path:
@@ -40,6 +56,72 @@ def operation_cwd(operation: dict[str, Any], fallback: Path) -> Path:
                 candidate = Path(value).expanduser()
                 return resolve_path(candidate if candidate.is_absolute() else fallback / candidate)
     return resolve_path(fallback)
+
+
+def operation_is_native_write(operation: dict[str, Any]) -> bool:
+    return normalized_tool_name(str(operation.get("tool_name") or "")) in NATIVE_WRITE_TOOLS
+
+
+def native_write_targets(operation: dict[str, Any], cwd: Path) -> list[Path]:
+    """Return ordinary target paths exposed by a harness-native write tool."""
+    targets: list[Path] = []
+    tool_input = operation.get("tool_input")
+    if isinstance(tool_input, dict):
+        targets.extend(paths_from_mapping(tool_input, cwd))
+
+    if normalized_tool_name(str(operation.get("tool_name") or "")) == "applypatch":
+        patch = patch_body(operation)
+        targets.extend(apply_patch_targets(patch, cwd))
+    return list(dict.fromkeys(targets))
+
+
+def paths_from_mapping(tool_input: dict[str, Any], cwd: Path) -> list[Path]:
+    targets: list[Path] = []
+    for key in PATH_INPUT_KEYS:
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            targets.append(resolve_operation_path(value, cwd))
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        for edit in edits:
+            if isinstance(edit, dict):
+                targets.extend(paths_from_mapping(edit, cwd))
+    return targets
+
+
+def patch_body(operation: dict[str, Any]) -> str:
+    tool_input = operation.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("patch", "input", "command"):
+            value = tool_input.get(key)
+            if isinstance(value, str):
+                return value
+    raw_input = operation.get("raw_input")
+    if isinstance(raw_input, str) and raw_input:
+        return raw_input
+    command = operation.get("command")
+    return command if isinstance(command, str) else ""
+
+
+def apply_patch_targets(patch: str, cwd: Path) -> list[Path]:
+    targets: list[Path] = []
+    for line in patch.splitlines():
+        for prefix in PATCH_PATH_PREFIXES:
+            if line.startswith(prefix):
+                value = line.removeprefix(prefix).strip()
+                if value:
+                    targets.append(resolve_operation_path(value, cwd))
+                break
+    return targets
+
+
+def resolve_operation_path(value: str, cwd: Path) -> Path:
+    candidate = Path(os.path.expandvars(value)).expanduser()
+    return resolve_path(candidate if candidate.is_absolute() else cwd / candidate)
+
+
+def normalized_tool_name(tool_name: str) -> str:
+    return tool_name.replace("_", "").replace("-", "").lower()
 
 
 def recover_codex_exec_workdir(payload: dict[str, Any]) -> dict[str, Any]:

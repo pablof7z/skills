@@ -9,7 +9,7 @@
     {
       "name": "worktree-guard",
       "source": "./plugins/worktree-guard",
-      "description": "Block six risky Git commands in base checkouts; leave linked worktrees and other tools alone."
+      "description": "Block risky Git commands and harness-native file writes in base checkouts."
     }
   ]
 }

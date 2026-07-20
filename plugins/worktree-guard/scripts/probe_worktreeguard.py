@@ -17,6 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 WTG = ROOT / "bin" / "wtg"
 BLOCKED = ("checkout", "clean", "rebase", "reset", "restore", "switch")
+NATIVE_WRITES = ("apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit")
 
 
 @dataclass(frozen=True)
@@ -63,8 +64,8 @@ def main() -> int:
             failures.append(
                 f"denial log: expected {expected_denials} records, got {len(records)}"
             )
-        if any(record.get("subcommand") not in BLOCKED for record in records):
-            failures.append("denial log contains a command outside the explicit denylist")
+        if any(not valid_denial(record) for record in records):
+            failures.append("denial log contains an operation outside the policy")
 
         if failures:
             print("\n".join(f"FAIL {failure}" for failure in failures), file=sys.stderr)
@@ -103,16 +104,36 @@ def contract_cases(temp: Path, base: Path, linked: Path) -> list[Case]:
     ]
     cases += [
         Case("allows non-Git shell command", "allow", shell(base, "printf hello")),
+        Case("allows direct shell file write", "allow", shell(base, "rm README.md")),
         Case("honors git -C base", "deny", shell(temp, f"git -C {base} reset --hard")),
         Case("honors simple cd then Git", "deny", shell(temp, f"cd {base} && git switch main")),
         Case("honors linked hook workdir", "allow", shell(base, "git reset", workdir=linked)),
         Case(
-            "ignores non-shell tools",
+            "ignores MCP tools",
             "allow",
             {"cwd": str(base), "tool_name": "mcp__anything", "tool_input": {"command": "git reset"}},
         ),
+        Case("blocks Edit target in base", "deny", native(base, "Edit", file_path=base / "README.md")),
+        Case("blocks Write target in base", "deny", native(base, "Write", path=base / "created.txt")),
+        Case("blocks MultiEdit target in base", "deny", native(base, "MultiEdit", file_path="README.md")),
+        Case("blocks NotebookEdit target in base", "deny", native(base, "NotebookEdit", notebook_path=base / "notes.ipynb")),
+        Case("blocks apply_patch target in base", "deny", patch(base, "*** Update File: README.md")),
+        Case(
+            "blocks raw apply_patch input in base",
+            "deny",
+            {
+                "cwd": str(base),
+                "tool_name": "apply_patch",
+                "tool_input": "*** Begin Patch\n*** Add File: raw.txt\n*** End Patch",
+            },
+        ),
+        Case("allows Edit target in linked worktree", "allow", native(base, "Edit", file_path=linked / "README.md")),
+        Case("allows Write target outside checkout", "allow", native(base, "Write", path=temp / "outside.txt")),
+        Case("allows apply_patch target in linked worktree", "allow", patch(linked, "*** Add File: linked.txt")),
+        Case("blocks targetless native write from base", "deny", native(base, "Write")),
+        Case("allows targetless native write from worktree", "allow", native(linked, "Write")),
         Case("malformed shell fails open", "allow", shell(base, "git 'reset")),
-        Case("permission hook uses same narrow policy", "deny", shell(base, "git restore ."), "permission-request"),
+        Case("permission hook uses same policy", "deny", native(base, "Edit", file_path=base / "README.md"), "permission-request"),
     ]
     return cases
 
@@ -124,14 +145,27 @@ def shell(cwd: Path, command: str, *, workdir: Path | None = None) -> dict[str, 
     return {"cwd": str(cwd), "tool_name": "Bash", "tool_input": tool_input}
 
 
+def native(cwd: Path, tool_name: str, **values: Path | str) -> dict[str, Any]:
+    return {
+        "cwd": str(cwd),
+        "tool_name": tool_name,
+        "tool_input": {key: str(value) for key, value in values.items()},
+    }
+
+
+def patch(cwd: Path, body: str) -> dict[str, Any]:
+    return native(cwd, "apply_patch", patch=f"*** Begin Patch\n{body}\n*** End Patch")
+
+
 def manifest_failures() -> list[str]:
     hooks = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
     failures: list[str] = []
     if set(hooks) != {"PreToolUse", "PermissionRequest"}:
         failures.append(f"unexpected hook events: {sorted(hooks)}")
+    matcher = "Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
     for event in ("PreToolUse", "PermissionRequest"):
-        if hooks[event][0].get("matcher") != "Bash|Shell":
-            failures.append(f"{event} matcher is not exactly Bash|Shell")
+        if hooks[event][0].get("matcher") != matcher:
+            failures.append(f"{event} matcher does not cover the native write tools")
     return failures
 
 
@@ -200,6 +234,10 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def valid_denial(record: dict[str, Any]) -> bool:
+    return record.get("subcommand") in BLOCKED or record.get("tool_name") in NATIVE_WRITES
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> None:

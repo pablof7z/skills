@@ -1,18 +1,22 @@
 # WorktreeGuard
 
 WorktreeGuard is a lightweight accident-prevention hook for Codex and Claude
-Code. It has one policy:
+Code. It has two narrow policies:
 
 > In a Git repository's base checkout, block `git checkout`, `git clean`,
 > `git rebase`, `git reset`, `git restore`, and `git switch`.
+>
+> Block ordinary native `apply_patch`, `Edit`, `Write`, `MultiEdit`, and
+> `NotebookEdit` operations when their target is inside a base checkout.
 
-That is the entire boundary. Those commands are allowed in linked worktrees.
-Every other Git command, non-Git shell command, patch, edit, write, and MCP tool
-is outside WorktreeGuard's policy.
+That is the entire boundary. Those operations are allowed in linked worktrees.
+Every other Git command, non-Git shell command, and MCP tool is outside
+WorktreeGuard's policy.
 
-WorktreeGuard is not a security boundary. It recognizes ordinary direct shell
-invocations well enough to prevent common agent mistakes; it does not attempt
-to stop a malicious or deliberately obfuscated caller.
+WorktreeGuard is not a security boundary. It recognizes ordinary direct Git
+invocations and the target paths provided by harness-native write tools. It
+does not inspect shell commands for indirect file writes or attempt to stop a
+malicious or deliberately obfuscated caller.
 
 ## Commands
 
@@ -33,8 +37,8 @@ tracking, or full allow-action audit.
 
 The shared `lib/worktreeguard/` package owns the policy and CLI. The Codex and
 Claude shims only translate their hook entrypoints into the shared command.
-`hooks/hooks.json` matches only `Bash|Shell` for `PreToolUse` and
-`PermissionRequest`. It installs no other lifecycle hooks.
+`hooks/hooks.json` matches `Bash|Shell` and the five native write tool names for
+`PreToolUse` and `PermissionRequest`. It installs no other lifecycle hooks.
 
 All Git main worktrees are guarded by default. No repository registration or
 protection database is required. Local grants are stored in

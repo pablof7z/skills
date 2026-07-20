@@ -2,26 +2,26 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Shell",
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
             "command": "WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" pre-tool-use; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" pre-tool-use; fi",
             "timeout": 5,
-            "statusMessage": "Checking risky Git command"
+            "statusMessage": "Checking base-checkout mutation"
           }
         ]
       }
     ],
     "PermissionRequest": [
       {
-        "matcher": "Bash|Shell",
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
             "command": "WTG_H=codex; WTG_ROOT=\"$PLUGIN_ROOT\"; if [ -z \"$WTG_ROOT\" ]; then WTG_H=claude; WTG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; fi; WTG_HOOK=\"$HOME/.local/bin/wtg-hook-$WTG_H\"; if [ -x \"$WTG_HOOK\" ]; then \"$WTG_HOOK\" permission-request; else \"$WTG_ROOT/bin/wtg-hook-$WTG_H\" permission-request; fi",
             "timeout": 5,
-            "statusMessage": "Checking risky Git command"
+            "statusMessage": "Checking base-checkout mutation"
           }
         ]
       }
