@@ -1,4 +1,4 @@
-"""The complete WorktreeGuard policy: six Git subcommands in base checkouts."""
+"""WorktreeGuard policy for risky Git commands and native file writes."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from .core import BLOCKED_GIT_COMMANDS, resolve_path
+from .core import BLOCKED_GIT_COMMANDS, Repo, resolve_path
 from .git import is_main_worktree
+from .operations import native_write_targets, operation_is_native_write
 
 
 CONTROL_TOKENS = {"&&", "||", ";", "|", "&"}
@@ -21,6 +22,74 @@ class BlockedGitOperation:
     command: str
     cwd: Path
     base_path: Path
+
+
+@dataclass(frozen=True)
+class BlockedFileOperation:
+    tool_name: str
+    cwd: Path
+    base_path: Path
+    target: Path | None
+
+
+BlockedOperation = BlockedGitOperation | BlockedFileOperation
+
+
+def blocked_operation(operation: dict[str, object], cwd: Path) -> BlockedOperation | None:
+    """Return a blocked ordinary harness operation, if one is in a base checkout."""
+    if operation_is_native_write(operation):
+        return blocked_file_operation(operation, cwd)
+    if str(operation.get("tool_name") or "") in {"Bash", "Shell"}:
+        return blocked_git_operation(str(operation.get("command") or ""), cwd)
+    return None
+
+
+def blocked_file_operation(
+    operation: dict[str, object], cwd: Path
+) -> BlockedFileOperation | None:
+    """Block native edit/write targets in a Git repository's base checkout."""
+    resolved_cwd = resolve_path(cwd)
+    targets = native_write_targets(operation, resolved_cwd)
+    for target in targets:
+        repo = base_repo_containing(target)
+        if repo is not None:
+            return BlockedFileOperation(
+                str(operation.get("tool_name") or "file write"),
+                resolved_cwd,
+                repo.base_path,
+                target,
+            )
+
+    if targets:
+        return None
+    is_base, repo = is_main_worktree(resolved_cwd)
+    if is_base and repo is not None:
+        return BlockedFileOperation(
+            str(operation.get("tool_name") or "file write"),
+            resolved_cwd,
+            repo.base_path,
+            None,
+        )
+    return None
+
+
+def base_repo_containing(target: Path) -> Repo | None:
+    context = existing_context_dir(target)
+    is_base, repo = is_main_worktree(context)
+    if not is_base or repo is None:
+        return None
+    try:
+        target.relative_to(repo.base_path)
+    except ValueError:
+        return None
+    return repo
+
+
+def existing_context_dir(path: Path) -> Path:
+    context = path if path.is_dir() else path.parent
+    while not context.exists() and context != context.parent:
+        context = context.parent
+    return context
 
 
 def blocked_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None:

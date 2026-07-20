@@ -2,10 +2,10 @@
 
 ## Purpose
 
-WorktreeGuard prevents a coding agent from accidentally running a short list
-of destructive or checkout-changing Git commands in a repository's base
-checkout. It nudges the agent toward a linked worktree, where those commands
-are allowed.
+WorktreeGuard prevents a coding agent from accidentally changing a repository's
+base checkout through its ordinary native file tools or a short list of
+destructive or checkout-changing Git commands. It nudges the agent toward a
+linked worktree, where those mutations are allowed.
 
 It is a convenience guardrail, not a security control. Simplicity and a low
 false-positive rate matter more than adversarial completeness.
@@ -15,9 +15,10 @@ false-positive rate matter more than adversarial completeness.
 There is one product named **WorktreeGuard**. Harness-specific shims for Codex
 and Claude Code are adapters to the same product, not separate variants.
 
-WorktreeGuard evaluates only Bash/Shell hook events. It does not inspect or
-classify MCP calls, patches, edits, writes, notebook operations, or arbitrary
-tool names.
+WorktreeGuard evaluates Bash/Shell hook events and the ordinary native mutation
+tools exposed by Codex and Claude Code: `apply_patch`, `Edit`, `Write`,
+`MultiEdit`, and `NotebookEdit`. It does not inspect or classify MCP calls or
+arbitrary tool names.
 
 WorktreeGuard does not provide remote approval, pairing, relays, signing,
 daemons, human-endpoint integration, branch repair, filesystem rollback,
@@ -34,7 +35,7 @@ The blocked Git subcommands are exactly:
 - `restore`
 - `switch`
 
-A command is denied only when all of the following are true:
+A shell command is denied only when all of the following are true:
 
 1. The hook is `PreToolUse` or `PermissionRequest`.
 2. The tool is Bash or Shell.
@@ -49,13 +50,23 @@ Every other operation is allowed, including:
 - all Git commands not listed above, including `add`, `commit`, `fetch`,
   `merge`, `pull`, and `worktree`;
 - all non-Git shell commands;
-- all non-shell tools;
+- MCP tools and unrecognized non-shell tools;
 - malformed or unrecognized input.
 
 The parser should understand common accidental forms such as a hook-supplied
 working directory, `git -C <path> ...`, `git --work-tree <path> ...`, and a
 simple `cd <path> && git ...` sequence. It need not defeat aliases, nested shell
 evaluation, deliberate obfuscation, or other bypass attempts.
+
+A native mutation is denied when its ordinary target-path field, or an
+`apply_patch` file header, resolves inside a repository's main/base worktree.
+Targets in linked worktrees and outside the base checkout are allowed. If a
+recognized native mutation supplies no target, its hook working directory is
+used as the conservative fallback.
+
+WorktreeGuard does not parse shell commands to discover file writes. An agent
+could write through `rm`, `sed`, Python, an indirect shell, or another tool; that
+is intentionally outside this accident-prevention boundary.
 
 Repository discovery is live through Git. Main worktrees are guarded by
 default; no explicit repository registration exists.
@@ -83,7 +94,8 @@ denial log.
 ## Hook behavior
 
 The shared hook manifest installs only `PreToolUse` and `PermissionRequest`,
-both with matcher `Bash|Shell`. It installs no other lifecycle hooks.
+both matching `Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit`. It
+installs no other lifecycle hooks.
 
 A denial uses the harness's normal hook decision JSON and exits successfully;
 the hook decision, not the process exit status, carries allow/deny behavior.
@@ -98,8 +110,11 @@ prove:
 - all six are allowed in linked worktrees;
 - representative normal Git and non-Git commands are allowed in a base;
 - `git -C`, hook workdir, and simple `cd && git` resolve the correct checkout;
-- non-shell tool payloads are ignored even if invoked directly in a test;
-- the hook manifest contains only policy events and matches only Bash/Shell;
+- all recognized native mutation tools are denied for base-checkout targets;
+- native mutations remain allowed in linked worktrees and outside the base;
+- MCP and unrecognized non-shell tool payloads are ignored;
+- the hook manifest contains only policy events and matches the explicit shell
+  and native-mutation tool names;
 - a local once override allows exactly one otherwise-blocked command;
 - malformed input fails open;
 - only denials are logged.

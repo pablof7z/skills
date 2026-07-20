@@ -10,7 +10,7 @@ from typing import Any
 from .audit import denial_message, denial_record
 from .core import emit, resolve_path
 from .operations import extract_operation, operation_cwd, payload_string, recover_codex_exec_workdir
-from .policy import blocked_git_operation
+from .policy import blocked_operation
 from .storage import consume_valid_grant, load_hook_payload, write_denial
 
 
@@ -26,10 +26,9 @@ def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
         return 0
 
     operation = extract_operation(payload)
-    if operation["tool_name"] not in {"Bash", "Shell"}:
-        return 0
     payload_cwd = resolve_path(str(payload.get("cwd") or os.getcwd()))
-    blocked = blocked_git_operation(operation["command"], operation_cwd(operation, payload_cwd))
+    cwd = operation_cwd(operation, payload_cwd)
+    blocked = blocked_operation(operation, cwd)
     if blocked is None:
         return 0
 
