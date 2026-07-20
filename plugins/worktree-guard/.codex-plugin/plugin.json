@@ -1,7 +1,7 @@
 {
   "name": "worktree-guard",
-  "version": "0.3.1",
-  "description": "Lightweight Git and native-edit accident prevention for base checkouts.",
+  "version": "0.3.2",
+  "description": "Configurable Git and native-edit awareness for base checkouts.",
   "author": {
     "name": "Pablo Fernandez",
     "url": "https://github.com/pablof7z"
@@ -17,8 +17,8 @@
   ],
   "interface": {
     "displayName": "WorktreeGuard",
-    "shortDescription": "Keep agent mutations out of base checkouts.",
-    "longDescription": "A lightweight accident-prevention hook that blocks six risky Git commands and harness-native file writes in Git base checkouts. Linked worktrees remain available for mutations.",
+    "shortDescription": "Control and surface base-checkout mutations.",
+    "longDescription": "A lightweight accident-prevention hook that blocks six risky Git commands and provides configurable, notified auto-grants for harness-native file writes in Git base checkouts.",
     "developerName": "Pablo Fernandez",
     "category": "Productivity",
     "capabilities": [

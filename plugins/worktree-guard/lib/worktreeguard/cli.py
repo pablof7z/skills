@@ -14,7 +14,8 @@ from .core import BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, WorktreeGuard
 from .git import discover_repo
 from .hooks import cmd_hook_harness
 from .storage import (
-    active_grants, create_grant, deny_log_path, read_denials, request_human_approval,
+    active_auto_grants, active_grants, auto_grant_base_edits_enabled, create_grant,
+    deny_log_path, read_denials, request_human_approval, set_auto_grant_base_edits,
     stable_hook_shim_path, state_path,
 )
 
@@ -54,6 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--timeout", type=int, default=0)
     request.set_defaults(func=cmd_request_base_access)
 
+    config = subparsers.add_parser("config", help="Inspect or change WorktreeGuard preferences")
+    config_settings = config.add_subparsers(dest="setting", required=True)
+    auto_grant = config_settings.add_parser(
+        "auto-grant-edits", help="Show or change native base-edit auto grants"
+    )
+    auto_grant.add_argument("value", nargs="?", choices=["on", "off"])
+    auto_grant.set_defaults(func=cmd_config_auto_grant_edits)
+
     doctor = subparsers.add_parser("doctor", help="Check the local WorktreeGuard installation")
     doctor.set_defaults(func=cmd_doctor)
 
@@ -78,6 +87,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if repo.worktree_path == repo.base_path:
         print(f"Base checkout guarded: {repo.base_path}")
         print("Blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
+        print(f"Native edit auto-grants: {on_off(auto_grant_base_edits_enabled())}")
     else:
         print(f"Linked worktree unrestricted: {repo.worktree_path}")
         print(f"Base checkout: {repo.base_path}")
@@ -93,6 +103,7 @@ def cmd_current(args: argparse.Namespace) -> int:
         "worktree": str(repo.worktree_path),
         "is_base_checkout": repo.worktree_path == repo.base_path,
         "blocked_git_commands": sorted(BLOCKED_GIT_COMMANDS),
+        "auto_grant_base_edits": auto_grant_base_edits_enabled(),
     })
     return 0
 
@@ -116,6 +127,13 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_auto_grant_edits(args: argparse.Namespace) -> int:
+    if args.value is not None:
+        set_auto_grant_base_edits(args.value == "on")
+    print(f"auto-grant-edits: {on_off(auto_grant_base_edits_enabled())}")
+    return 0
+
+
 def cmd_doctor(_args: argparse.Namespace) -> int:
     git_path = shutil.which("git")
     print(f"git: {git_path or 'missing'}")
@@ -126,6 +144,8 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         status = "executable" if os.access(shim, os.X_OK) else "missing"
         print(f"hook shim ({harness}): {shim} ({status})")
     print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
+    print(f"auto-grant base edits: {on_off(auto_grant_base_edits_enabled())}")
+    print(f"active edit auto-grants: {len(active_auto_grants())}")
     print(f"active overrides: {len(active_grants())}")
     return 0 if git_path else 1
 
@@ -143,8 +163,15 @@ def cmd_denials(args: argparse.Namespace) -> int:
     else:
         print(f"Denied commands: {len(records)} ({deny_log_path()})")
         for record in tail:
+            action = (
+                f"git {record.get('subcommand')}"
+                if record.get("subcommand") else str(record.get("tool_name") or "mutation")
+            )
             print(
-                f"{record.get('timestamp', '')} git {record.get('subcommand', '')} "
-                f"in {record.get('base_path', '')}"
+                f"{record.get('timestamp', '')} {action} in {record.get('base_path', '')}"
             )
     return 0
+
+
+def on_off(value: bool) -> str:
+    return "on" if value else "off"
