@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -22,17 +23,30 @@ def notify_auto_grant(base_path: Path, *, reason: str, session_id: str) -> None:
         return
     if sys.platform != "darwin":
         return
+    terminal_notifier = shutil.which("terminal-notifier")
+    if terminal_notifier and deliver([
+        terminal_notifier,
+        "-title", "WorktreeGuard",
+        "-subtitle", "Base access auto-granted",
+        "-message", message,
+    ]):
+        return
     script = (
         f'display notification "{apple_script_string(message)}" '
         'with title "WorktreeGuard" subtitle "Base access auto-granted"'
     )
+    deliver(["osascript", "-e", script])
+
+
+def deliver(command: list[str]) -> bool:
     try:
-        subprocess.run(
-            ["osascript", "-e", script], stdout=subprocess.DEVNULL,
+        result = subprocess.run(
+            command, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=2, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return False
+    return result.returncode == 0
 
 
 def apple_script_string(value: str) -> str:
