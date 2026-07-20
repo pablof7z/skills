@@ -63,7 +63,9 @@ protection database is required. Local grants are stored in
 `~/.local/state/worktreeguard/state.json` alongside the auto-grant preference;
 denials are appended to `~/worktreeguard-denied-actions.jsonl`. Notifications are
 local, non-interactive, and best-effort; notification delivery failure does not
-block the grant.
+block the grant. On macOS, WorktreeGuard prefers `terminal-notifier` when it is
+available so the title, status, and message appear directly in Notification
+Center. It falls back to AppleScript when no native sender is installed.
 
 ## Install
 
