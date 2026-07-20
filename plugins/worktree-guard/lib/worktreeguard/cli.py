@@ -13,8 +13,9 @@ from pathlib import Path
 from .core import BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, WorktreeGuardError, emit, resolve_path
 from .git import discover_repo
 from .hooks import cmd_hook_harness
+from .notifications import notify_auto_grant
 from .storage import (
-    active_auto_grants, active_grants, auto_grant_base_edits_enabled, create_grant,
+    active_grants, auto_grant_base_edits_enabled, create_grant,
     deny_log_path, read_denials, request_human_approval, set_auto_grant_base_edits,
     stable_hook_shim_path, state_path,
 )
@@ -87,7 +88,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if repo.worktree_path == repo.base_path:
         print(f"Base checkout guarded: {repo.base_path}")
         print("Blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
-        print(f"Native edit auto-grants: {on_off(auto_grant_base_edits_enabled())}")
+        print(f"Auto-grant base access requests: {on_off(auto_grant_base_edits_enabled())}")
     else:
         print(f"Linked worktree unrestricted: {repo.worktree_path}")
         print(f"Base checkout: {repo.base_path}")
@@ -112,15 +113,20 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
     repo = discover_repo(Path(args.repo))
     if repo.worktree_path != repo.base_path:
         raise WorktreeGuardError("This is already a linked worktree; no override is needed.")
-    decision = request_human_approval(
-        repo=repo, reason=args.reason, requested_scope=args.scope, timeout=args.timeout
-    )
+    session_id = os.environ.get("WTG_SESSION_ID", "")
+    if auto_grant_base_edits_enabled():
+        decision = args.scope
+        notify_auto_grant(repo.base_path, reason=args.reason, session_id=session_id)
+    else:
+        decision = request_human_approval(
+            repo=repo, reason=args.reason, requested_scope=args.scope, timeout=args.timeout
+        )
     if decision is None:
         print("Denied. Run the Git command from a linked worktree instead.", file=sys.stderr)
         return 1
     grant = create_grant(
         base_path=repo.base_path, scope=decision, reason=args.reason,
-        ttl_seconds=args.ttl_seconds, session_id=os.environ.get("WTG_SESSION_ID", ""),
+        ttl_seconds=args.ttl_seconds, session_id=session_id,
     )
     expires = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(grant["expires_at"]))
     print(f"Approved {decision} override until {expires}. Retry the command.")
@@ -144,8 +150,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         status = "executable" if os.access(shim, os.X_OK) else "missing"
         print(f"hook shim ({harness}): {shim} ({status})")
     print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
-    print(f"auto-grant base edits: {on_off(auto_grant_base_edits_enabled())}")
-    print(f"active edit auto-grants: {len(active_auto_grants())}")
+    print(f"auto-grant base access requests: {on_off(auto_grant_base_edits_enabled())}")
     print(f"active overrides: {len(active_grants())}")
     return 0 if git_path else 1
 
