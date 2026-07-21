@@ -1,0 +1,4 @@
+interface:
+  display_name: "Visual Storytelling"
+  short_description: "Turn ideas into clear visual narratives"
+  default_prompt: "Use $visual-storytelling to turn this idea into an original, high-contrast visual narrative."
