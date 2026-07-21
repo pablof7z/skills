@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,11 +31,6 @@ class WorktreeGuardError(RuntimeError):
 
 def resolve_path(raw_path: str | Path) -> Path:
     return Path(raw_path).expanduser().resolve(strict=False)
-
-
-def command_name() -> str:
-    raw = os.environ.get("WTG_COMMAND") or sys.argv[0] or "wtg"
-    return "wtg" if raw == "wtg" else shlex.quote(str(resolve_path(raw)))
 
 
 def emit(payload: dict[str, Any]) -> None:

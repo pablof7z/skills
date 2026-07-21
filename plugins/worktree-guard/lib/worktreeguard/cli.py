@@ -51,7 +51,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     request.add_argument("--repo", default=".")
     request.add_argument("--reason", required=True)
-    request.add_argument("--scope", default="session", choices=["once", "operation", "session"])
     request.add_argument("--ttl-seconds", type=int, default=DEFAULT_GRANT_TTL_SECONDS)
     request.add_argument("--timeout", type=int, default=0)
     request.set_defaults(func=cmd_request_base_access)
@@ -113,24 +112,34 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
     repo = discover_repo(Path(args.repo))
     if repo.worktree_path != repo.base_path:
         raise WorktreeGuardError("This is already a linked worktree; no override is needed.")
-    session_id = os.environ.get("WTG_SESSION_ID", "")
+    session_id = current_session_id()
+    if not session_id:
+        raise WorktreeGuardError(
+            "Cannot determine the current Codex or Claude Code session; no access was granted."
+        )
     if auto_grant_base_edits_enabled():
-        decision = args.scope
+        approved = True
         notify_auto_grant(repo.base_path, reason=args.reason, session_id=session_id)
     else:
-        decision = request_human_approval(
-            repo=repo, reason=args.reason, requested_scope=args.scope, timeout=args.timeout
-        )
-    if decision is None:
+        approved = request_human_approval(repo=repo, reason=args.reason, timeout=args.timeout)
+    if not approved:
         print("Denied. Run the Git command from a linked worktree instead.", file=sys.stderr)
         return 1
     grant = create_grant(
-        base_path=repo.base_path, scope=decision, reason=args.reason,
+        base_path=repo.base_path, reason=args.reason,
         ttl_seconds=args.ttl_seconds, session_id=session_id,
     )
     expires = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(grant["expires_at"]))
-    print(f"Approved {decision} override until {expires}. Retry the command.")
+    print(f"Approved session override until {expires}. Retry the command.")
     return 0
+
+
+def current_session_id() -> str:
+    for name in ("WTG_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"):
+        session_id = os.environ.get(name, "").strip()
+        if session_id:
+            return session_id
+    return ""
 
 
 def cmd_config_auto_grant_edits(args: argparse.Namespace) -> int:
