@@ -13,7 +13,9 @@ Both are blocked in a base checkout until the agent explicitly asks for access
 with `wtg request-base-access`. A write never grants itself permission; only a
 request does. Once a request is granted, that harness session may both edit
 files and run the six Git commands in that base checkout until the grant
-expires. Everything is always allowed in linked worktrees.
+expires. Every grant is bound to the current Codex or Claude Code session;
+there is no one-command scope or sessionless fallback. Everything is always
+allowed in linked worktrees.
 
 `auto-grant-edits` controls how a *request* is answered, not whether the guard
 applies. With it on (the default), a request is granted immediately and you get
@@ -42,7 +44,8 @@ python3 <plugin-root>/scripts/probe_worktreeguard.py
 
 `request-base-access` is the only way to obtain a grant. It is auto-granted with
 a notification when `auto-grant-edits` is on, and asks through a local macOS
-dialog when it is off. There is no remote approval, pairing, daemon, relay, MCP
+dialog when it is off. A request outside a detectable Codex or Claude Code
+session is refused. There is no remote approval, pairing, daemon, relay, MCP
 integration, automatic branch repair, session cwd tracking, or full allow-action
 audit.
 

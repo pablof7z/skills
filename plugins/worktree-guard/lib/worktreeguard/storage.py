@@ -13,7 +13,7 @@ from typing import Any
 from .core import DEFAULT_DENY_LOG_FILE, DEFAULT_GRANT_TTL_SECONDS, Repo, resolve_path
 
 
-STATE_VERSION = 3
+STATE_VERSION = 4
 AUTO_GRANT_PREFERENCE = "auto_grant_base_edits"
 
 
@@ -47,12 +47,20 @@ def load_state() -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {}
     grants = payload.get("grants", [])
+    if not isinstance(grants, list):
+        grants = []
     preferences = payload.get("preferences", {})
     if not isinstance(preferences, dict):
         preferences = {}
+    session_grants = [
+        grant for grant in grants
+        if isinstance(grant, dict)
+        and grant.get("scope") == "session"
+        and str(grant.get("session_id") or "")
+    ]
     return {
         "version": STATE_VERSION,
-        "grants": grants if isinstance(grants, list) else [],
+        "grants": session_grants,
         "preferences": {
             AUTO_GRANT_PREFERENCE: bool(preferences.get(AUTO_GRANT_PREFERENCE, True)),
         },
@@ -73,19 +81,20 @@ def save_state(state: dict[str, Any]) -> None:
 
 
 def create_grant(
-    *, base_path: Path, scope: str, reason: str, ttl_seconds: int, session_id: str = ""
+    *, base_path: Path, reason: str, ttl_seconds: int, session_id: str
 ) -> dict[str, Any]:
+    if not session_id:
+        raise ValueError("session_id is required")
     now = int(time.time())
     grant: dict[str, Any] = {
         "id": f"grant-{now}-{os.getpid()}",
         "base_path": str(resolve_path(base_path)),
-        "scope": "once" if scope in {"once", "operation"} else "session",
+        "scope": "session",
         "reason": reason,
         "created_at": now,
         "expires_at": now + max(1, ttl_seconds),
+        "session_id": session_id,
     }
-    if session_id:
-        grant["session_id"] = session_id
     state = load_state()
     state["grants"].append(grant)
     save_state(state)
@@ -93,6 +102,8 @@ def create_grant(
 
 
 def consume_valid_grant(base_path: Path, *, session_id: str = "") -> bool:
+    if not session_id:
+        return False
     state = load_state()
     now = int(time.time())
     active: list[dict[str, Any]] = []
@@ -104,12 +115,11 @@ def consume_valid_grant(base_path: Path, *, session_id: str = "") -> bool:
         applies = (
             not matched
             and str(grant.get("base_path") or "") == str(resolve_path(base_path))
-            and (not grant_session or grant_session == session_id)
+            and grant_session == session_id
         )
         if applies:
             matched = True
-            if grant.get("scope") != "once":
-                active.append(grant)
+            active.append(grant)
         else:
             active.append(grant)
     if active != state["grants"]:
@@ -137,23 +147,19 @@ def set_auto_grant_base_edits(enabled: bool) -> None:
     save_state(state)
 
 
-def request_human_approval(*, repo: Repo, reason: str, requested_scope: str, timeout: int) -> str | None:
+def request_human_approval(*, repo: Repo, reason: str, timeout: int) -> bool:
     override = os.environ.get("WTG_APPROVAL_RESPONSE", "").strip().lower()
     if override:
-        if override in {"allow", "approve", "session"}:
-            return "once" if requested_scope in {"once", "operation"} else "session"
-        if override in {"once", "operation"}:
-            return "once"
-        return None
+        return override in {"allow", "approve", "session"}
     if sys.platform != "darwin":
-        return None
+        return False
     prompt = (
         "Allow a coding agent to run a normally blocked Git command?\n\n"
-        f"Base checkout: {repo.base_path}\nScope: {requested_scope}\n\nReason:\n{reason}"
+        f"Base checkout: {repo.base_path}\nScope: current harness session\n\nReason:\n{reason}"
     )
     escaped = prompt.replace("\\", "\\\\").replace('"', '\\"')
     script = (
-        f'display dialog "{escaped}" buttons {{"Deny", "Allow once", "Allow session"}} '
+        f'display dialog "{escaped}" buttons {{"Deny", "Allow session"}} '
         'default button "Deny" cancel button "Deny" with icon caution\nbutton returned of result'
     )
     try:
@@ -162,10 +168,10 @@ def request_human_approval(*, repo: Repo, reason: str, requested_scope: str, tim
             timeout=timeout if timeout > 0 else None, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return False
     if result.returncode != 0:
-        return None
-    return {"Allow once": "once", "Allow session": "session"}.get(result.stdout.strip())
+        return False
+    return result.stdout.strip() == "Allow session"
 
 
 def write_denial(record: dict[str, Any]) -> None:

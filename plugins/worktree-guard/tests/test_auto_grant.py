@@ -8,8 +8,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -51,14 +52,25 @@ class BaseAccessTests(unittest.TestCase):
         self.environment.stop()
         self.temporary.cleanup()
 
-    def test_existing_state_migrates_with_auto_grant_on(self) -> None:
+    def test_existing_state_keeps_only_session_bound_grants(self) -> None:
+        expires_at = int(time.time()) + 300
         self.state.write_text(
-            json.dumps({"version": 2, "grants": [{"id": "existing"}]}),
+            json.dumps({"version": 3, "grants": [
+                {
+                    "id": "session", "scope": "session",
+                    "session_id": "s", "expires_at": expires_at,
+                },
+                {
+                    "id": "once", "scope": "once",
+                    "session_id": "s", "expires_at": expires_at,
+                },
+                {"id": "unbound", "scope": "session", "expires_at": expires_at},
+            ]}),
             encoding="utf-8",
         )
         state = load_state()
-        self.assertEqual(state["version"], 3)
-        self.assertEqual(state["grants"], [{"id": "existing"}])
+        self.assertEqual(state["version"], 4)
+        self.assertEqual([grant["id"] for grant in state["grants"]], ["session"])
         self.assertTrue(auto_grant_base_edits_enabled())
 
     def test_unrequested_base_edit_is_denied_even_with_auto_grant_on(self) -> None:
@@ -80,6 +92,9 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(notices[0]["base_path"], str(self.base))
         self.assertIn("requested and was auto-granted", notices[0]["message"])
         self.assertEqual(len(active_grants()), 1)
+        self.assertEqual(active_grants()[0]["scope"], "session")
+        self.assertEqual(active_grants()[0]["session_id"], "session-one")
+        self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
         self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
 
     def test_granted_session_also_unblocks_git(self) -> None:
@@ -94,6 +109,41 @@ class BaseAccessTests(unittest.TestCase):
         self.assertFalse(self.notifications.exists())
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_one_time_approval_response_is_rejected(self) -> None:
+        set_auto_grant_base_edits(False)
+        with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "once"}):
+            self.assertEqual(request_access(self.base, "one command only"), 1)
+        self.assertEqual(active_grants(), [])
+
+    def test_scope_option_is_not_accepted(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main([
+                "request-base-access", "--repo", str(self.base),
+                "--reason", "one command only", "--scope", "once",
+            ])
+
+    def test_codex_thread_id_binds_request_when_override_is_absent(self) -> None:
+        with patch.dict(os.environ, {
+            "WTG_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "", "CODEX_THREAD_ID": "codex-session",
+        }):
+            self.assertEqual(request_access(self.base, "codex base edit"), 0)
+        self.assertEqual(active_grants()[0]["session_id"], "codex-session")
+
+    def test_claude_code_session_id_binds_request_when_override_is_absent(self) -> None:
+        with patch.dict(os.environ, {
+            "WTG_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "claude-session",
+            "CODEX_THREAD_ID": "",
+        }):
+            self.assertEqual(request_access(self.base, "claude base edit"), 0)
+        self.assertEqual(active_grants()[0]["session_id"], "claude-session")
+
+    def test_request_without_harness_session_is_refused(self) -> None:
+        with patch.dict(os.environ, {
+            "WTG_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "", "CODEX_THREAD_ID": "",
+        }), redirect_stderr(io.StringIO()):
+            self.assertEqual(request_access(self.base, "unbound edit"), 1)
+        self.assertEqual(active_grants(), [])
 
     def test_grant_does_not_leak_to_another_session(self) -> None:
         self.assertEqual(request_access(self.base, "scoped to session-one"), 0)

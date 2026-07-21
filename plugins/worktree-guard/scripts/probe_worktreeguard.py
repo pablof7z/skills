@@ -62,7 +62,7 @@ def main() -> int:
         expected_denials += 2
         failures.extend(request_grant_failures(base, env))
         expected_denials += 1
-        failures.extend(once_override_failures(base, env))
+        failures.extend(session_approval_failures(base, env))
         expected_denials += 1
         records = read_jsonl(Path(env["WTG_DENY_LOG_FILE"]))
         if len(records) != expected_denials:
@@ -196,23 +196,30 @@ def shim_failures(temp: Path) -> list[str]:
     return failures
 
 
-def once_override_failures(base: Path, env: dict[str, str]) -> list[str]:
+def session_approval_failures(base: Path, env: dict[str, str]) -> list[str]:
     """With auto-grant off, the request falls back to asking the local human."""
     set_auto_grant(env, "off")
-    approval_env = {**env, "WTG_APPROVAL_RESPONSE": "once"}
+    approval_env = {
+        **env, "WTG_APPROVAL_RESPONSE": "session", "WTG_SESSION_ID": "approved-session",
+    }
     result = subprocess.run(
         [str(WTG), "request-base-access", "--repo", str(base), "--reason", "probe"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=approval_env, check=False,
     )
     if result.returncode != 0:
-        return [f"once override request failed: {result.stderr}"]
-    payload = {"session_id": "grant", **shell(base, "git reset --hard")}
+        return [f"session override request failed: {result.stderr}"]
+    payload = {"session_id": "approved-session", **shell(base, "git reset --hard")}
     first, _ = decision("codex", "pre-tool-use", payload, env)
     second, _ = decision("codex", "pre-tool-use", payload, env)
-    print(f"{first.upper():5} [codex] once override permits first blocked command")
-    print(f"{second.upper():5} [codex] once override is consumed")
-    return [] if (first, second) == ("allow", "deny") else [
-        f"once override expected allow then deny, got {first} then {second}"
+    other, _ = decision(
+        "codex", "pre-tool-use",
+        {"session_id": "other-session", **shell(base, "git reset --hard")}, env,
+    )
+    print(f"{first.upper():5} [codex] session override permits first blocked command")
+    print(f"{second.upper():5} [codex] session override permits later blocked command")
+    print(f"{other.upper():5} [codex] session override does not leak")
+    return [] if (first, second, other) == ("allow", "allow", "deny") else [
+        f"session override expected allow, allow, deny; got {first}, {second}, {other}"
     ]
 
 

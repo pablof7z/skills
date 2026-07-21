@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .core import command_name
 from .operations import payload_string
 from .policy import BlockedFileOperation, BlockedGitOperation, BlockedOperation
 
@@ -21,11 +20,10 @@ def denial_message(operation: BlockedOperation) -> str:
         detail = f"\nTarget: {operation.target}" if operation.target is not None else ""
     return (
         f"WorktreeGuard blocked {summary}:\n{operation.base_path}{detail}\n\n"
-        "Run the mutation from a linked worktree instead. Non-Git shell commands "
-        "remain outside WorktreeGuard's file-write policy.\n\n"
-        "If this base-checkout mutation is intentional, request a short local override:\n"
-        f"  {command_name()} request-base-access --repo "
-        f"{shlex.quote(str(operation.base_path))} --reason \"<why>\""
+        "Shouldn't you be working on a Git worktree?\n\n"
+        "If you really meant to work in the base checkout, use "
+        f"`wtg request-base-access --repo {shlex.quote(str(operation.base_path))} "
+        "--reason \"<why>\"` to request permission."
     )
 
 
