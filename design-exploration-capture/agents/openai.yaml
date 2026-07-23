@@ -1,4 +1,0 @@
-interface:
-  display_name: "Design Exploration Capture"
-  short_description: "Capture iterative design exploration"
-  default_prompt: "Use $design-exploration-capture to explore an unresolved design direction while keeping concise notes and checking high-leverage adjacent risks."
