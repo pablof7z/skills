@@ -25,6 +25,15 @@ The agent should inspect the repository before it writes, identify the real audi
 
 ## The Skills
 
+### [Runbook: Learn Procedures From Real Work](runbook/SKILL.md)
+
+Recurring requests should get easier without letting yesterday's procedure
+override today's user instruction or live source of truth. `runbook` stores a
+compact, revisable procedure in an agent-owned directory and ships a local
+helper for finding, capturing, reviewing, and validating it.
+
+[See the runbook workflow and safety boundary →](runbook/SKILL.md)
+
 ### [TTS: Publish to a Durable Spoken Queue](tts/README.md)
 
 The `tts` skill is a thin producer adapter for the standalone
@@ -98,6 +107,7 @@ Most skill folders contain instructions and reference material only. The excepti
 - `design-exploration-capture` may create or update local exploration notes while a design session is active.
 - `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
+- `runbook` writes only to the selected runbook directory and makes no network requests.
 - The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
 
 Installation copies skill folders into `~/.agents/skills`. Remove a copied
