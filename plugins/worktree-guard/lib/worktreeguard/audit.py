@@ -14,7 +14,7 @@ from .policy import BlockedFileOperation, BlockedGitOperation, BlockedOperation
 def denial_message(operation: BlockedOperation) -> str:
     if isinstance(operation, BlockedGitOperation):
         summary = f"`git {operation.subcommand}` in the base checkout"
-        detail = ""
+        detail = f"\nRejected command:\n{operation.command}"
     else:
         summary = f"the native `{operation.tool_name}` tool in the base checkout"
         detail = f"\nTarget: {operation.target}" if operation.target is not None else ""

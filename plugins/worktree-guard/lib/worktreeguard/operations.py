@@ -158,12 +158,33 @@ def transcript_exec_input(*, transcript_path: str, command: str, turn_id: str) -
         item = record.get("payload") if isinstance(record, dict) else None
         if not isinstance(item, dict) or record.get("type") != "response_item":
             continue
-        if item.get("type") != "custom_tool_call" or item.get("name") != "exec":
+        exec_input = transcript_item_exec_input(item, command)
+        if exec_input is None:
             continue
         metadata = item.get("internal_chat_message_metadata_passthrough")
         item_turn = str(metadata.get("turn_id") or "") if isinstance(metadata, dict) else ""
         if turn_id and item_turn != turn_id:
             return None
+        return exec_input
+    return None
+
+
+def transcript_item_exec_input(
+    item: dict[str, Any], command: str
+) -> dict[str, Any] | None:
+    if item.get("type") == "function_call" and item.get("name") == "exec_command":
+        arguments = item.get("arguments")
+        if not isinstance(arguments, str):
+            return None
+        try:
+            value = json.loads(arguments)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(value, dict) and str(value.get("cmd") or "") == command:
+            return value
+        return None
+
+    if item.get("type") == "custom_tool_call" and item.get("name") == "exec":
         source = item.get("input")
         return parse_exec_call(source, command) if isinstance(source, str) else None
     return None
