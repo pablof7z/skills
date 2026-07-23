@@ -17,9 +17,11 @@ from worktreeguard.policy import BlockedGitOperation  # noqa: E402
 class DenialMessageTests(unittest.TestCase):
     def test_denial_points_to_worktree_and_short_permission_command(self) -> None:
         base = Path("/repo")
-        message = denial_message(BlockedGitOperation("reset", "git reset", base, base))
+        command = "git reset --hard\n\ngit status"
+        message = denial_message(BlockedGitOperation("reset", command, base, base))
 
         self.assertIn("Shouldn't you be working on a Git worktree?", message)
+        self.assertIn(f"Rejected command:\n{command}", message)
         self.assertIn(
             "If you really meant to work in the base checkout, use "
             "`wtg request-base-access --repo /repo --reason \"<why>\"` "
