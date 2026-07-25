@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "COSG_H=codex; COSG_ROOT=\"$PLUGIN_ROOT\"; if [ -z \"$COSG_ROOT\" ]; then COSG_H=claude; COSG_ROOT=\"$CLAUDE_PLUGIN_ROOT\"; fi; COSG_HOOK=\"$HOME/.local/bin/cosg-hook-$COSG_H\"; if [ -x \"$COSG_HOOK\" ]; then \"$COSG_HOOK\" pre-tool-use; else \"$COSG_ROOT/bin/cosg-hook-$COSG_H\" pre-tool-use; fi",
+            "timeout": 5,
+            "statusMessage": "Checking chief-of-staff orchestration boundary"
+          }
+        ]
+      }
+    ]
+  }
+}
