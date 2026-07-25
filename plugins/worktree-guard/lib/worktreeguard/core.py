@@ -15,6 +15,7 @@ BLOCKED_GIT_COMMANDS = frozenset(
 )
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
+DEFAULT_REQUEST_LOG_FILE = "worktreeguard-base-access-requests.jsonl"
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,7 @@ def main() -> int:
         env = os.environ.copy()
         env["WTG_STATE_FILE"] = str(temp / "state.json")
         env["WTG_DENY_LOG_FILE"] = str(temp / "denials.jsonl")
+        env["WTG_REQUEST_LOG_FILE"] = str(temp / "requests.jsonl")
         env["WTG_NOTIFICATION_LOG_FILE"] = str(temp / "notifications.jsonl")
         base, linked = make_repo(temp)
         failures.extend(manifest_failures())

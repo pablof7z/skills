@@ -10,14 +10,15 @@ import sys
 import time
 from pathlib import Path
 
+from .audit import request_record
 from .core import BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, WorktreeGuardError, emit, resolve_path
 from .git import discover_repo
 from .hooks import cmd_hook_harness
 from .notifications import notify_auto_grant
 from .storage import (
     active_grants, auto_grant_base_edits_enabled, create_grant,
-    deny_log_path, read_denials, request_human_approval, set_auto_grant_base_edits,
-    stable_hook_shim_path, state_path,
+    deny_log_path, read_denials, read_requests, request_human_approval, request_log_path,
+    set_auto_grant_base_edits, stable_hook_shim_path, state_path, write_request,
 )
 
 
@@ -73,6 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
     denials.add_argument("--json", action="store_true")
     denials.set_defaults(func=cmd_denials)
 
+    requests = subparsers.add_parser(
+        "requests", help="Inspect past request-base-access reasons"
+    )
+    requests.add_argument("--tail", type=int, default=20)
+    requests.add_argument("--repo")
+    requests.add_argument("--session")
+    requests.add_argument("--json", action="store_true")
+    requests.set_defaults(func=cmd_requests)
+
     hook = subparsers.add_parser("hook", help="Run a harness hook")
     harnesses = hook.add_subparsers(dest="harness", required=True)
     for harness_name in ("codex", "claude"):
@@ -119,9 +129,15 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
         )
     if auto_grant_base_edits_enabled():
         approved = True
+        method = "auto_grant"
         notify_auto_grant(repo.base_path, reason=args.reason, session_id=session_id)
     else:
         approved = request_human_approval(repo=repo, reason=args.reason, timeout=args.timeout)
+        method = "human_approval"
+    write_request(request_record(
+        base_path=repo.base_path, reason=args.reason, session_id=session_id,
+        approved=approved, method=method,
+    ))
     if not approved:
         print("Denied. Run the Git command from a linked worktree instead.", file=sys.stderr)
         return 1
@@ -154,6 +170,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     print(f"git: {git_path or 'missing'}")
     print(f"state: {state_path()}")
     print(f"deny log: {deny_log_path()}")
+    print(f"request log: {request_log_path()}")
     for harness in ("codex", "claude"):
         shim = stable_hook_shim_path(harness)
         status = "executable" if os.access(shim, os.X_OK) else "missing"
@@ -183,6 +200,27 @@ def cmd_denials(args: argparse.Namespace) -> int:
             )
             print(
                 f"{record.get('timestamp', '')} {action} in {record.get('base_path', '')}"
+            )
+    return 0
+
+
+def cmd_requests(args: argparse.Namespace) -> int:
+    records = read_requests()
+    if args.repo:
+        repo = str(resolve_path(args.repo))
+        records = [record for record in records if record.get("base_path") == repo]
+    if args.session:
+        records = [record for record in records if record.get("session_id") == args.session]
+    tail = records[-max(0, args.tail) :] if args.tail else []
+    if args.json:
+        emit({"log": str(request_log_path()), "total": len(records), "tail": tail})
+    else:
+        print(f"Base access requests: {len(records)} ({request_log_path()})")
+        for record in tail:
+            outcome = "approved" if record.get("approved") else "denied"
+            print(
+                f"{record.get('timestamp', '')} {outcome} in {record.get('base_path', '')}: "
+                f"{record.get('reason', '')}"
             )
     return 0
 

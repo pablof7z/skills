@@ -1,4 +1,4 @@
-"""Messages and records for the only event WorktreeGuard logs: a denial."""
+"""Messages and records for the two events WorktreeGuard logs: a denial or a base-access request."""
 
 from __future__ import annotations
 
@@ -49,3 +49,17 @@ def denial_record(
             target=str(operation.target) if operation.target is not None else None,
         )
     return record
+
+
+def request_record(
+    *, base_path: Path, reason: str, session_id: str, approved: bool, method: str,
+) -> dict[str, Any]:
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": "request-base-access",
+        "base_path": str(base_path),
+        "reason": reason,
+        "session_id": session_id,
+        "approved": approved,
+        "method": method,
+    }

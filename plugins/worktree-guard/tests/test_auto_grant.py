@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 from worktreeguard.cli import main  # noqa: E402
 from worktreeguard.hooks import run_harness_hook  # noqa: E402
 from worktreeguard.storage import (  # noqa: E402
-    active_grants, auto_grant_base_edits_enabled, load_state,
+    active_grants, auto_grant_base_edits_enabled, load_state, read_requests,
     set_auto_grant_base_edits,
 )
 
@@ -34,6 +34,7 @@ class BaseAccessTests(unittest.TestCase):
         self.state = root / "state.json"
         self.notifications = root / "notifications.jsonl"
         self.denials = root / "denials.jsonl"
+        self.requests = root / "requests.jsonl"
         run(["git", "init", "-q", "-b", "main", str(self.base)])
         run(["git", "config", "user.email", "probe@example.com"], cwd=self.base)
         run(["git", "config", "user.name", "Probe"], cwd=self.base)
@@ -44,6 +45,7 @@ class BaseAccessTests(unittest.TestCase):
             "WTG_STATE_FILE": str(self.state),
             "WTG_NOTIFICATION_LOG_FILE": str(self.notifications),
             "WTG_DENY_LOG_FILE": str(self.denials),
+            "WTG_REQUEST_LOG_FILE": str(self.requests),
             "WTG_SESSION_ID": "session-one",
         })
         self.environment.start()
@@ -96,6 +98,13 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(active_grants()[0]["session_id"], "session-one")
         self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
         self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
+        logged = read_requests()
+        self.assertEqual(len(logged), 1)
+        self.assertEqual(logged[0]["reason"], "user asked for a base edit")
+        self.assertEqual(logged[0]["base_path"], str(self.base))
+        self.assertEqual(logged[0]["session_id"], "session-one")
+        self.assertTrue(logged[0]["approved"])
+        self.assertEqual(logged[0]["method"], "auto_grant")
 
     def test_granted_session_also_unblocks_git(self) -> None:
         self.assertEqual(request_access(self.base, "rebasing on purpose"), 0)
@@ -109,6 +118,11 @@ class BaseAccessTests(unittest.TestCase):
         self.assertFalse(self.notifications.exists())
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+        logged = read_requests()
+        self.assertEqual(len(logged), 1)
+        self.assertEqual(logged[0]["reason"], "should be refused")
+        self.assertFalse(logged[0]["approved"])
+        self.assertEqual(logged[0]["method"], "human_approval")
 
     def test_one_time_approval_response_is_rejected(self) -> None:
         set_auto_grant_base_edits(False)
@@ -144,6 +158,15 @@ class BaseAccessTests(unittest.TestCase):
         }), redirect_stderr(io.StringIO()):
             self.assertEqual(request_access(self.base, "unbound edit"), 1)
         self.assertEqual(active_grants(), [])
+
+    def test_requests_command_reports_logged_reasons(self) -> None:
+        self.assertEqual(request_access(self.base, "auditable reason"), 0)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["requests", "--repo", str(self.base), "--json"]), 0)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["tail"][0]["reason"], "auditable reason")
 
     def test_grant_does_not_leak_to_another_session(self) -> None:
         self.assertEqual(request_access(self.base, "scoped to session-one"), 0)
