@@ -84,6 +84,14 @@ from the stable agent identity and keeps session identity out of that choice.
 
 [See the private-state boundary and resolver →](home-directory/SKILL.md)
 
+### [Prime Context: Research a Topic Once, Reuse It All Session](prime-context/README.md)
+
+Agents that investigate the same subject twice waste the second pass reconstructing what the first pass already learned, usually with less care about sources and uncertainty. `prime-context` delegates topic research to a subagent that checks the calling agent's own research root for a prior matching entry before doing new work, then writes a single sourced note when nothing relevant exists.
+
+The calling agent reads the resulting note itself, confirms tersely, and keeps the topic primed for the rest of the session — capturing follow-up notes as new evidence arrives.
+
+[See the note contract and ownership resolution →](prime-context/README.md)
+
 ### [NIP-60: Keep Nostr Cashu Wallet State Coherent](nip60/README.md)
 
 In a Cashu wallet, the hard part is not drawing a balance. It is keeping proofs, mints, encrypted Nostr events, pending operations, nutzaps, and recovery coherent when the network is partial and money is in motion.
@@ -107,6 +115,7 @@ Most skill folders contain instructions and reference material only. The excepti
 - `design-exploration-capture` may create or update local exploration notes while a design session is active.
 - `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
+- `prime-context` reads and writes research notes only under the calling agent's own `~/.agents/home/{identifier}/research` directory, resolved via `home-directory`. It does not write to a shared location or another agent's home.
 - `runbook` writes only to the selected runbook directory and makes no network requests.
 - The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
 
