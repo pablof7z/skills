@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prime Context"
+  short_description: "Load and preserve sourced topic research"
+  default_prompt: "Use $prime-context to investigate this topic, reuse prior research when available, and load the findings into context."
