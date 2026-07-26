@@ -37,7 +37,7 @@ helper for finding, capturing, reviewing, and validating it.
 ### [TTS: Publish to a Durable Spoken Queue](tts/README.md)
 
 The `tts` skill is a thin producer adapter for the standalone
-[TTS29](https://github.com/pablof7z-agent/tts29) product. An agent publishes one
+[TTS29](https://github.com/pablof7z/tts29) product. An agent publishes one
 durable spoken item or bounded question; iPhone, macOS, and compatible NIP-29
 clients independently reconstruct and play the shared queue.
 
