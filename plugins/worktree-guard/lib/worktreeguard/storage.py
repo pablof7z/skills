@@ -10,7 +10,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .core import DEFAULT_DENY_LOG_FILE, DEFAULT_GRANT_TTL_SECONDS, Repo, resolve_path
+from .core import (
+    DEFAULT_DENY_LOG_FILE, DEFAULT_GRANT_TTL_SECONDS, DEFAULT_REQUEST_LOG_FILE, Repo, resolve_path,
+)
 
 
 STATE_VERSION = 4
@@ -33,6 +35,11 @@ def state_path() -> Path:
 def deny_log_path() -> Path:
     override = os.environ.get("WTG_DENY_LOG_FILE")
     return resolve_path(override) if override else Path.home() / DEFAULT_DENY_LOG_FILE
+
+
+def request_log_path() -> Path:
+    override = os.environ.get("WTG_REQUEST_LOG_FILE")
+    return resolve_path(override) if override else Path.home() / DEFAULT_REQUEST_LOG_FILE
 
 
 def stable_hook_shim_path(harness: str) -> Path:
@@ -175,7 +182,22 @@ def request_human_approval(*, repo: Repo, reason: str, timeout: int) -> bool:
 
 
 def write_denial(record: dict[str, Any]) -> None:
-    path = deny_log_path()
+    _append_jsonl(deny_log_path(), record)
+
+
+def read_denials() -> list[dict[str, Any]]:
+    return _read_jsonl(deny_log_path())
+
+
+def write_request(record: dict[str, Any]) -> None:
+    _append_jsonl(request_log_path(), record)
+
+
+def read_requests() -> list[dict[str, Any]]:
+    return _read_jsonl(request_log_path())
+
+
+def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -184,9 +206,9 @@ def write_denial(record: dict[str, Any]) -> None:
         pass
 
 
-def read_denials() -> list[dict[str, Any]]:
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     try:
-        lines = deny_log_path().read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     records: list[dict[str, Any]] = []
