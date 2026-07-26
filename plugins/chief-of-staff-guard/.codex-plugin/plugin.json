@@ -1,0 +1,32 @@
+{
+  "name": "chief-of-staff-guard",
+  "version": "0.1.0",
+  "description": "Blocks state-mutating shell and file-write actions from chief-of-staff harness sessions outside its own tracking-repo home.",
+  "author": {
+    "name": "Pablo Fernandez",
+    "url": "https://github.com/pablof7z"
+  },
+  "repository": "https://github.com/pablof7z/skills",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "mosaico",
+    "chief-of-staff",
+    "hooks",
+    "guardrails"
+  ],
+  "interface": {
+    "displayName": "ChiefOfStaffGuard",
+    "shortDescription": "Keep chief-of-staff sessions to orchestration, not implementation.",
+    "longDescription": "A PreToolUse hook that blocks state-mutating shell commands and file writes from chief-of-staff harness sessions everywhere except its own tracking-repo home, forcing implementation work to be dispatched to another agent instead of performed directly.",
+    "developerName": "Pablo Fernandez",
+    "category": "Productivity",
+    "capabilities": [
+      "Hooks",
+      "Policy"
+    ],
+    "defaultPrompt": [
+      "Dispatch implementation work to another agent instead of doing it directly."
+    ]
+  }
+}

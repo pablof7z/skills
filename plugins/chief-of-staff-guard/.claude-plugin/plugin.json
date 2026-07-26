@@ -1,0 +1,20 @@
+{
+  "name": "chief-of-staff-guard",
+  "displayName": "ChiefOfStaffGuard",
+  "version": "0.1.0",
+  "description": "Blocks state-mutating shell and file-write actions from chief-of-staff harness sessions outside its own tracking-repo home.",
+  "author": {
+    "name": "Pablo Fernandez",
+    "url": "https://github.com/pablof7z"
+  },
+  "homepage": "https://github.com/pablof7z/skills",
+  "repository": "https://github.com/pablof7z/skills",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "mosaico",
+    "chief-of-staff",
+    "hooks",
+    "guardrails"
+  ]
+}
