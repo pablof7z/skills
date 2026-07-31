@@ -59,13 +59,13 @@ Skills rarely fail in clean, repeatable ways. An instruction is ambiguous, a tri
 
 [See how real skill friction becomes a durable issue →](meta-feedback/SKILL.md)
 
-### [Design Exploration Capture: Preserve the Path to a Decision](design-exploration-capture/README.md)
+### [Whiteboard: Preserve the Path to a Decision](whiteboard/README.md)
 
-The hardest design discussions do not fail from a lack of ideas. They fail when assumptions quietly become decisions, rejected options return without context, or implementation begins before the important uncertainty is gone.
+The hardest exploratory discussions do not fail from a lack of ideas. They fail when assumptions quietly become decisions, rejected options return without context, or implementation begins before the important uncertainty is gone.
 
-`design-exploration-capture` keeps the exploration alive without letting it become vague: evidence, tensions, risks, alternatives, and decision signals stay distinct until the direction actually converges.
+`whiteboard` keeps the exploration alive without letting it become vague: evidence, tensions, risks, alternatives, and decision signals stay distinct until the direction actually converges.
 
-[See how an open question becomes a defensible decision →](design-exploration-capture/README.md)
+[See how an open question becomes a defensible decision →](whiteboard/README.md)
 
 ### [High Level: Understand Without Drowning](high-level/README.md)
 
@@ -112,7 +112,7 @@ Most skill folders contain instructions and reference material only. The excepti
   installed TTS29 daemon. It does not read daemon credentials, synthesize or
   store audio, pair devices, own playback, or implement Nostr.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
-- `design-exploration-capture` may create or update local exploration notes while a design session is active.
+- `whiteboard` may create or update local exploration notes while an exploration session is active.
 - `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
 - `prime-context` reads and writes research notes only under the calling agent's own `~/.agents/home/{identifier}/research` directory, resolved via `home-directory`. It does not write to a shared location or another agent's home.

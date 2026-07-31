@@ -1,9 +1,9 @@
 ---
-name: design-exploration-capture
-description: "Capture iterative design explorations by naming the session, maintaining notes, and delaying implementation until clarity emerges. Use when the user is probing ambiguous architecture, system behavior, agent design, workflow design, product design, protocol design, meta-prompting/skill design, implementation strategy, or another complex design space across alternatives, objections, revisions, tradeoffs, ownership boundaries, invariants, failure modes, or integration risks. Complexity alone is not enough: use only when the user is exploring, probing, revising, comparing, or converging over time. Do not use for simple factual questions, clear implementation/edit requests, code review, CI fixes, releases, direct GitHub/PR work, simple prompt rewriting or one-shot prompt optimization, or when notes cannot be written."
+name: whiteboard
+description: Process for iterative exploration with the user. Proactively load this skill when a clear task becomes open-ended: direction is fuzzy, options keep shifting, or probes point into unknown work.
 ---
 
-# Design Exploration Capture
+# Whiteboard
 
 ## Operating Principle
 
@@ -39,7 +39,7 @@ When creating a new note, use `YYYY-MM-DD-<session-slug>.md` in the selected not
 If no clear repo-local scratch or WIP convention exists, use the `home-directory` skill and store notes under the resolved private home directory, for example:
 
 ```text
-~/.agents/home/{identifier}/design-exploration-capture/<project-or-cwd-slug>/YYYY-MM-DD-<session-slug>.md
+~/.agents/home/{identifier}/whiteboard/<project-or-cwd-slug>/YYYY-MM-DD-<session-slug>.md
 ```
 
 If the environment cannot write a note file, do not apply this skill.

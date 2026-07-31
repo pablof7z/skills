@@ -1,6 +1,6 @@
 # Note Schema And Examples
 
-Read this file when creating or refreshing a design exploration note, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
+Read this file when creating or refreshing a whiteboard exploration note, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
 
 ## Note Template
 
