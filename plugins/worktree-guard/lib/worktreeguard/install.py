@@ -42,15 +42,15 @@ def install_hooks(*, grok: bool = True) -> list[str]:
             messages.append(f"missing source shim: {source}")
             continue
         target = bin_dir / f"wtg-hook-{name}"
-        shutil.copy2(source, target)
-        target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        install_executable(source, target)
         messages.append(f"installed {target}")
 
     wtg_source = root / "bin" / "wtg"
     if wtg_source.is_file():
         wtg_target = bin_dir / "wtg"
-        shutil.copy2(wtg_source, wtg_target)
-        # Ensure the copied CLI can import the package from the plugin root.
+        # Always write a real file that imports this plugin root; never write
+        # through an existing symlink (e.g. old Claude marketplace pin).
+        replace_path(wtg_target)
         wtg_target.write_text(
             "#!/usr/bin/env python3\n"
             "from __future__ import annotations\n"
@@ -60,12 +60,27 @@ def install_hooks(*, grok: bool = True) -> list[str]:
             "raise SystemExit(main())\n",
             encoding="utf-8",
         )
-        wtg_target.chmod(wtg_target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        make_executable(wtg_target)
         messages.append(f"installed {wtg_target}")
 
     if grok:
         messages.extend(install_grok_global_hook(bin_dir / "wtg-hook-dispatch"))
     return messages
+
+
+def install_executable(source: Path, target: Path) -> None:
+    replace_path(target)
+    shutil.copy2(source, target)
+    make_executable(target)
+
+
+def replace_path(path: Path) -> None:
+    if path.is_symlink() or path.exists():
+        path.unlink()
+
+
+def make_executable(path: Path) -> None:
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def install_grok_global_hook(dispatch: Path) -> list[str]:
