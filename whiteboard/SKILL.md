@@ -22,25 +22,25 @@ Treat tentative language like "I think X might work" as a hypothesis, not approv
 
 ## Note Location
 
-Resolve the current project context from the workspace, using `git rev-parse --show-toplevel` when available and the current directory otherwise.
-
-During active exploration, prefer private or session-local scratch notes. Create or update durable repo/project notes only when the project already has a clear convention for WIP/design notes, the user asks to save/write/document it, or the design has converged enough that losing the state would be costly.
-
-When choosing a repo-local note location, prefer existing conventions. Check, in this order:
-
-- `.planning/` and its local patterns, such as `notes/`, `phases/`, `workstreams/`, or `explorations/`
-- project-specific planning directories
-- `notes/`, `docs/notes/`, `docs/plans/`, or similar project note folders
-- `WIP.md`, only when the project already uses it for active exploratory tracking or links
-- ADR folders and canonical docs, for style and prior decisions only until convergence
-
-When creating a new note, use `YYYY-MM-DD-<session-slug>.md` in the selected notes location. If an existing note clearly matches the same session, update it instead of creating another.
-
-If no clear repo-local scratch or WIP convention exists, use the `home-directory` skill and store notes under the resolved private home directory, for example:
+Always store exploration notes under the agent private home from the `home-directory` skill:
 
 ```text
-~/.agents/home/{identifier}/whiteboard/<project-or-cwd-slug>/YYYY-MM-DD-<session-slug>.md
+~/.agents/home/{identifier}/whiteboard/<project-slug>/YYYY-MM-DD-<session-slug>.md
 ```
+
+Resolve `{identifier}` with `home-directory` (stable agent identity, not a session handle).
+
+Resolve `<project-slug>` as:
+
+1. The git repository name when inside a git work tree. Use the main repository directory name, not the worktree directory name:
+
+```bash
+basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+```
+
+2. Otherwise the basename of the current working directory only (`basename "$PWD"`), never a full path.
+
+Create parent directories as needed. If an existing note clearly matches the same session, update it instead of creating another. Do not write exploration notes into the project tree.
 
 If the environment cannot write a note file, do not apply this skill.
 
@@ -118,7 +118,7 @@ Obey direct user override commands immediately:
 - `mark this as decided`: mark the session `decided`, unless doing so would create a false record; if unclear, record the user's command as the decision signal.
 - `split this into a new session`: create a separate note and move the relevant context.
 - `merge this with the previous session`: merge only related explorations and preserve distinct decisions/risks.
-- `save this now`: persist the current note to the best available scratch or project note surface without bypassing the convergence gate for canonical artifacts.
+- `save this now`: flush the current note under the agent private home path without bypassing the convergence gate for canonical project artifacts.
 - `do not run background agents here`: stop proactive adjacent exploration for this session unless the user later re-enables it.
 
 When the user corrects an interpretation, revise the affected note sections retroactively. Do not merely append a correction below stale assumptions.
