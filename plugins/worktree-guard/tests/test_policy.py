@@ -74,12 +74,25 @@ class WorktreeGuardPolicyTests(unittest.TestCase):
             native("Write", path=str(self.base / "new.txt")),
             native("MultiEdit", file_path="tracked.txt"),
             native("NotebookEdit", notebook_path=str(self.base / "notes.ipynb")),
+            native("search_replace", file_path=str(self.base / "tracked.txt")),
         )
         for operation in cases:
             with self.subTest(tool=operation["tool_name"]):
                 blocked = blocked_operation(operation, self.base)
                 self.assertIsNotNone(blocked)
                 self.assertEqual(blocked.base_path, self.base)
+
+    def test_grok_shell_tool_is_blocked_in_base(self) -> None:
+        for tool_name in ("run_terminal_command", "run_terminal_cmd", "Bash", "Shell"):
+            with self.subTest(tool=tool_name):
+                operation = {
+                    "tool_name": tool_name,
+                    "command": "git checkout -b feature",
+                    "tool_input": {"command": "git checkout -b feature"},
+                }
+                blocked = blocked_operation(operation, self.base)
+                self.assertIsNotNone(blocked)
+                self.assertEqual(blocked.subcommand, "checkout")
 
     def test_apply_patch_targets_are_blocked_in_base(self) -> None:
         patch = "\n".join((
@@ -118,6 +131,22 @@ class WorktreeGuardPolicyTests(unittest.TestCase):
     def test_non_native_tool_is_outside_file_write_policy(self) -> None:
         operation = native("mcp__server__write_file", path=str(self.base / "new.txt"))
         self.assertIsNone(blocked_operation(operation, self.base))
+
+    def test_grok_camelcase_payload_extracts_and_blocks(self) -> None:
+        from worktreeguard.operations import extract_operation
+
+        payload = {
+            "sessionId": "grok-1",
+            "cwd": str(self.base),
+            "toolName": "run_terminal_command",
+            "toolInput": {"command": f"git -C {self.base} reset --hard"},
+        }
+        operation = extract_operation(payload)
+        self.assertEqual(operation["tool_name"], "run_terminal_command")
+        self.assertIn("reset", operation["command"])
+        blocked = blocked_operation(operation, self.base)
+        self.assertIsNotNone(blocked)
+        self.assertEqual(blocked.subcommand, "reset")
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> None:

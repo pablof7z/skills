@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Harness-detecting PreToolUse entrypoint for WorktreeGuard.
+
+Grok resolves plugin hook commands relative to hooks/hooks.json, so this
+shim lives under bin/ and is invoked as ``../bin/wtg-hook-dispatch``. It
+picks Codex, Claude, or Grok from the environment and delegates to the
+shared ``wtg hook <harness> <event>`` surface.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    event = sys.argv[1] if len(sys.argv) > 1 else "hook"
+    stdin = sys.stdin.buffer.read()
+    harness = detect_harness()
+    wtg_bin = select_wtg_binary()
+
+    env = os.environ.copy()
+    env.setdefault("WTG_COMMAND", str(wtg_bin))
+
+    result = subprocess.run(
+        [str(wtg_bin), "hook", harness, event],
+        input=stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+    sys.stdout.buffer.write(result.stdout)
+    sys.stderr.buffer.write(result.stderr)
+    return result.returncode
+
+
+def detect_harness() -> str:
+    if os.environ.get("GROK_PLUGIN_ROOT") or os.environ.get("GROK_SESSION_ID"):
+        return "grok"
+    if os.environ.get("PLUGIN_ROOT") and not os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "codex"
+    if os.environ.get("CLAUDE_PLUGIN_ROOT") or os.environ.get("CLAUDE_CODE_SESSION_ID"):
+        # Grok also sets CLAUDE_PLUGIN_ROOT as an alias; prefer grok when
+        # Grok-specific vars are present (checked above).
+        if os.environ.get("CODEX_THREAD_ID"):
+            return "codex"
+        return "claude"
+    if os.environ.get("CODEX_THREAD_ID"):
+        return "codex"
+    # Fallback: Claude-compatible path used by older installs.
+    return "claude"
+
+
+def select_wtg_binary() -> Path:
+    override = os.environ.get("WTG_BIN")
+    if override:
+        return Path(override).expanduser().resolve(strict=False)
+
+    plugin_root = Path(__file__).resolve().parents[1]
+    for key in ("GROK_PLUGIN_ROOT", "PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
+        value = os.environ.get(key)
+        if value:
+            candidate = Path(value) / "bin" / "wtg"
+            if candidate.is_file():
+                return candidate
+
+    bundled = plugin_root / "bin" / "wtg"
+    if bundled.is_file():
+        return bundled
+
+    external = shutil.which("wtg")
+    if external:
+        return Path(external).resolve(strict=False)
+
+    return bundled
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
