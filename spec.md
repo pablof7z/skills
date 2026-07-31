@@ -12,13 +12,15 @@ false-positive rate matter more than adversarial completeness.
 
 ## Product boundary
 
-There is one product named **WorktreeGuard**. Harness-specific shims for Codex
-and Claude Code are adapters to the same product, not separate variants.
+There is one product named **WorktreeGuard**. Harness-specific shims for Codex,
+Claude Code, and Grok Build are adapters to the same product, not separate
+variants.
 
-WorktreeGuard evaluates Bash/Shell hook events and the ordinary native mutation
-tools exposed by Codex and Claude Code: `apply_patch`, `Edit`, `Write`,
-`MultiEdit`, and `NotebookEdit`. It does not inspect or classify MCP calls or
-arbitrary tool names.
+WorktreeGuard evaluates shell hook events (`Bash`, `Shell`, and Grok
+`run_terminal_command` / `run_terminal_cmd`) and the ordinary native mutation
+tools exposed by Codex, Claude Code, and Grok: `apply_patch`, `Edit`, `Write`,
+`MultiEdit`, `NotebookEdit`, and Grok `search_replace`. It does not inspect or
+classify MCP calls or arbitrary tool names.
 
 WorktreeGuard does not provide remote approval, pairing, relays, signing,
 daemons, human-endpoint integration, branch repair, filesystem rollback,
@@ -38,7 +40,8 @@ The blocked Git subcommands are exactly:
 A shell command is denied only when all of the following are true:
 
 1. The hook is `PreToolUse`.
-2. The tool is Bash or Shell.
+2. The tool is a recognized shell tool (`Bash`, `Shell`, or Grok
+   `run_terminal_command` / `run_terminal_cmd`).
 3. An ordinary direct shell invocation resolves to one of the six subcommands.
 4. The invocation's effective Git working directory belongs to the repository's
    main/base worktree.
@@ -108,21 +111,30 @@ denial log.
 
 ## Hook behavior
 
-The shared hook manifest installs only `PreToolUse`, matching
-`Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit`. It installs no other
-lifecycle hooks. WorktreeGuard does not participate in the harness's own
-permission system: it inspects what a tool is about to do and decides, and
-permission for a base-checkout mutation is requested through `wtg`, never
-through a harness prompt.
+The shared hook manifest installs only `PreToolUse`, matching shell tools and
+recognized native mutation tools including Grok's `run_terminal_command` and
+`search_replace`. It installs no other lifecycle hooks. WorktreeGuard does not
+participate in the harness's own permission system: it inspects what a tool is
+about to do and decides, and permission for a base-checkout mutation is
+requested through `wtg`, never through a harness prompt.
 
-A denial uses the harness's normal hook decision JSON and exits successfully. A
-grant-covered operation is silent. The hook never creates a grant; it only
-consumes one. Hook decisions, not process exit status, carry behavior. Failures
-to parse payloads or discover repositories fail open.
+Grok Build 0.2.x discovers plugin-bundled hooks but does not execute them.
+`wtg install-hooks` therefore installs stable shims under `~/.local/bin` and
+registers `~/.grok/hooks/worktree-guard.json` so Grok runs the same policy
+through its global hook path. Claude Code and Codex continue to use the plugin
+manifest directly.
+
+A denial uses the harness's normal hook decision JSON and exits successfully.
+Denials include both Claude/Codex `hookSpecificOutput.permissionDecision` and
+Grok `decision`/`reason` fields. A grant-covered operation is silent. The hook
+never creates a grant; it only consumes one. Hook decisions, not process exit
+status, carry behavior. Failures to parse payloads or discover repositories fail
+open. Session detection for grants accepts `WTG_SESSION_ID`, `GROK_SESSION_ID`,
+`CLAUDE_CODE_SESSION_ID`, and `CODEX_THREAD_ID`.
 
 ## Acceptance tests
 
-The regression probe must exercise both Codex and Claude dispatch paths and
+The regression probe must exercise Codex, Claude, and Grok dispatch paths and
 prove:
 
 - all six listed commands are denied in a base checkout;

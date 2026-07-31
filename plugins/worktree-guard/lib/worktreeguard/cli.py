@@ -15,6 +15,7 @@ from .core import BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, WorktreeGuard
 from .git import discover_repo
 from .hooks import cmd_hook_harness
 from .notifications import notify_auto_grant
+from .install import install_hooks
 from .storage import (
     active_grants, auto_grant_base_edits_enabled, create_grant,
     deny_log_path, read_denials, read_requests, request_human_approval, request_log_path,
@@ -67,6 +68,17 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", help="Check the local WorktreeGuard installation")
     doctor.set_defaults(func=cmd_doctor)
 
+    install = subparsers.add_parser(
+        "install-hooks",
+        help="Install stable hook shims and register the Grok global hook",
+    )
+    install.add_argument(
+        "--no-grok",
+        action="store_true",
+        help="Skip writing ~/.grok/hooks/worktree-guard.json",
+    )
+    install.set_defaults(func=cmd_install_hooks)
+
     denials = subparsers.add_parser("denials", help="Inspect blocked Git command records")
     denials.add_argument("--tail", type=int, default=20)
     denials.add_argument("--repo")
@@ -85,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     hook = subparsers.add_parser("hook", help="Run a harness hook")
     harnesses = hook.add_subparsers(dest="harness", required=True)
-    for harness_name in ("codex", "claude"):
+    for harness_name in ("codex", "claude", "grok"):
         harness = harnesses.add_parser(harness_name)
         harness.add_argument("event", nargs="?", default="hook")
         harness.set_defaults(func=cmd_hook_harness)
@@ -125,7 +137,8 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
     session_id = current_session_id()
     if not session_id:
         raise WorktreeGuardError(
-            "Cannot determine the current Codex or Claude Code session; no access was granted."
+            "Cannot determine the current Codex, Claude Code, or Grok session; "
+            "no access was granted."
         )
     if auto_grant_base_edits_enabled():
         approved = True
@@ -151,7 +164,12 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
 
 
 def current_session_id() -> str:
-    for name in ("WTG_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"):
+    for name in (
+        "WTG_SESSION_ID",
+        "GROK_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ID",
+        "CODEX_THREAD_ID",
+    ):
         session_id = os.environ.get(name, "").strip()
         if session_id:
             return session_id
@@ -171,14 +189,25 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     print(f"state: {state_path()}")
     print(f"deny log: {deny_log_path()}")
     print(f"request log: {request_log_path()}")
-    for harness in ("codex", "claude"):
+    for harness in ("codex", "claude", "grok", "dispatch"):
         shim = stable_hook_shim_path(harness)
         status = "executable" if os.access(shim, os.X_OK) else "missing"
         print(f"hook shim ({harness}): {shim} ({status})")
+    grok_hook = Path.home() / ".grok" / "hooks" / "worktree-guard.json"
+    print(
+        f"grok global hook: {grok_hook} "
+        f"({'present' if grok_hook.is_file() else 'missing'})"
+    )
     print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
     print(f"auto-grant base access requests: {on_off(auto_grant_base_edits_enabled())}")
     print(f"active overrides: {len(active_grants())}")
     return 0 if git_path else 1
+
+
+def cmd_install_hooks(args: argparse.Namespace) -> int:
+    for message in install_hooks(grok=not args.no_grok):
+        print(message)
+    return 0
 
 
 def cmd_denials(args: argparse.Namespace) -> int:

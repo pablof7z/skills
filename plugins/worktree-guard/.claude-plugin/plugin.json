@@ -1,7 +1,7 @@
 {
   "name": "worktree-guard",
   "displayName": "WorktreeGuard",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Configurable Git and native-edit awareness for base checkouts.",
   "author": {
     "name": "Pablo Fernandez",
@@ -12,6 +12,8 @@
   "license": "MIT",
   "keywords": [
     "claude-code",
+    "codex",
+    "grok",
     "git",
     "worktree",
     "hooks",

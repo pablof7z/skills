@@ -9,7 +9,7 @@ from typing import Union
 
 from .core import BLOCKED_GIT_COMMANDS, Repo, resolve_path
 from .git import is_main_worktree
-from .operations import native_write_targets, operation_is_native_write
+from .operations import native_write_targets, operation_is_native_write, operation_is_shell
 
 
 CONTROL_TOKENS = {"&&", "||", ";", "|", "&"}
@@ -40,7 +40,7 @@ def blocked_operation(operation: dict[str, object], cwd: Path) -> BlockedOperati
     """Return a blocked ordinary harness operation, if one is in a base checkout."""
     if operation_is_native_write(operation):
         return blocked_file_operation(operation, cwd)
-    if str(operation.get("tool_name") or "") in {"Bash", "Shell"}:
+    if operation_is_shell(operation):
         return blocked_git_operation(str(operation.get("command") or ""), cwd)
     return None
 

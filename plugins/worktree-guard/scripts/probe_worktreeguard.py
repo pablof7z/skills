@@ -17,7 +17,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 WTG = ROOT / "bin" / "wtg"
 BLOCKED = ("checkout", "clean", "rebase", "reset", "restore", "switch")
-NATIVE_WRITES = ("apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit")
+NATIVE_WRITES = (
+    "apply_patch", "Edit", "Write", "MultiEdit", "NotebookEdit", "search_replace",
+)
 
 
 @dataclass(frozen=True)
@@ -43,7 +45,7 @@ def main() -> int:
 
         cases = contract_cases(temp, base, linked)
         expected_denials = 0
-        for harness in ("codex", "claude"):
+        for harness in ("codex", "claude", "grok"):
             for index, case in enumerate(cases):
                 payload = {
                     "session_id": f"probe-{harness}",
@@ -60,7 +62,7 @@ def main() -> int:
                     )
 
         failures.extend(auto_grant_setting_failures(base, env))
-        expected_denials += 2
+        expected_denials += 3  # codex, claude, grok disabled-auto-grant denials
         failures.extend(request_grant_failures(base, env))
         expected_denials += 1
         failures.extend(session_approval_failures(base, env))
@@ -76,7 +78,7 @@ def main() -> int:
         if failures:
             print("\n".join(f"FAIL {failure}" for failure in failures), file=sys.stderr)
             return 1
-        print(f"PASS {len(cases) * 2 + 7} decisions; denials logged={len(records)}")
+        print(f"PASS {len(cases) * 3 + 7} decisions; denials logged={len(records)}")
         return 0
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -123,6 +125,29 @@ def contract_cases(temp: Path, base: Path, linked: Path) -> list[Case]:
         Case("blocks unrequested Write target in base", "deny", native(base, "Write", path=base / "created.txt")),
         Case("blocks unrequested MultiEdit target in base", "deny", native(base, "MultiEdit", file_path="README.md")),
         Case("blocks unrequested NotebookEdit target in base", "deny", native(base, "NotebookEdit", notebook_path=base / "notes.ipynb")),
+        Case(
+            "blocks unrequested search_replace target in base",
+            "deny",
+            native(base, "search_replace", file_path=base / "README.md"),
+        ),
+        Case(
+            "blocks unrequested Grok shell git checkout in base",
+            "deny",
+            {
+                "cwd": str(base),
+                "tool_name": "run_terminal_command",
+                "tool_input": {"command": "git checkout -b probe"},
+            },
+        ),
+        Case(
+            "blocks camelCase Grok shell git checkout in base",
+            "deny",
+            {
+                "cwd": str(base),
+                "toolName": "run_terminal_command",
+                "toolInput": {"command": "git checkout -b probe"},
+            },
+        ),
         Case("blocks unrequested apply_patch target in base", "deny", patch(base, "*** Update File: README.md")),
         Case(
             "blocks unrequested raw apply_patch input in base",
@@ -168,7 +193,10 @@ def manifest_failures() -> list[str]:
     failures: list[str] = []
     if set(hooks) != {"PreToolUse"}:
         failures.append(f"unexpected hook events: {sorted(hooks)}")
-    matcher = "Bash|Shell|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
+    matcher = (
+        "Bash|Shell|run_terminal_command|run_terminal_cmd|apply_patch|"
+        "Edit|Write|MultiEdit|NotebookEdit|search_replace"
+    )
     if hooks["PreToolUse"][0].get("matcher") != matcher:
         failures.append("PreToolUse matcher does not cover the native write tools")
     return failures
@@ -183,12 +211,22 @@ def shim_failures(temp: Path) -> list[str]:
         ("wtg-hook-codex", {}, "hook codex pre-tool-use"),
         ("wtg-hook-claude", {"transcript_path": "/tmp/.claude/session.jsonl"}, "hook claude pre-tool-use"),
         ("wtg-hook-claude", {"transcript_path": "/tmp/.codex/session.jsonl"}, "hook codex pre-tool-use"),
+        ("wtg-hook-grok", {}, "hook grok pre-tool-use"),
+        ("wtg-hook-dispatch", {"GROK_SESSION_ID": "g1"}, "hook grok pre-tool-use"),
+        ("wtg-hook-dispatch", {"PLUGIN_ROOT": "/tmp/plugin"}, "hook codex pre-tool-use"),
+        ("wtg-hook-dispatch", {"CLAUDE_PLUGIN_ROOT": "/tmp/plugin"}, "hook claude pre-tool-use"),
     )
     failures: list[str] = []
-    for shim, payload, expected in scenarios:
+    for shim, payload_or_env, expected in scenarios:
+        if shim == "wtg-hook-dispatch":
+            run_env = {**env, **payload_or_env}
+            payload: dict[str, Any] = {}
+        else:
+            run_env = env
+            payload = payload_or_env
         result = subprocess.run(
             [str(ROOT / "bin" / shim), "pre-tool-use"], input=json.dumps(payload),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=run_env, check=False,
         )
         actual = result.stdout.strip()
         print(f"{actual.upper():27} {shim} routes to shared WorktreeGuard")
@@ -235,7 +273,7 @@ def auto_grant_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
         if result.returncode != 0 or f"auto-grant-edits: {value}" not in result.stdout:
             failures.append(f"config auto-grant-edits {value} failed: {result.stderr}")
         if value == "off":
-            for harness in ("codex", "claude"):
+            for harness in ("codex", "claude", "grok"):
                 payload = {"session_id": f"disabled-{harness}", **native(
                     base, "Edit", file_path=base / "README.md"
                 )}
@@ -311,12 +349,17 @@ def decision(
     if not result.stdout.strip():
         return "allow", ""
     try:
-        output = json.loads(result.stdout)["hookSpecificOutput"]
-    except (json.JSONDecodeError, KeyError):
+        body = json.loads(result.stdout)
+    except json.JSONDecodeError:
         return "error", result.stdout
+    if not isinstance(body, dict):
+        return "error", result.stdout
+    output = body.get("hookSpecificOutput") if isinstance(body.get("hookSpecificOutput"), dict) else {}
     if event == "permission-request":
         return output.get("decision", {}).get("behavior", "allow"), result.stdout
-    return output.get("permissionDecision", "allow"), result.stdout
+    if body.get("decision") == "deny" or output.get("permissionDecision") == "deny":
+        return "deny", result.stdout
+    return output.get("permissionDecision") or body.get("decision") or "allow", result.stdout
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:

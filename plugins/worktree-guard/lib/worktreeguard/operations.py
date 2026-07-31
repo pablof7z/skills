@@ -11,7 +11,23 @@ from .core import resolve_path
 
 
 NATIVE_WRITE_TOOLS = frozenset(
-    {"applypatch", "edit", "write", "multiedit", "notebookedit"}
+    {
+        "applypatch",
+        "edit",
+        "write",
+        "multiedit",
+        "notebookedit",
+        "searchreplace",  # Grok Build
+    }
+)
+# Shell tools whose `command` field is subject to the Git denylist.
+SHELL_TOOLS = frozenset(
+    {
+        "bash",
+        "shell",
+        "runterminalcommand",  # Grok Build
+        "runterminalcmd",  # Grok headless alias
+    }
 )
 PATH_INPUT_KEYS = ("file_path", "filepath", "path", "filename", "notebook_path")
 PATCH_PATH_PREFIXES = (
@@ -27,14 +43,20 @@ def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
     tool = payload.get("tool") if isinstance(payload.get("tool"), dict) else {}
     tool_name = (
         payload.get("tool_name")
+        or payload.get("toolName")
         or event.get("tool_name")
+        or event.get("toolName")
         or tool.get("name")
         or payload.get("tool")
         or ""
     )
     raw_input = payload.get("tool_input")
     if not isinstance(raw_input, (dict, str)):
+        raw_input = payload.get("toolInput")
+    if not isinstance(raw_input, (dict, str)):
         raw_input = event.get("tool_input")
+    if not isinstance(raw_input, (dict, str)):
+        raw_input = event.get("toolInput")
     if not isinstance(raw_input, (dict, str)):
         raw_input = tool.get("input")
     tool_input = raw_input if isinstance(raw_input, dict) else {}
@@ -45,6 +67,10 @@ def extract_operation(payload: dict[str, Any]) -> dict[str, Any]:
         "tool_input": tool_input,
         "raw_input": raw_input if isinstance(raw_input, str) else "",
     }
+
+
+def operation_is_shell(operation: dict[str, Any]) -> bool:
+    return normalized_tool_name(str(operation.get("tool_name") or "")) in SHELL_TOOLS
 
 
 def operation_cwd(operation: dict[str, Any], fallback: Path) -> Path:
@@ -128,7 +154,7 @@ def recover_codex_exec_workdir(payload: dict[str, Any]) -> dict[str, Any]:
     """Recover workdir when the Codex hook bridge flattened exec input."""
     operation = extract_operation(payload)
     tool_input = operation["tool_input"]
-    if operation["tool_name"] not in {"Bash", "Shell"} or operation_workdir(tool_input):
+    if not operation_is_shell(operation) or operation_workdir(tool_input):
         return payload
     recovered = transcript_exec_input(
         transcript_path=payload_string(payload, "transcript_path", "transcriptPath"),
