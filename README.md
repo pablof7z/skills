@@ -34,15 +34,6 @@ helper for finding, capturing, reviewing, and validating it.
 
 [See the runbook workflow and safety boundary →](runbook/SKILL.md)
 
-### [TTS: Publish to a Durable Spoken Queue](tts/README.md)
-
-The `tts` skill is a thin producer adapter for the standalone
-[TTS29](https://github.com/pablof7z/tts29) product. An agent publishes one
-durable spoken item or bounded question; iPhone, macOS, and compatible NIP-29
-clients independently reconstruct and play the shared queue.
-
-[See the adapter boundary and first publication →](tts/README.md)
-
 ### [Repo Marketing: Make the Value Visible](repo-marketing/README.md)
 
 Useful software is often buried under a README that starts where the maintainer's mind ended: architecture, setup matrices, and internal nouns. `repo-marketing` works backward from the moment a stranger decides whether this is for them.
@@ -108,9 +99,6 @@ The repository includes a WorktreeGuard plugin for keeping agent mutations out o
 
 Most skill folders contain instructions and reference material only. The exceptions are explicit:
 
-- `tts` sends one validated request to the private Unix socket of a separately
-  installed TTS29 daemon. It does not read daemon credentials, synthesize or
-  store audio, pair devices, own playback, or implement Nostr.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
 - `whiteboard` writes exploration notes only under the agent private home (`~/.agents/home/{identifier}/whiteboard/`).
 - `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
@@ -134,8 +122,8 @@ scripts/install-fleet customer@23.88.91.234 pablo@157.180.102.242
 
 The command fetches the latest merged `origin/main` and deploys it from a
 temporary archive, so a dirty or behind local checkout is left untouched. It
-overwrites stale catalog files without keeping backups, preserves explicitly
-excluded machine-owned state such as legacy TTS sessions and skill feedback,
+overwrites stale catalog files without keeping backups, retires removed catalog
+skills while preserving excluded machine-owned sessions and skill feedback,
 then validates installed skill entrypoints and reports the exact commit.
 
 ## License
