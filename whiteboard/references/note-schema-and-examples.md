@@ -1,6 +1,6 @@
 # Note Schema And Examples
 
-Read this file when creating or refreshing a design exploration note, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
+Read this file when creating or refreshing a whiteboard exploration note, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
 
 ## Note Template
 
@@ -185,4 +185,4 @@ Before creating or updating a durable artifact, confirm the note has:
 
 Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues. Create a new durable artifact only when no suitable existing artifact exists.
 
-During exploration, prefer scratch notes. Promote to durable repo/project notes only when the project already has a clear WIP/design-note convention, the user asks to save/write/document it, or the design has converged enough that losing the state would be costly.
+Keep exploration notes under the agent private home (`~/.agents/home/{identifier}/whiteboard/<project-slug>/`). Promote to a durable project artifact only after the session is `decided` and the user is ready for that next step.
