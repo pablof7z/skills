@@ -1,6 +1,6 @@
 ---
 name: whiteboard
-description: Process for iterative exploration with the user. Proactively load this skill when a clear task becomes open-ended: direction is fuzzy, options keep shifting, or probes point into unknown work.
+description: "Process for iterative exploration with the user. Proactively load this skill when a clear task becomes open-ended: direction is fuzzy, options keep shifting, or probes point into unknown work."
 ---
 
 # Whiteboard
