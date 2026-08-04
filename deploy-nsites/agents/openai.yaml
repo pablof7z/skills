@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deploy nsites"
+  short_description: "Publish nsites to chosen relays and Blossom servers"
+  default_prompt: "Use $deploy-nsites to publish this static site to the relay and Blossom server URLs I provide."
