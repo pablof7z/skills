@@ -25,6 +25,15 @@ The agent should inspect the repository before it writes, identify the real audi
 
 ## The Skills
 
+### [Deploy nsites: Choose Every Publication Target](deploy-nsites/SKILL.md)
+
+An nsite deployment spans two networks: signed manifests go to Nostr relays,
+while static files go to Blossom servers. `deploy-nsites` keeps those target
+lists explicit, protects signing material, previews the exact publication, and
+checks each requested destination before calling the deployment complete.
+
+[See the configurable deployment workflow →](deploy-nsites/SKILL.md)
+
 ### [Runbook: Learn Procedures From Real Work](runbook/SKILL.md)
 
 Recurring requests should get easier without letting yesterday's procedure
@@ -99,6 +108,10 @@ The repository includes a WorktreeGuard plugin for keeping agent mutations out o
 
 Most skill folders contain instructions and reference material only. The exceptions are explicit:
 
+- `deploy-nsites` can upload public files to caller-selected Blossom servers
+  and publish signed site events to caller-selected Nostr relays. It does not
+  delete remote data or publish profile and discovery metadata unless the user
+  explicitly requests those separate operations.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
 - `whiteboard` writes exploration notes only under the agent private home (`~/.agents/home/{identifier}/whiteboard/`).
 - `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
