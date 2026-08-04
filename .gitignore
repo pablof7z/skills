@@ -3,5 +3,3 @@ __pycache__/
 *.swp
 .claude/worktrees/
 docs/wiki/_citations.log
-tts/macos/.visual-state/
-tts/mcp/.venv/

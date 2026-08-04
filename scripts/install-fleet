@@ -39,6 +39,8 @@ RSYNC_FILTERS=(
   --exclude '*.pyc'
 )
 
+RETIRED_SKILLS=(tts)
+
 discover_skills() {
   local stage="$1"
   find "${stage}" -mindepth 2 -maxdepth 2 -name SKILL.md -print \
@@ -56,6 +58,39 @@ verify_skill() {
     printf '%s\n' "${drift}" >&2
     fail "${label} did not match the catalog after installation"
   }
+}
+
+retire_local() {
+  local root="${HOME}/.agents/skills" skill destination
+  for skill in "${RETIRED_SKILLS[@]}"; do
+    destination="${root}/${skill}"
+    if [[ -L "${destination}" || ( -e "${destination}" && ! -d "${destination}" ) ]]; then
+      rm -f -- "${destination}"
+    elif [[ -d "${destination}" ]]; then
+      find "${destination}" -mindepth 1 -maxdepth 1 \
+        ! -name sessions ! -name meta-feedback -exec rm -rf -- {} +
+      rmdir "${destination}" 2>/dev/null || true
+    fi
+  done
+}
+
+retire_remote() {
+  local target="$1"
+  # HOME and the positional skill names must expand on the remote host.
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    'set -euo pipefail' \
+    'root="$HOME/.agents/skills"' \
+    'for skill in "$@"; do' \
+    '  destination="$root/$skill"' \
+    '  if [[ -L "$destination" || ( -e "$destination" && ! -d "$destination" ) ]]; then' \
+    '    rm -f -- "$destination"' \
+    '  elif [[ -d "$destination" ]]; then' \
+    '    find "$destination" -mindepth 1 -maxdepth 1 ! -name sessions ! -name meta-feedback -exec rm -rf -- {} +' \
+    '    rmdir "$destination" 2>/dev/null || true' \
+    '  fi' \
+    'done' \
+    | ssh "${target}" bash -s -- "${RETIRED_SKILLS[@]}"
 }
 
 install_local() {
@@ -110,12 +145,8 @@ install_remote() {
 activate_host() {
   local expected="$1"
   local root="${HOME}/.agents/skills"
-  local tts="${root}/tts" feedback="${root}/meta-feedback"
+  local feedback="${root}/meta-feedback"
 
-  [[ -f "${tts}/SKILL.md" ]] || fail "${tts} is not installed"
-  python3 -m py_compile \
-    "${tts}/scripts/tts" \
-    "${tts}/scripts/tts29_request.py"
   if [[ -f "${feedback}/scripts/record_feedback.py" ]]; then
     python3 -m py_compile "${feedback}/scripts/record_feedback.py"
   fi
@@ -140,6 +171,7 @@ run_stage() {
   [[ -s "${skills_file}" ]] || fail "origin/main contains no top-level skills"
 
   echo "==> $(hostname -s): installing ${expected}"
+  retire_local
   install_local "${stage}" "${skills_file}"
   activate_host "${expected}"
 
@@ -147,6 +179,7 @@ run_stage() {
   script_body="$(<"${script_path}")"
   for target in "$@"; do
     [[ "${target}" != -* ]] || fail "unknown option ${target}"
+    retire_remote "${target}"
     install_remote "${stage}" "${skills_file}" "${target}"
     printf '%s\n' "${script_body}" \
       | ssh "${target}" bash -s -- --activate-host "${expected}"
