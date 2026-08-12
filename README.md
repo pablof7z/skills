@@ -75,6 +75,12 @@ The result is a useful mental model, not a file tour, glossary dump, or performa
 
 [See what a good high-level explanation should accomplish →](high-level/README.md)
 
+### [Cohesive: Reconstruct Intent Before Changing](cohesive/README.md)
+
+`cohesive` helps agents reconcile a user's underlying goal with the current architecture before implementing ambiguous features, structural changes, and recurring bug fixes.
+
+[See the intent-reconstruction and coherence workflow →](cohesive/SKILL.md)
+
 ### [Home Directory: Keep Agent-Private State Together](home-directory/SKILL.md)
 
 Session handles come and go, but an agent's private notes, helper scripts,
