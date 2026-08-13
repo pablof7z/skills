@@ -43,6 +43,7 @@ malicious or deliberately obfuscated caller.
 <plugin-root>/bin/wtg doctor
 <plugin-root>/bin/wtg install-hooks
 python3 <plugin-root>/scripts/probe_worktreeguard.py
+python3 <plugin-root>/scripts/probe_codex_exec.py
 ```
 
 `request-base-access` is the only way to obtain a grant. It is auto-granted with
@@ -51,6 +52,11 @@ dialog when it is off. A request outside a detectable Codex, Claude Code, or
 Grok session is refused. There is no remote approval, pairing, daemon, relay,
 MCP integration, automatic branch repair, session cwd tracking, or full
 allow-action audit.
+
+`probe_codex_exec.py` is the end-to-end Codex check. It creates a disposable Git
+repository, asks a real ephemeral `codex exec` session to switch branches, and
+passes only when Codex reports the PreToolUse block, the branch remains `main`,
+and WorktreeGuard recorded exactly one denial.
 
 `config auto-grant-edits` prints the current preference when no value is
 provided. `on` is the default.

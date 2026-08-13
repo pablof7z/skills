@@ -78,6 +78,7 @@ class BaseAccessTests(unittest.TestCase):
     def test_unrequested_base_edit_is_denied_even_with_auto_grant_on(self) -> None:
         self.assertTrue(auto_grant_base_edits_enabled())
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
+        self.assertEqual(set(output), {"hookSpecificOutput"})
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertEqual(len(read_jsonl(self.denials)), 1)
         self.assertEqual(active_grants(), [])
@@ -86,6 +87,13 @@ class BaseAccessTests(unittest.TestCase):
     def test_harness_permission_events_are_not_wtg_business(self) -> None:
         self.assertEqual(hook_output("permission-request", native_payload(self.base, "s")), "")
         self.assertEqual(read_jsonl(self.denials), [])
+
+    def test_grok_denial_does_not_mix_in_codex_fields(self) -> None:
+        output = json.loads(hook_output(
+            "pre-tool-use", native_payload(self.base, "session-one"), harness="grok"
+        ))
+        self.assertEqual(set(output), {"decision", "reason"})
+        self.assertEqual(output["decision"], "deny")
 
     def test_request_auto_grants_and_notifies_then_edits_pass(self) -> None:
         self.assertEqual(request_access(self.base, "user asked for a base edit"), 0)
@@ -197,10 +205,12 @@ def request_access(base: Path, reason: str) -> int:
         return main(["request-base-access", "--repo", str(base), "--reason", reason])
 
 
-def hook_output(event: str, payload: dict[str, object]) -> str:
+def hook_output(
+    event: str, payload: dict[str, object], *, harness: str = "codex"
+) -> str:
     output = io.StringIO()
     with redirect_stdout(output):
-        run_harness_hook(event, payload)
+        run_harness_hook(event, payload, harness=harness)
     return output.getvalue().strip()
 
 

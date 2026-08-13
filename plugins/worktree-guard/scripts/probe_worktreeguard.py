@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hook_contracts import denial_decision
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WTG = ROOT / "bin" / "wtg"
@@ -206,7 +208,14 @@ def shim_failures(temp: Path) -> list[str]:
     fake = temp / "fake-wtg"
     fake.write_text('#!/bin/sh\nprintf "%s\\n" "$*"\n', encoding="utf-8")
     fake.chmod(0o755)
-    env = {**os.environ, "WTG_BIN": str(fake)}
+    harness_markers = {
+        "CLAUDE_CODE_SESSION_ID", "CLAUDE_PLUGIN_ROOT", "CODEX_THREAD_ID",
+        "GROK_PLUGIN_ROOT", "GROK_SESSION_ID", "PLUGIN_ROOT",
+    }
+    env = {
+        **{key: value for key, value in os.environ.items() if key not in harness_markers},
+        "WTG_BIN": str(fake),
+    }
     scenarios = (
         ("wtg-hook-codex", {}, "hook codex pre-tool-use"),
         ("wtg-hook-claude", {"transcript_path": "/tmp/.claude/session.jsonl"}, "hook claude pre-tool-use"),
@@ -357,9 +366,10 @@ def decision(
     output = body.get("hookSpecificOutput") if isinstance(body.get("hookSpecificOutput"), dict) else {}
     if event == "permission-request":
         return output.get("decision", {}).get("behavior", "allow"), result.stdout
-    if body.get("decision") == "deny" or output.get("permissionDecision") == "deny":
-        return "deny", result.stdout
-    return output.get("permissionDecision") or body.get("decision") or "allow", result.stdout
+    actual, contract_error = denial_decision(harness, body)
+    if contract_error:
+        return "error", f"{contract_error}: {result.stdout}"
+    return actual, result.stdout
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:

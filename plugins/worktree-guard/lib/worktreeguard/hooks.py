@@ -17,10 +17,12 @@ def cmd_hook_harness(args: argparse.Namespace) -> int:
     payload = load_hook_payload(sys.stdin.buffer.read())
     if args.harness == "codex":
         payload = recover_codex_exec_workdir(payload)
-    return run_harness_hook(args.event, payload)
+    return run_harness_hook(args.event, payload, harness=args.harness)
 
 
-def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
+def run_harness_hook(
+    event: str, payload: dict[str, Any], *, harness: str = "codex"
+) -> int:
     if event != "pre-tool-use":
         return 0
 
@@ -42,14 +44,12 @@ def run_harness_hook(event: str, payload: dict[str, Any]) -> int:
 
     message = denial_message(blocked)
     write_denial(denial_record(event=event, payload=payload, operation=blocked))
-    # Claude/Codex use hookSpecificOutput; Grok uses decision/reason. Emit both.
-    emit({
-        "decision": "deny",
-        "reason": message,
-        "hookSpecificOutput": {
+    if harness == "grok":
+        emit({"decision": "deny", "reason": message})
+    else:
+        emit({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": message,
-        },
-    })
+        }})
     return 0
