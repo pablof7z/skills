@@ -22,6 +22,6 @@ When asked to prime a topic, the calling agent delegates to a subagent that firs
 $prime-context prime context on the NIP-60 wallet recovery flow before we touch it.
 ```
 
-The agent resolves its own identity, finds or creates its private research root via `home-directory`, and either reuses a matching note or investigates fresh. Later in the same session, if new evidence changes what was loaded, the agent records a follow-up note rather than treating the finding as a passing detail.
+The agent resolves its own identity, finds or creates its private research root via `agent-home`, and either reuses a matching note or investigates fresh. Later in the same session, if new evidence changes what was loaded, the agent records a follow-up note rather than treating the finding as a passing detail.
 
 Read [SKILL.md](SKILL.md) for the note contract, ownership resolution, and the rules for capturing later discoveries.

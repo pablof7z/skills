@@ -19,7 +19,7 @@ confirming what was loaded.
 3. Resolve or create the caller's home with:
 
    ```bash
-   ~/.agents/skills/home-directory/scripts/resolve-home-directory.sh <agent-id>
+   ~/.agents/skills/agent-home/scripts/resolve-agent-home.sh <agent-id>
    ```
 
 4. Use `<caller-home>/research` as the research root. Pass that exact absolute

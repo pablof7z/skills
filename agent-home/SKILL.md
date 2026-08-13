@@ -1,9 +1,9 @@
 ---
-name: home-directory
+name: agent-home
 description: Resolve and use a durable private home directory at ~/.agents/home/{identifier} for agent-only notes, scripts, caches, drafts, and other state that must persist across sessions.
 ---
 
-# Home Directory
+# Agent Home
 
 Use one durable directory for private state that belongs to this agent across
 sessions. Do not use it for project-shared files, team-owned state, or
@@ -36,7 +36,7 @@ inside it.
 Pass the resolved agent identity explicitly when it is known:
 
 ```bash
-~/.agents/skills/home-directory/scripts/resolve-home-directory.sh codex
+~/.agents/skills/agent-home/scripts/resolve-agent-home.sh codex
 ```
 
 With no argument, the helper checks common runtime-provided agent identity and

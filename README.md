@@ -81,14 +81,14 @@ The result is a useful mental model, not a file tour, glossary dump, or performa
 
 [See the intent-reconstruction and coherence workflow →](cohesive/SKILL.md)
 
-### [Home Directory: Keep Agent-Private State Together](home-directory/SKILL.md)
+### [Agent Home: Keep Agent-Private State Together](agent-home/SKILL.md)
 
 Session handles come and go, but an agent's private notes, helper scripts,
 drafts, and lightweight caches should not scatter across a new directory every
-time. `home-directory` resolves one durable `~/.agents/home/{identifier}` path
+time. `agent-home` resolves one durable `~/.agents/home/{identifier}` path
 from the stable agent identity and keeps session identity out of that choice.
 
-[See the private-state boundary and resolver →](home-directory/SKILL.md)
+[See the private-state boundary and resolver →](agent-home/SKILL.md)
 
 ### [Prime Context: Research a Topic Once, Reuse It All Session](prime-context/README.md)
 
@@ -120,9 +120,9 @@ Most skill folders contain instructions and reference material only. The excepti
   explicitly requests those separate operations.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
 - `whiteboard` writes exploration notes only under the agent private home (`~/.agents/home/{identifier}/whiteboard/`).
-- `home-directory` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
+- `agent-home` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
-- `prime-context` reads and writes research notes only under the calling agent's own `~/.agents/home/{identifier}/research` directory, resolved via `home-directory`. It does not write to a shared location or another agent's home.
+- `prime-context` reads and writes research notes only under the calling agent's own `~/.agents/home/{identifier}/research` directory, resolved via `agent-home`. It does not write to a shared location or another agent's home.
 - `runbook` writes only to the selected runbook directory and makes no network requests.
 - The WorktreeGuard plugin installs Codex hooks and writes local policy and audit state.
 
