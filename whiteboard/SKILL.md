@@ -22,13 +22,13 @@ Treat tentative language like "I think X might work" as a hypothesis, not approv
 
 ## Note Location
 
-Always store exploration notes under the agent private home from the `home-directory` skill:
+Always store exploration notes under the agent private home from the `agent-home` skill:
 
 ```text
 ~/.agents/home/{identifier}/whiteboard/<project-slug>/YYYY-MM-DD-<session-slug>.md
 ```
 
-Resolve `{identifier}` with `home-directory` (stable agent identity, not a session handle).
+Resolve `{identifier}` with `agent-home` (stable agent identity, not a session handle).
 
 Resolve `<project-slug>` as:
 
