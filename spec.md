@@ -124,13 +124,15 @@ registers `~/.grok/hooks/worktree-guard.json` so Grok runs the same policy
 through its global hook path. Claude Code and Codex continue to use the plugin
 manifest directly.
 
-A denial uses the harness's normal hook decision JSON and exits successfully.
-Denials include both Claude/Codex `hookSpecificOutput.permissionDecision` and
-Grok `decision`/`reason` fields. A grant-covered operation is silent. The hook
-never creates a grant; it only consumes one. Hook decisions, not process exit
-status, carry behavior. Failures to parse payloads or discover repositories fail
-open. Session detection for grants accepts `WTG_SESSION_ID`, `GROK_SESSION_ID`,
-`CLAUDE_CODE_SESSION_ID`, and `CODEX_THREAD_ID`.
+A denial uses only the current harness's normal hook decision JSON and exits
+successfully. Claude and Codex receive
+`hookSpecificOutput.permissionDecision`; Grok receives `decision`/`reason`.
+These formats must never be mixed because Codex validates the entire response
+and rejects Grok's `decision: deny` value as invalid. A grant-covered operation
+is silent. The hook never creates a grant; it only consumes one. Hook decisions,
+not process exit status, carry behavior. Failures to parse payloads or discover
+repositories fail open. Session detection for grants accepts `WTG_SESSION_ID`,
+`GROK_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, and `CODEX_THREAD_ID`.
 
 ## Acceptance tests
 
@@ -138,6 +140,8 @@ The regression probe must exercise Codex, Claude, and Grok dispatch paths and
 prove:
 
 - all six listed commands are denied in a base checkout;
+- each harness denial validates as that harness's response format, without
+  incompatible fields from another harness;
 - all six are allowed in linked worktrees;
 - representative normal Git and non-Git commands are allowed in a base;
 - `git -C`, hook workdir, and simple `cd && git` resolve the correct checkout;
