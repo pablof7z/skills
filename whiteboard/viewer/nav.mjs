@@ -1,9 +1,12 @@
 // Floating navigation overlays for the document viewer:
 //  - left TOC rail: auto-generated from headings, click to jump, marks sections
-//    with unviewed changes, highlights the active section on scroll.
-//  - minimap strip: document shape with change/comment markers, click to jump.
+//    with unviewed changes (blue dot) or agent attention markers (amber dot),
+//    highlights the active section on scroll.
+//  - minimap strip: document shape with change/comment/attention markers.
 //  - top/bottom change bars: "N changes above/below" that scroll to the next
 //    change on click.
+//  - attention pill: "⚑ N to review" — DocuSign-style jump to the next agent
+//    attention marker, cycling.
 
 export function initNav({ docScroll, docEl, state }) {
   const rail = document.createElement("nav");
@@ -22,8 +25,14 @@ export function initNav({ docScroll, docEl, state }) {
   barTop.hidden = true; barBottom.hidden = true;
   document.body.appendChild(barTop); document.body.appendChild(barBottom);
 
+  const attBar = document.createElement("div");
+  attBar.className = "attention-bar";
+  attBar.hidden = true;
+  document.body.appendChild(attBar);
+
   let headings = [];
-  let targets = []; // { el, top, kind } change/comment elements to jump between
+  let targets = []; // change/comment targets for the top/bottom bars
+  let attTargets = []; // { el, top } agent attention markers (non-resolved)
   let ticking = false;
 
   const sectionRange = (i) => {
@@ -31,7 +40,7 @@ export function initNav({ docScroll, docEl, state }) {
     const end = i + 1 < headings.length ? headings[i + 1].el.offsetTop : docEl.scrollHeight;
     return [start, end];
   };
-  const hasChangeInRange = (a, b) => targets.some((t) => t.top >= a && t.top < b);
+  const inRange = (top, a, b) => top >= a && top < b;
 
   function buildTOC() {
     const list = rail.querySelector(".toc-list");
@@ -39,11 +48,11 @@ export function initNav({ docScroll, docEl, state }) {
     headings = [...docEl.querySelectorAll("h1, h2, h3")].map((el) => ({ el, level: el.tagName.toLowerCase(), text: el.textContent.trim() }));
     for (let i = 0; i < headings.length; i++) {
       const h = headings[i];
-      const li = document.createElement("li");
-      li.className = `toc-item toc-${h.level}`;
-      li.dataset.idx = String(i);
       const [a, b] = sectionRange(i);
-      if (hasChangeInRange(a, b)) li.classList.add("has-changes");
+      const hasChanges = targets.some((t) => inRange(t.top, a, b));
+      const hasAtt = attTargets.some((t) => inRange(t.top, a, b));
+      const li = document.createElement("li");
+      li.className = `toc-item toc-${h.level}` + (hasChanges ? " has-changes" : "") + (hasAtt ? " has-attention" : "");
       li.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="toc-text">${esc(h.text)}</span>`;
       li.addEventListener("click", () => h.el.scrollIntoView({ behavior: "smooth", block: "start" }));
       list.appendChild(li);
@@ -53,6 +62,17 @@ export function initNav({ docScroll, docEl, state }) {
   function collectTargets() {
     const sels = state.diffMode ? ".wb-ins, .wb-del" : "mark.wb-anno";
     targets = [...docEl.querySelectorAll(sels)].map((el) => ({ el, top: el.offsetTop, kind: el.classList.contains("wb-del") ? "del" : "ins" }));
+  }
+
+  function collectAttention() {
+    attTargets = [];
+    for (const a of (state.annotations || [])) {
+      if (a.motivation !== "highlighting") continue;
+      if (state.resolved && state.resolved.has(a.id)) continue;
+      const id = a.id.split(":").pop();
+      const el = docEl.querySelector(`mark.wb-attention[data-anno-id="${id}"]`);
+      if (el) attTargets.push({ el, top: el.offsetTop, id });
+    }
   }
 
   function drawMinimap() {
@@ -68,18 +88,20 @@ export function initNav({ docScroll, docEl, state }) {
     const vpTop = docScroll.scrollTop;
     const vpH = docScroll.clientHeight;
     const yOf = (top) => (top / docH) * h;
-    // viewport indicator
     ctx.fillStyle = "rgba(47,111,235,0.10)";
     ctx.fillRect(2, yOf(vpTop), w - 4, Math.max(6, (vpH / docH) * h));
-    // heading ticks
-    ctx.fillStyle = "var(--muted)"; ctx.fillStyle = "#9aa0a6";
+    ctx.fillStyle = "#9aa0a6";
     for (const hd of headings) { const y = yOf(hd.el.offsetTop); ctx.fillRect(2, y, 6, 1); }
-    // change/comment markers
     for (const t of targets) {
       const y = yOf(t.top);
       ctx.fillStyle = t.kind === "del" ? "rgba(192,53,47,0.7)" : "rgba(10,138,95,0.7)";
       if (!state.diffMode) ctx.fillStyle = "rgba(47,111,235,0.7)";
       ctx.fillRect(w - 6, y, 4, 2);
+    }
+    for (const t of attTargets) {
+      const y = yOf(t.top);
+      ctx.fillStyle = "rgba(217,119,6,0.9)";
+      ctx.fillRect(w - 8, y, 4, 3);
     }
   }
 
@@ -89,10 +111,16 @@ export function initNav({ docScroll, docEl, state }) {
     const above = targets.filter((t) => t.top + t.el.offsetHeight < vpTop).length;
     const below = targets.filter((t) => t.top > vpBottom).length;
     const label = state.diffMode ? "change" : "comment";
-    if (above > 0) { barTop.hidden = false; barTop.innerHTML = `↑ ${above} ${label}${above === 1 ? "" : "s"} above`; }
-    else barTop.hidden = true;
-    if (below > 0) { barBottom.hidden = false; barBottom.innerHTML = `${below} ${label}${below === 1 ? "" : "s"} below ↓`; }
-    else barBottom.hidden = true;
+    barTop.hidden = above === 0; barBottom.hidden = below === 0;
+    if (above > 0) barTop.innerHTML = `↑ ${above} ${label}${above === 1 ? "" : "s"} above`;
+    if (below > 0) barBottom.innerHTML = `${below} ${label}${below === 1 ? "" : "s"} below ↓`;
+  }
+
+  function updateAttBar() {
+    const n = attTargets.length;
+    if (n === 0) { attBar.hidden = true; return; }
+    attBar.hidden = false;
+    attBar.innerHTML = `⚑ ${n} to review`;
   }
 
   function updateActive() {
@@ -120,6 +148,14 @@ export function initNav({ docScroll, docEl, state }) {
     if (pick) pick.el.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
+  function jumpNextAttention() {
+    if (attTargets.length === 0) return;
+    const vpCenter = docScroll.scrollTop + docScroll.clientHeight / 2;
+    let pick = attTargets.find((t) => t.top > vpCenter);
+    if (!pick) pick = attTargets[0]; // wrap around
+    pick.el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
   function onMinimapClick(e) {
     const rect = minimap.getBoundingClientRect();
     const ratio = (e.clientY - rect.top) / rect.height;
@@ -128,18 +164,20 @@ export function initNav({ docScroll, docEl, state }) {
 
   barTop.addEventListener("click", () => jumpTo("up"));
   barBottom.addEventListener("click", () => jumpTo("down"));
+  attBar.addEventListener("click", jumpNextAttention);
   minimap.addEventListener("click", onMinimapClick);
   docScroll.addEventListener("scroll", onScroll, { passive: true });
 
   function refresh() {
     collectTargets();
+    collectAttention();
     buildTOC();
-    updateBars(); updateActive(); drawMinimap();
+    updateBars(); updateAttBar(); updateActive(); drawMinimap();
   }
 
   function destroy() {
     docScroll.removeEventListener("scroll", onScroll);
-    rail.remove(); minimap.remove(); barTop.remove(); barBottom.remove();
+    rail.remove(); minimap.remove(); barTop.remove(); barBottom.remove(); attBar.remove();
   }
 
   return { refresh, destroy };

@@ -1,7 +1,9 @@
-// W3C Web Annotation comments: anchor top-level annotations to document text,
-// render them as margin notes positioned at their anchor's Y (sharing the
-// document scroll so a comment is visible when its anchor is in view), thread
-// replies, and handle text-selection -> comment composition.
+// W3C Web Annotation comments + agent attention markers: anchor top-level
+// comments and highlighting annotations to document text, render them as margin
+// notes positioned at their anchor's Y (sharing the document scroll), thread
+// replies, and handle text-selection -> comment composition. Attention markers
+// (motivation "highlighting", agent-authored) render as amber call-outs and can
+// be dismissed (resolved).
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -9,7 +11,6 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
 
 const whoClass = (name) => (String(name || "").toLowerCase() === "agent" ? "agent" : "user");
 
-// DOMPurify options shared with the viewer for rendering comment bodies.
 const SANITIZE_OPTS = {
   USE_PROFILES: { html: true },
   ADD_ATTR: ["data-footnote-ref", "data-footnote-backref", "data-footnotes", "aria-describedby", "aria-label"],
@@ -21,8 +22,10 @@ function renderBody(text, renderMarkdown) {
 }
 
 export function initComments({ docEl, railEl, state, renderMarkdown, postComment, getVersion, onChange, onToggleResolve }) {
-  const isTopLevel = (a) => a && a.motivation !== "replying" && !(a.target && a.target.id);
+  const isAttention = (a) => a && a.motivation === "highlighting";
+  const isTopLevel = (a) => a && a.motivation !== "replying" && !(a.target && a.target.id) && !isAttention(a);
   const topLevel = () => state.annotations.filter(isTopLevel);
+  const attentionItems = () => state.annotations.filter(isAttention);
   const repliesOf = (pid) => state.annotations
     .filter((a) => a.motivation === "replying" && a.target && a.target.id === pid)
     .sort((a, b) => (a.created || "").localeCompare(b.created || ""));
@@ -50,7 +53,7 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
     if (suffix) { const i = hay.indexOf(exact + suffix); if (i !== -1) return i; }
     return hay.indexOf(exact);
   }
-  function wrapRangeByOffsets(rootNode, start, end, annoId) {
+  function wrapRangeByOffsets(rootNode, start, end, annoId, cls) {
     if (start < 0 || end <= start) return false;
     const map = cumulativeOffsets(rootNode);
     const si = map.findIndex((m) => start >= m.start && start < m.end);
@@ -75,7 +78,7 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
     for (const tn of wrapped) {
       if (!tn.parentNode) continue;
       const mark = document.createElement("mark");
-      mark.className = "wb-anno";
+      mark.className = cls || "wb-anno";
       mark.dataset.annoId = annoId;
       tn.parentNode.insertBefore(mark, tn);
       mark.appendChild(tn);
@@ -83,21 +86,23 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
     return true;
   }
 
+  function anchorOne(a, cls) {
+    const sel = (a.target && a.target.selector) || [];
+    const tq = sel.find((s) => s.type === "TextQuoteSelector");
+    const tp = sel.find((s) => s.type === "TextPositionSelector");
+    let start = tq ? quoteIndex(docEl.textContent, tq.exact, tq.prefix, tq.suffix) : -1;
+    if (start === -1 && tp) start = tp.start;
+    const len = tq && tq.exact ? tq.exact.length : (tp ? tp.end - tp.start : 0);
+    const end = start === -1 ? -1 : start + len;
+    if (start === -1) { a._anchored = false; a._start = -1; return; }
+    const id = a.id.split(":").pop();
+    a._anchored = wrapRangeByOffsets(docEl, start, end, id, cls);
+    a._start = a._anchored ? start : -1;
+  }
+
   function anchor() {
-    const full = docEl.textContent;
-    for (const a of topLevel()) {
-      const sel = (a.target && a.target.selector) || [];
-      const tq = sel.find((s) => s.type === "TextQuoteSelector");
-      const tp = sel.find((s) => s.type === "TextPositionSelector");
-      let start = tq ? quoteIndex(full, tq.exact, tq.prefix, tq.suffix) : -1;
-      if (start === -1 && tp) start = tp.start;
-      const len = tq && tq.exact ? tq.exact.length : (tp ? tp.end - tp.start : 0);
-      const end = start === -1 ? -1 : start + len;
-      if (start === -1) { a._anchored = false; a._start = -1; continue; }
-      const id = a.id.split(":").pop();
-      a._anchored = wrapRangeByOffsets(docEl, start, end, id);
-      a._start = a._anchored ? start : -1;
-    }
+    for (const a of topLevel()) anchorOne(a, "wb-anno");
+    for (const a of attentionItems()) anchorOne(a, "wb-attention");
   }
 
   function renderMsg(a) {
@@ -127,53 +132,60 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
   function setActive(id) {
     state.activeId = id;
     railEl.querySelectorAll(".thread").forEach((c) => c.classList.toggle("active", c.dataset.annoId === id));
-    docEl.querySelectorAll("mark.wb-anno").forEach((m) => m.classList.toggle("active", m.dataset.annoId === id));
-    const mark = docEl.querySelector(`mark.wb-anno[data-anno-id="${id}"]`);
+    docEl.querySelectorAll("mark.wb-anno, mark.wb-attention").forEach((m) => m.classList.toggle("active", m.dataset.annoId === id));
+    const mark = docEl.querySelector(`mark.wb-attention[data-anno-id="${id}"], mark.wb-anno[data-anno-id="${id}"]`);
     if (mark) mark.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  // Render margin notes: position each card at its anchor mark's Y within the
-  // shared scroll content, with simple collision stacking so clustered cards
-  // cascade instead of overlapping.
+  function wireResolve(card, id, isResolved) {
+    const btn = card.querySelector(".resolve-btn");
+    if (btn && onToggleResolve) btn.addEventListener("click", (e) => { e.stopPropagation(); onToggleResolve(id, !isResolved); });
+  }
+
+  // Render margin notes: comments + agent attention markers, sorted by anchor Y,
+  // positioned with simple collision stacking so clustered cards cascade.
   function render() {
-    const items = topLevel().slice().sort((a, b) => {
+    const items = topLevel().concat(attentionItems()).slice().sort((a, b) => {
       const pa = a._start ?? Infinity, pb = b._start ?? Infinity;
       return pa !== pb ? pa - pb : (a.created || "").localeCompare(b.created || "");
     });
     railEl.innerHTML = "";
+    if (onChange) onChange(topLevel().length);
     if (items.length === 0) return;
-    const wrap = railEl.parentElement; // .doc-wrap (position: relative)
     let lastBottom = -8;
     for (const a of items) {
       const id = a.id.split(":").pop();
-      const mark = docEl.querySelector(`mark.wb-anno[data-anno-id="${id}"]`);
+      const att = isAttention(a);
+      const mark = docEl.querySelector(att ? `mark.wb-attention[data-anno-id="${id}"]` : `mark.wb-anno[data-anno-id="${id}"]`);
       const anchorY = mark ? mark.offsetTop : (a._start ?? 0);
       const isResolved = state.resolved.has(a.id);
-      const card = document.createElement("div");
-      card.className = "thread" + (a._anchored === false ? " orphaned" : "") + (state.activeId === id ? " active" : "") + (isResolved ? " resolved" : "");
-      card.dataset.annoId = id;
-      const ex = excerptOf(a);
       const ver = (a.target && a.target.version ? a.target.version : "—").slice(0, 8);
       const where = a._anchored === false ? `not found @ ${ver}` : `@ ${ver}`;
-      card.innerHTML = `<div class="excerpt">${esc(ex.slice(0, 120))}${ex.length > 120 ? "…" : ""}<span class="where">${esc(where)}</span></div><div class="msg-list"></div><div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Mark resolved"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div></div>`;
-      const list = card.querySelector(".msg-list");
-      list.appendChild(renderMsg(a));
-      for (const r of repliesOf(a.id)) list.appendChild(renderMsg(r));
-      wireReply(card, a);
-      const resolveBtn = card.querySelector(".resolve-btn");
-      if (resolveBtn && onToggleResolve) resolveBtn.addEventListener("click", (e) => { e.stopPropagation(); onToggleResolve(a.id, !isResolved); });
+      const card = document.createElement("div");
+      card.className = "thread" + (att ? " attention" : "") + (a._anchored === false ? " orphaned" : "") + (state.activeId === id ? " active" : "") + (isResolved ? " resolved" : "");
+      card.dataset.annoId = id;
+      if (att) {
+        const reason = (a.body && a.body.value) || "Needs your attention.";
+        card.innerHTML = `<div class="att-head"><span class="att-flag">⚑</span><span class="where">${esc(where)}</span></div><div class="att-reason">${renderBody(reason, renderMarkdown)}</div><div class="reply-box"><div class="row"><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Dismiss"}">${isResolved ? "↺ dismissed" : "✓ dismiss"}</button></div></div>`;
+      } else {
+        const ex = excerptOf(a);
+        card.innerHTML = `<div class="excerpt">${esc(ex.slice(0, 120))}${ex.length > 120 ? "…" : ""}<span class="where">${esc(where)}</span></div><div class="msg-list"></div><div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Mark resolved"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div></div>`;
+        const list = card.querySelector(".msg-list");
+        list.appendChild(renderMsg(a));
+        for (const r of repliesOf(a.id)) list.appendChild(renderMsg(r));
+        wireReply(card, a);
+      }
+      wireResolve(card, a.id, isResolved);
       card.addEventListener("click", (e) => { if (e.target.closest(".reply-box")) return; setActive(id); });
       railEl.appendChild(card);
-      // Stack: if this card would overlap the previous, push it down.
       const naturalTop = Math.max(anchorY, lastBottom + 8);
       card.style.top = `${naturalTop}px`;
       lastBottom = naturalTop + card.offsetHeight;
     }
-    if (onChange) onChange(items.length);
   }
 
   docEl.addEventListener("click", (e) => {
-    const m = e.target.closest("mark.wb-anno");
+    const m = e.target.closest("mark.wb-anno, mark.wb-attention");
     if (m) setActive(m.dataset.annoId);
   });
 

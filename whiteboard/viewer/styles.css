@@ -511,3 +511,35 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
 }
 .margin-rail .thread .resolve-btn:hover { color: var(--accent); border-color: var(--accent); }
 .margin-rail .thread.resolved .resolve-btn { color: var(--agent); border-color: var(--agent); }
+
+/* ---- agent attention markers ---- */
+mark.wb-attention {
+  background: #fde68a; border-bottom: 2px solid #d97706; color: #4a3502;
+  border-radius: 2px; padding: 0 2px; cursor: pointer; transition: box-shadow 0.12s;
+}
+mark.wb-attention::before { content: "⚑"; color: #d97706; font-size: 0.78em; margin-right: 2px; }
+mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
+.margin-rail .thread.attention { border-color: #d97706; background: #fffbeb; }
+.margin-rail .thread.attention.resolved { opacity: 0.6; border-style: dashed; }
+.margin-rail .thread.attention .att-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.margin-rail .thread.attention .att-flag { color: #d97706; font-size: 14px; }
+.margin-rail .thread.attention .att-reason { font-size: 12.5px; color: var(--ink); }
+.margin-rail .thread.attention.resolved .att-reason { color: var(--muted); }
+
+/* DocuSign-style attention jump pill */
+.attention-bar {
+  position: fixed; left: 224px; top: 52px; z-index: 40;
+  background: #d97706; color: #fff; font-size: 12.5px; font-weight: 600;
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(217,119,6,0.4); user-select: none;
+}
+.attention-bar:hover { filter: brightness(1.07); }
+
+/* TOC: attention dot (amber) overrides change dot when a section has both */
+.toc-item.has-attention .dot { background: #d97706; }
+
+@media (prefers-color-scheme: dark) {
+  mark.wb-attention { background: #4a3502; color: #fde68a; border-bottom-color: #d97706; }
+  .margin-rail .thread.attention { background: #2a2308; }
+  .attention-bar { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+}

@@ -254,6 +254,34 @@ In both cases, relaunch the watcher for the next item. The viewer's filesystem w
 
 Do not answer a comment or chat only in the host conversation — the human is reviewing in the viewer, so the reply must live in `comments/` or `chat/` to appear there. Use the host conversation to surface that you replied and to discuss anything that changes the direction.
 
+## Marking something for the human's attention
+
+When a section of `deliverable.md` needs the human to look at it (an open question pinned to specific text, a risk they must sign off on, a choice that is theirs to make), mark it with a **highlighting annotation**. The viewer renders it as an amber highlight in the document with a ⚑ flag, an amber margin card carrying your reason, and a floating "⚑ N to review" pill that jumps to the next marker (DocuSign-style). The human or you can dismiss it once reviewed (it reuses the resolve mechanism).
+
+Write a file into `comments/` named `<timestamp>-<idhint>-attention.json` with the W3C Web Annotation shape, `motivation: "highlighting"`, anchored to the exact text:
+
+```json
+{
+  "@context": "http://www.w3.org/ns/anno.jsonld",
+  "type": "Annotation",
+  "id": "urn:uuid:<uuid>",
+  "motivation": "highlighting",
+  "created": "<ISO>",
+  "creator": { "type": "Person", "name": "agent" },
+  "body": { "type": "TextualBody", "value": "Why this needs your attention (one or two sentences).", "format": "text/markdown", "language": "en" },
+  "target": {
+    "source": "deliverable.md",
+    "version": "<current 12-char sha>",
+    "selector": [
+      { "type": "TextQuoteSelector", "exact": "<exact quoted text>", "prefix": "<up to 32 chars before>", "suffix": "<up to 32 chars after>" },
+      { "type": "TextPositionSelector", "start": <n>, "end": <n> }
+    ]
+  }
+}
+```
+
+Get the selectors the same way the viewer does: `exact` is the verbatim text, `prefix`/`suffix` are ~32 chars of surrounding context, and `start`/`end` are character offsets within the document's text content. Use `highlighting` only for things that genuinely need the human — do not litter the document. Dismiss a marker by POSTing to the running viewer's `/api/session/<project-slug>/<session-slug>/resolved` with `{"id":"<urn:uuid>","resolved":true,"by":"agent"}`.
+
 ## Convergence and Promotion
 
 Move status from `exploring` to `converging` when one direction is becoming stronger but important assumptions or risks remain open. Do not mark a session `converging` only because the agent has a preferred answer.
