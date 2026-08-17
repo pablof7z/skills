@@ -11,9 +11,16 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
 
+// DOMPurify options: full HTML profile, plus the footnote extension's data/aria
+// attributes (USE_PROFILES html already allows most, these are belt-and-suspenders).
+const SANITIZE_OPTS = {
+  USE_PROFILES: { html: true },
+  ADD_ATTR: ["data-footnote-ref", "data-footnote-backref", "data-footnotes", "aria-describedby", "aria-label"],
+};
+
 function renderMarkdown(md) {
   const raw = window.marked ? window.marked.parse(md || "") : esc(md || "");
-  return window.DOMPurify ? window.DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } }) : raw;
+  return window.DOMPurify ? window.DOMPurify.sanitize(raw, SANITIZE_OPTS) : raw;
 }
 
 export function initViewer(root, project, slug) {
@@ -234,7 +241,7 @@ export function initViewer(root, project, slug) {
 
   function renderBody(text) {
     const raw = window.marked ? window.marked.parse(text || "") : esc(text);
-    return window.DOMPurify ? window.DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } }) : raw;
+    return window.DOMPurify ? window.DOMPurify.sanitize(raw, SANITIZE_OPTS) : raw;
   }
   const whoClass = (name) => (String(name || "").toLowerCase() === "agent" ? "agent" : "user");
 
