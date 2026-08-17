@@ -11,6 +11,7 @@ export const NOTES = "notes.md";
 export const MANIFEST = "manifest.json";
 export const COMMENTS_DIR = "comments";
 export const VERSIONS_DIR = "versions";
+export const CHAT_DIR = "chat";
 export const SEEN_FILE = ".seen.json";
 
 export function sha12(text) {
@@ -24,6 +25,7 @@ export function isSessionDir(name) {
 export function ensureDirs(sessionDir) {
   fs.mkdirSync(path.join(sessionDir, COMMENTS_DIR), { recursive: true });
   fs.mkdirSync(path.join(sessionDir, VERSIONS_DIR), { recursive: true });
+  fs.mkdirSync(path.join(sessionDir, CHAT_DIR), { recursive: true });
 }
 
 export function readJsonSafe(p, fallback) {
@@ -68,6 +70,54 @@ export function readComments(sessionDir) {
       catch { return null; }
     })
     .filter(Boolean);
+}
+
+// ---- versions ----
+
+export function readVersions(sessionDir) {
+  const dir = path.join(sessionDir, VERSIONS_DIR);
+  if (!fs.existsSync(dir)) return [];
+  const out = fs.readdirSync(dir)
+    .filter((f) => /^[0-9a-f]{12}\.md$/.test(f))
+    .map((f) => {
+      const p = path.join(dir, f);
+      try { return { version: f.slice(0, -3), mtime: fs.statSync(p).mtimeMs }; }
+      catch { return null; }
+    })
+    .filter(Boolean);
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out;
+}
+
+export function readVersionContent(sessionDir, v) {
+  if (!/^[0-9a-f]{12}$/.test(v)) return null;
+  const p = path.join(sessionDir, VERSIONS_DIR, `${v}.md`);
+  if (!fs.existsSync(p)) return null;
+  return fs.readFileSync(p, "utf8");
+}
+
+// ---- chat ----
+
+export function readChat(sessionDir) {
+  const dir = path.join(sessionDir, CHAT_DIR);
+  if (!fs.existsSync(dir)) return [];
+  const out = fs.readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => {
+      try { return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); }
+      catch { return null; }
+    })
+    .filter(Boolean);
+  out.sort((a, b) => (a.created || "").localeCompare(b.created || ""));
+  return out;
+}
+
+export function writeChatMessage(sessionDir, msg) {
+  const dir = path.join(sessionDir, CHAT_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  const ts = new Date(msg.created).getTime() || Date.now();
+  const rand = msg.id.split("-").pop().slice(0, 6);
+  fs.writeFileSync(path.join(dir, `${ts}-${rand}.json`), JSON.stringify(msg, null, 2) + "\n", "utf8");
 }
 
 export function readSeen(sessionDir) {
