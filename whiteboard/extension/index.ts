@@ -96,15 +96,19 @@ async function isViewerUp() {
 }
 
 export default function (pi: ExtensionAPI) {
-  let viewerChild: ReturnType<typeof spawn> | null = null;
   let watcher: ReturnType<typeof fs.watch> | null = null;
   let debounce: ReturnType<typeof setTimeout> | null = null;
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
   const handled = new Set<string>();
 
+  // The viewer is a persistent, self-healing daemon: spawn-if-down, detached so
+  // it survives pi restarts/reloads, and never killed by the extension. A
+  // heartbeat re-checks every 10s so a crashed/killed viewer respawns within a
+  // session. Stop it manually with: pkill -f viewer/server.mjs
   async function ensureViewer() {
     if (await isViewerUp()) return;
-    viewerChild = spawn("node", [SERVER, ROOT, "--port", String(PORT)], { stdio: "ignore" });
-    viewerChild.unref();
+    const child = spawn("node", [SERVER, ROOT, "--port", String(PORT)], { stdio: "ignore", detached: true });
+    child.unref();
     for (let i = 0; i < 25; i++) { if (await isViewerUp()) return; await new Promise((r) => setTimeout(r, 200)); }
   }
 
@@ -145,19 +149,19 @@ export default function (pi: ExtensionAPI) {
     for (const it of scanActionable()) handled.add(`${it.kind}:${it.id}`);
     startWatcher(ctx);
     updateStatus(ctx);
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = setInterval(() => { ensureViewer().catch(() => {}); }, 10000);
     if (ctx?.hasUI) ctx.ui.notify(`whiteboard: ${VIEWER_URL}`, "info");
   });
 
-  pi.on("session_shutdown", (event, ctx) => {
+  pi.on("session_shutdown", (_event, ctx) => {
     if (debounce) { clearTimeout(debounce); debounce = null; }
+    if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
     try { watcher?.close(); } catch {}
     watcher = null;
     if (ctx?.hasUI) ctx.ui.setStatus("whiteboard", undefined);
-    // Only tear down the viewer when pi actually quits; keep it across /new, /resume, /reload.
-    if (event.reason === "quit" && viewerChild) {
-      try { viewerChild.kill(); } catch {}
-      viewerChild = null;
-    }
+    // Viewer is a persistent daemon: kept across /new, /resume, /reload, and
+    // even after pi quits. Stop it manually with: pkill -f viewer/server.mjs
   });
 
   pi.registerCommand("wb", {
