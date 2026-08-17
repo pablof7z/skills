@@ -173,23 +173,23 @@ Summarize the result into `notes.md`. Bring only the relevant conclusion back to
 
 ## Live Viewer and Comments
 
-The workspace has a localhost web viewer (`whiteboard/viewer`) that renders `deliverable.md` and lets the human select any span and write a comment anchored to that text **at the current document version**. Comments are W3C Web Annotation JSON files in `comments/`. The viewer watches the filesystem and re-renders live whenever the deliverable, notes, or comments change.
+The whiteboard root (`~/whiteboard`) has a localhost web viewer (`whiteboard/viewer`) that serves an **explorer** plus a per-session view. The explorer lists every project's sessions with **unread badges** (agent replies the human hasn't opened yet); each session view renders `deliverable.md` and lets the human select any span and write a comment anchored to that text **at the current document version**. Comments are W3C Web Annotation JSON files in `comments/`. The viewer watches the filesystem and re-renders live whenever any deliverable, notes, or comments change.
 
 ### Launch the viewer
 
-When the session starts, launch the viewer as a background monitor and open it in the browser:
+Launch one viewer for the whole root (not per session) as a background monitor and open it in the browser:
 
 ```bash
-node "<skill-dir>/whiteboard/viewer/server.mjs" "<session-dir>" --open
+node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
 ```
 
-`<skill-dir>` is the directory containing this `SKILL.md`. The server binds to `127.0.0.1:4318` (override with `--port`). Keep it running for the life of the session. Tell the human the URL.
+`<skill-dir>` is the directory containing this `SKILL.md`. The server binds to `127.0.0.1:4318` (override with `--port`) and serves every session under the root. Keep it running across sessions; tell the human the root URL (`http://127.0.0.1:4318/`) and the direct link to the current session: `http://127.0.0.1:4318/session/<project-slug>/<session-slug>`.
 
-The viewer auto-snapshots `deliverable.md` into `versions/<sha12>.md` on every change, so a comment's anchored version can always be recovered even after later edits.
+The viewer auto-snapshots `deliverable.md` into `versions/<sha12>.md` on every change, so a comment's anchored version can always be recovered even after later edits. Opening a session marks it seen and clears its unread badge.
 
 ### Watch for new comments and reply
 
-The human will leave comments in the viewer, not in chat. To respond, run the comment watcher as a background monitor:
+The human will leave comments in the viewer, not in chat. To respond, run the comment watcher for the current session as a background monitor:
 
 ```bash
 node "<skill-dir>/whiteboard/viewer/wait-for-comment.mjs" "<session-dir>"

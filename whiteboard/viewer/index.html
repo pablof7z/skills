@@ -7,40 +7,9 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="app" id="app">
-    <main class="doc-col">
-      <div class="topbar">
-        <span class="title" id="title">Whiteboard</span>
-        <span class="status" id="status">exploring</span>
-        <span class="version" id="version">v—</span>
-        <span class="conn" id="conn">live</span>
-      </div>
-      <div class="doc-scroll" id="doc-scroll">
-        <div class="doc-wrap">
-          <article id="doc"></article>
-        </div>
-      </div>
-    </main>
-    <aside class="side">
-      <div class="side-head">
-        <h2>Comments</h2>
-        <span class="count" id="count">0</span>
-        <div class="tabs">
-          <span class="tab active" data-tab="all">All</span>
-          <span class="tab" data-tab="open">Open</span>
-        </div>
-      </div>
-      <div class="side-scroll" id="threads"></div>
-    </aside>
-  </div>
-
-  <div class="notes-drawer" id="notes-drawer">
-    <div class="grip" id="notes-grip">▾ Notes log</div>
-    <pre id="notes"></pre>
-  </div>
-
+  <div id="root"></div>
   <script src="/vendor/marked.min.js"></script>
   <script src="/vendor/purify.min.js"></script>
-  <script type="module" src="/app.mjs"></script>
+  <script type="module" src="/main.mjs"></script>
 </body>
 </html>
