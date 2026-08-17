@@ -5,6 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+// The extension only wakes for sessions in this pi session's project
+// (cwd basename, or WHITEBOARD_PROJECT). This test runs from .../whiteboard,
+// so force the test session's project to match.
+process.env.WHITEBOARD_PROJECT = "exttest";
 const mod = await import("./index.ts");
 const ext = mod.default;
 

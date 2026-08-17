@@ -5,7 +5,7 @@ A pi (pi-coding-agent) extension that accelerates the whiteboard skill when runn
 ## What it does (v1)
 
 - **Viewer lifecycle.** The viewer is a persistent, self-healing daemon. On `session_start` it's spawned-if-down (`node ../viewer/server.mjs ~/whiteboard`, detached so it survives pi restarts/reloads). A 10s heartbeat re-checks and respawns it if it crashes or is killed. The extension **never kills the viewer** — it's kept across `/new`, `/resume`, `/reload`, and even after pi quits. Stop it manually with `pkill -f viewer/server.mjs`.
-- **Native comment/chat wake.** `fs.watch`es `~/whiteboard`; on a new actionable item (a top-level human comment with no agent reply, or a human chat message with no agent reply after), calls `pi.sendUserMessage(prompt, { deliverAs: "followUp" })` to wake the agent in the live pi session. Baselines existing items on `session_start` so only new ones wake the agent.
+- **Native comment/chat wake (scoped to this session's project).** `fs.watch`es `~/whiteboard`; on a new actionable item **in this pi session's own project** (whiteboard `project` = cwd basename, overridable via `WHITEBOARD_PROJECT`) — a top-level human comment with no agent reply, or a human chat message with no agent reply after — calls `pi.sendUserMessage(prompt, { deliverAs: "followUp" })` to wake the agent in the live pi session. Baselines existing items on `session_start` so only new ones wake the agent. Other projects never wake this session (an `nmp` pi session isn't woken for a `skills` comment and vice-versa).
 - **Footer status.** `ctx.ui.setStatus("whiteboard", "📓 N unread")` with total unread across sessions.
 - **`/wb` command.** Opens the viewer in the browser.
 
