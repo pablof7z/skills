@@ -225,6 +225,8 @@ node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
 
 `<skill-dir>` is the directory containing this `SKILL.md`. The server binds to `127.0.0.1:4318` (override with `--port`) and serves every session under the root. Keep it running across sessions; tell the human the root URL (`http://127.0.0.1:4318/`) and the direct link to the current session: `http://127.0.0.1:4318/session/<project-slug>/<session-slug>`.
 
+**If the whiteboard pi extension is installed** (it auto-discovers from `~/.pi/agent/extensions/whiteboard/`), it already keeps the viewer running and watches for new comments/chat — do not launch the server or `wait-for-comment.mjs` yourself. It wakes you with a `[whiteboard] New …` message when a human comment or chat lands; follow the reply steps below. Use the bash recipes below only when the extension is not present.
+
 The viewer auto-snapshots `deliverable.md` into `versions/<sha12>.md` on every change, so a comment's anchored version can always be recovered even after later edits. Opening a session marks it seen and clears its unread badge.
 
 ### Watch for new comments and chat, and reply
