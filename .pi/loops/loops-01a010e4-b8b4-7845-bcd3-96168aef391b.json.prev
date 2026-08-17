@@ -1,0 +1,20 @@
+{
+  "nextId": 2,
+  "loops": [
+    {
+      "id": "1",
+      "prompt": "Monitor #2 timed out. Inspect MonitorList, report the failure, and decide whether to retry with a smaller bounded command.",
+      "trigger": {
+        "type": "event",
+        "source": "monitor:timeout",
+        "filter": "{\"monitorId\":\"2\"}"
+      },
+      "status": "active",
+      "recurring": false,
+      "createdAt": 1786991058235,
+      "updatedAt": 1786991058235,
+      "expiresAt": 1787595858235,
+      "fireCount": 0
+    }
+  ]
+}

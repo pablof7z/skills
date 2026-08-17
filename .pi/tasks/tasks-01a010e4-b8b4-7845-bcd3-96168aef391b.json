@@ -1,0 +1,55 @@
+{
+  "nextId": 6,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Build whiteboard viewer server (Node + SSE + fs watch)",
+      "description": "Node HTTP server at whiteboard/viewer/server.mjs. Serves static viewer UI, exposes /api/session, /api/deliverable, /api/notes, /api/comments, SSE /api/events. Watches session dir for changes to deliverable.md, notes.md, comments/. Snapshots deliverable versions. Writes W3C Web Annotation comment files. Default port 4318.",
+      "status": "completed",
+      "createdAt": 1786990846940,
+      "updatedAt": 1786991015476,
+      "revision": 2,
+      "completedAt": 1786991015476
+    },
+    {
+      "id": "2",
+      "subject": "Build viewer browser client (markdown render + W3C annotations)",
+      "description": "index.html + app.mjs + styles.css. Render deliverable markdown (marked + DOMPurify). SSE live updates. Text selection → comment composer → POST annotation. Anchor comments by TextQuoteSelector/TextPositionSelector at a doc version. Sidebar threads with replies. Agent replies appear live.",
+      "status": "completed",
+      "createdAt": 1786990846950,
+      "updatedAt": 1786991015497,
+      "revision": 1,
+      "completedAt": 1786991015497
+    },
+    {
+      "id": "3",
+      "subject": "Build comment watcher script for the agent",
+      "description": "whiteboard/viewer/wait-for-comment.mjs: CLI that fs.watches comments/ in a session dir and exits (printing new comment path) when a new top-level user comment without a reply appears. Used by the agent via MonitorCreate with onDone to wake on new comments.",
+      "status": "completed",
+      "createdAt": 1786990846974,
+      "updatedAt": 1786991015516,
+      "revision": 1,
+      "completedAt": 1786991015516
+    },
+    {
+      "id": "4",
+      "subject": "Update whiteboard SKILL.md + references for session workspace + viewer",
+      "description": "Replace private-home Note Location with shared ~/whiteboard/<project>/YYYY-MM-<slug>/ workspace: deliverable.md (outward doc, includes all stated requirements/constraints), notes.md (append-only log), manifest.json, versions/, comments/. Add instructions to launch the viewer server and the comment watcher. Keep under LOC limits.",
+      "status": "completed",
+      "createdAt": 1786990846997,
+      "updatedAt": 1786991366269,
+      "revision": 1,
+      "completedAt": 1786991366269
+    },
+    {
+      "id": "5",
+      "subject": "Test viewer end-to-end with a sample session",
+      "description": "Create a sample session dir, run server, verify markdown render, SSE live update on doc edit, text selection → comment creation, comment file written as W3C annotation, reply file appears live, anchoring survives minor edits. Open PR.",
+      "status": "completed",
+      "createdAt": 1786990847017,
+      "updatedAt": 1786991366300,
+      "revision": 2,
+      "completedAt": 1786991366300
+    }
+  ]
+}

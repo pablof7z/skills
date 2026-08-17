@@ -106,6 +106,7 @@ File slugs should be lowercase hyphen-case:
 
 Use the skill for:
 
+- "How does the relay identity model work?" (a factual question — research it, then proactively bring in adjacent context)
 - "How does the relay identity model work? What if app accounts owned it instead?"
 - "I am not sure whether Trellis should split this at phase boundaries or runtime boundaries."
 - "Compare the queue ownership designs before we implement anything."
@@ -117,15 +118,11 @@ Use the skill for:
 Do not use the skill for:
 
 - "What is an ADR?"
-- "How does the relay identity model work?" (a factual question with a researchable answer — research and answer it directly)
-- "Where is the queue ownership code defined?" / "Does a relay identity type exist?"
 - "Implement the queue ownership fix."
 - "Review this PR."
 - "Fix the failing CI job."
 - "Rewrite this prompt."
 - "Optimize this prompt once."
-
-A factual question only becomes a whiteboard session if it grows into iterative comparison, objection, or revision across turns. Until then, answer it with research.
 
 If a simple question becomes iterative across turns with alternatives, objections, or changed direction, start the note at that point and include the prior context in the first entry.
 
