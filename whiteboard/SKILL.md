@@ -282,6 +282,42 @@ Write a file into `comments/` named `<timestamp>-<idhint>-attention.json` with t
 
 Get the selectors the same way the viewer does: `exact` is the verbatim text, `prefix`/`suffix` are ~32 chars of surrounding context, and `start`/`end` are character offsets within the document's text content. Use `highlighting` only for things that genuinely need the human — do not litter the document. Dismiss a marker by POSTing to the running viewer's `/api/session/<project-slug>/<session-slug>/resolved` with `{"id":"<urn:uuid>","resolved":true,"by":"agent"}`.
 
+## Block document model (`wb` CLI)
+
+The block model is the direction for the deliverable: the document is a sequence of **named markdown blocks** stored in `document.json` (no `deliverable.md` on disk). Each block is `{ name, md, flags? }` — a chunk of markdown with a stable name the agent picks (`goal`, `tradeoffs`, `open-questions`). Comments live inside `document.json`, anchored to the block `name` (with a `TextQuoteSelector` kept only as a repair hint for in-block span highlight). Flags (`needs-attention`, `decided`, `superseded`) are a set on the block. The agent reads and mutates the document **only through the `wb` CLI** (the pi extension wraps `wb` and sets `WB_SESSION`). This gives stable comment anchors (a comment stays attached to its block through edits to other blocks) and semantic change tracking.
+
+Run `wb` from the skill's `bin/wb` shim or `node <skill-dir>/whiteboard/cli/main.mjs …`. Core commands:
+
+```bash
+wb new <slug> [--from <md-file>]                # create a block-doc session
+wb read [--md|--json]                            # project: tagged <name>…</name> (default) / plain md / raw tree
+wb write add <name> [--before X|--after X] < f.md # add a block (content: --text|--file|stdin)
+wb write edit <name> < f.md                       # replace a block's markdown
+wb write move <name> --after X                    # reorder
+wb write rename <old> <new>                       # rename (cascades comments)
+wb write remove <name> [name…]                    # delete block(s) + their comments
+wb flag <name> needs-attention|--off             # set/clear a block flag
+wb comment <name> "text" [--exact "quote"]       # comment on a block (auto selector with --exact)
+wb reply <comment-id> "text"                      # reply in a thread
+wb attention <name> "reason"                      # flag needs-attention + comment
+wb resolve <comment-id> [--unresolve]            # resolve a comment
+wb note "trail entry"                             # append to notes.md
+```
+
+Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block names and boundaries:
+
+```
+<goal>
+Design the block model and CLI.
+</goal>
+
+<tradeoffs>
+We favor **named blocks** over flat markdown.
+</tradeoffs>
+```
+
+Session scope resolves from `--session <project>/<slug>` → `WB_SESSION` env → `~/.wb/current` (set by `wb use`). The pi extension sets `WB_SESSION` for you. Prefer the block model for new sessions; the legacy `deliverable.md` + per-file W3C comment path (above) is being superseded and will be migrated in a follow-up once the viewer renders `document.json`.
+
 ## Convergence and Promotion
 
 Move status from `exploring` to `converging` when one direction is becoming stronger but important assumptions or risks remain open. Do not mark a session `converging` only because the agent has a preferred answer.

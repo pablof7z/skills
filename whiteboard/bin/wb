@@ -1,0 +1,3 @@
+#!/bin/sh
+# wb — whiteboard block document CLI shim.
+exec node "$(dirname "$0")/../cli/main.mjs" "$@"
