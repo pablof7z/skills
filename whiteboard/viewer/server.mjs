@@ -115,7 +115,8 @@ async function handleSession(req, res, root, project, slug, rest) {
     const man = S.readManifest(dir);
     const d = S.readDeliverable(dir);
     const viewed = S.readViewed(dir);
-    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, deliverableVersion: d.version, viewedVersion: viewed.version });
+    const resolved = S.readResolved(dir);
+    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, deliverableVersion: d.version, viewedVersion: viewed.version, resolved });
   }
   if (rest === "deliverable" && m === "GET") {
     const d = S.readDeliverable(dir);
@@ -162,6 +163,14 @@ async function handleSession(req, res, root, project, slug, rest) {
     const version = (data && data.version) || d.version;
     S.writeViewed(dir, version);
     return sendJson(res, 200, { version, at: S.nowIso() });
+  }
+  if (rest === "resolved" && m === "GET") return sendJson(res, 200, S.readResolved(dir));
+  if (rest === "resolved" && m === "POST") {
+    const data = await readBody(req).catch(() => ({}));
+    const id = data && data.id;
+    if (!id) return sendJson(res, 400, { error: "id required" });
+    const map = S.setResolved(dir, id, data.resolved ? (data.by || "user") : null);
+    return sendJson(res, 200, map);
   }
   if (rest === "manifest" && m === "PATCH") {
     const data = await readBody(req).catch(() => null);
@@ -212,7 +221,7 @@ function main() {
           // Otherwise marking-seen would feedback-loop into endless refreshes.
           const leaf = segs[segs.length - 1];
           const sub = segs[2];
-          if (leaf === S.SEEN_FILE || leaf === S.VIEWED_FILE || sub === S.VERSIONS_DIR) return;
+          if (leaf === S.SEEN_FILE || leaf === S.VIEWED_FILE || leaf === S.RESOLVED_FILE || sub === S.VERSIONS_DIR) return;
           const key = `${segs[0]}/${segs[1]}`;
           broadcast(sessionClientsFor(key), "refresh", {});
           return;

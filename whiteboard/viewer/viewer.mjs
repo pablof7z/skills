@@ -87,13 +87,19 @@ export function initViewer(root, project, slug) {
   const diffBannerTextEl = document.getElementById("diff-banner-text");
   const diffMarkReadEl = document.getElementById("diff-markread");
 
-  const state = { deliverable: { content: "", version: "" }, notes: "", annotations: [], activeId: null, tab: "comments", viewedVersion: null, diffMode: false, oldViewedContent: "" };
+  const state = { deliverable: { content: "", version: "" }, notes: "", annotations: [], activeId: null, tab: "comments", viewedVersion: null, diffMode: false, oldViewedContent: "", resolved: new Set() };
 
   const codeblocks = initCodeBlocks();
-  const comments = initComments({ docEl, railEl, state, renderMarkdown, postComment, getVersion: () => state.deliverable.version, onChange: (n) => { countEl.textContent = String(n); } });
+  const comments = initComments({ docEl, railEl, state, renderMarkdown, postComment, getVersion: () => state.deliverable.version, onChange: (n) => { countEl.textContent = String(n); }, onToggleResolve: toggleResolve });
   const nav = initNav({ docScroll, docEl, state });
   const chat = initChat(chatPanelEl, API);
   const history = initHistory(historyPanelEl, API);
+  const appEl = root.querySelector(".app");
+
+  async function toggleResolve(id, resolved) {
+    await fetch(`${API}/resolved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, resolved, by: "user" }) });
+    await runRefresh();
+  }
 
   function setTab(tab) {
     state.tab = tab;
@@ -101,7 +107,9 @@ export function initViewer(root, project, slug) {
     commentsPanel.hidden = tab !== "comments";
     chatPanelEl.hidden = tab !== "chat";
     historyPanelEl.hidden = tab !== "history";
-    // Margin notes share the document scroll; show them only for the Comments tab.
+    // Comments own the right margin as margin notes (no sidebar); Chat/History
+    // get the 420px sidebar back.
+    appEl.classList.toggle("comments-on", tab === "comments");
     docWrap.classList.toggle("comments-on", tab === "comments");
     if (tab === "chat") chat.refresh().then(() => chat.focus && chat.focus());
     if (tab === "history") history.refresh();
@@ -163,6 +171,7 @@ export function initViewer(root, project, slug) {
     }
 
     state.deliverable = d; state.notes = n.content; state.annotations = annos;
+    state.resolved = new Set(Object.keys(s.resolved || {}));
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;

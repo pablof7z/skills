@@ -243,6 +243,7 @@ It baselines existing items, then exits (printing a token) as soon as there is a
 1. Read the new comment from its file in `comments/`.
 2. Answer it. Often the answer also changes `deliverable.md` or adds a `notes.md` entry — make those edits too.
 3. Write a **reply annotation** file into `comments/` with `motivation: "replying"`, `creator.name: "agent"`, and `target: { id: <parent urn:uuid>, type: "Annotation" }` so the reply threads under the question in the viewer. The W3C Web Annotation shape is specified in [references/annotations.md](references/annotations.md).
+4. If the comment is fully settled (the question is answered and the change is in), **mark it resolved** so it stops counting as actionable and renders collapsed/greyed: POST to the running viewer `curl -sX POST http://127.0.0.1:4318/api/session/<project-slug>/<session-slug>/resolved -H 'Content-Type: application/json' -d '{"id":"<parent urn:uuid>","resolved":true,"by":"agent"}'` (or merge the id into `.resolved.json`). Resolved comments do not wake the agent. Either the human or the agent can resolve; unresolve the same way with `"resolved":false`.
 
 **`chat:<id>`** — a free-form message from the webapp chat tab:
 1. Read the message from its file in `chat/` (JSON: `{ id, role, text, created }`).

@@ -148,6 +148,23 @@ export function writeViewed(sessionDir, version) {
   );
 }
 
+// resolved comments: { commentId: { at, by } }. Lets the human or agent mark a
+// top-level comment resolved so it stops counting as actionable and renders
+// collapsed/greyed in the viewer.
+export const RESOLVED_FILE = ".resolved.json";
+
+export function readResolved(sessionDir) {
+  return readJsonSafe(path.join(sessionDir, RESOLVED_FILE), {});
+}
+
+export function setResolved(sessionDir, id, by) {
+  const map = readResolved(sessionDir);
+  if (by) map[id] = { at: nowIso(), by };
+  else delete map[id];
+  fs.writeFileSync(path.join(sessionDir, RESOLVED_FILE), JSON.stringify(map, null, 2) + "\n", "utf8");
+  return map;
+}
+
 // Unread = annotations the human hasn't seen yet: created after lastSeenAt and
 // not authored by the human (i.e. agent replies). If never seen, all non-human
 // annotations count.

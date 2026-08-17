@@ -20,7 +20,7 @@ function renderBody(text, renderMarkdown) {
   return window.DOMPurify ? window.DOMPurify.sanitize(raw, SANITIZE_OPTS) : raw;
 }
 
-export function initComments({ docEl, railEl, state, renderMarkdown, postComment, getVersion, onChange }) {
+export function initComments({ docEl, railEl, state, renderMarkdown, postComment, getVersion, onChange, onToggleResolve }) {
   const isTopLevel = (a) => a && a.motivation !== "replying" && !(a.target && a.target.id);
   const topLevel = () => state.annotations.filter(isTopLevel);
   const repliesOf = (pid) => state.annotations
@@ -148,17 +148,20 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
       const id = a.id.split(":").pop();
       const mark = docEl.querySelector(`mark.wb-anno[data-anno-id="${id}"]`);
       const anchorY = mark ? mark.offsetTop : (a._start ?? 0);
+      const isResolved = state.resolved.has(a.id);
       const card = document.createElement("div");
-      card.className = "thread" + (a._anchored === false ? " orphaned" : "") + (state.activeId === id ? " active" : "");
+      card.className = "thread" + (a._anchored === false ? " orphaned" : "") + (state.activeId === id ? " active" : "") + (isResolved ? " resolved" : "");
       card.dataset.annoId = id;
       const ex = excerptOf(a);
       const ver = (a.target && a.target.version ? a.target.version : "—").slice(0, 8);
       const where = a._anchored === false ? `not found @ ${ver}` : `@ ${ver}`;
-      card.innerHTML = `<div class="excerpt">${esc(ex.slice(0, 120))}${ex.length > 120 ? "…" : ""}<span class="where">${esc(where)}</span></div><div class="msg-list"></div><div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
+      card.innerHTML = `<div class="excerpt">${esc(ex.slice(0, 120))}${ex.length > 120 ? "…" : ""}<span class="where">${esc(where)}</span></div><div class="msg-list"></div><div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Mark resolved"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div></div>`;
       const list = card.querySelector(".msg-list");
       list.appendChild(renderMsg(a));
       for (const r of repliesOf(a.id)) list.appendChild(renderMsg(r));
       wireReply(card, a);
+      const resolveBtn = card.querySelector(".resolve-btn");
+      if (resolveBtn && onToggleResolve) resolveBtn.addEventListener("click", (e) => { e.stopPropagation(); onToggleResolve(a.id, !isResolved); });
       card.addEventListener("click", (e) => { if (e.target.closest(".reply-box")) return; setActive(id); });
       railEl.appendChild(card);
       // Stack: if this card would overlap the previous, push it down.
