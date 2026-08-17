@@ -25,6 +25,10 @@ const SERVER = path.join(VIEWER_DIR, "server.mjs");
 const ROOT = path.join(os.homedir(), "whiteboard");
 const PORT = Number(process.env.WHITEBOARD_PORT || "4318");
 const VIEWER_URL = `http://127.0.0.1:${PORT}`;
+// Only wake this pi session for whiteboard sessions in its own project. The
+// whiteboard `project` (first path segment under ~/whiteboard) corresponds to
+// the repo/dir the pi session is working in. Override with WHITEBOARD_PROJECT.
+const myProject = process.env.WHITEBOARD_PROJECT || path.basename(process.cwd());
 
 const isSessionDir = (n: string) => /^\d{4}-\d{2}-.+/.test(n);
 const nowIso = () => new Date().toISOString();
@@ -73,6 +77,7 @@ function listSessions() {
 function scanActionable() {
   const items: { kind: "comment" | "chat"; id: string; project: string; slug: string; text: string }[] = [];
   for (const s of listSessions()) {
+    if (s.project !== myProject) continue; // only wake for this session's project
     const annos = readComments(s.dir);
     const replied = new Set(annos.filter((a) => a.motivation === "replying" && a.target?.id).map((a) => a.target.id));
     for (const a of annos) {
