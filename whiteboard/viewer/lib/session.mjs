@@ -132,6 +132,22 @@ export function writeSeen(sessionDir, lastSeenAt) {
   );
 }
 
+// viewedVersion: the deliverable version the human last actively looked at, used
+// to render inline diffs of what changed since.
+export const VIEWED_FILE = ".viewed.json";
+
+export function readViewed(sessionDir) {
+  return readJsonSafe(path.join(sessionDir, VIEWED_FILE), { version: null, at: null });
+}
+
+export function writeViewed(sessionDir, version) {
+  fs.writeFileSync(
+    path.join(sessionDir, VIEWED_FILE),
+    JSON.stringify({ version, at: nowIso() }, null, 2) + "\n",
+    "utf8",
+  );
+}
+
 // Unread = annotations the human hasn't seen yet: created after lastSeenAt and
 // not authored by the human (i.e. agent replies). If never seen, all non-human
 // annotations count.

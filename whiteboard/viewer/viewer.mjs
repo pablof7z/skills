@@ -5,6 +5,7 @@
 
 import { initChat } from "./chat.mjs";
 import { initHistory } from "./history.mjs";
+import { renderDocDiff } from "./docdiff.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -28,6 +29,10 @@ export function initViewer(root, project, slug) {
           <span class="status" id="status">exploring</span>
           <span class="version" id="version">v—</span>
           <span class="conn" id="conn">live</span>
+        </div>
+        <div class="diff-banner" id="diff-banner" hidden>
+          <span id="diff-banner-text"></span>
+          <button id="diff-markread" type="button">Mark as read</button>
         </div>
         <div class="doc-scroll" id="doc-scroll">
           <div class="doc-wrap"><article id="doc"></article></div>
@@ -64,8 +69,11 @@ export function initViewer(root, project, slug) {
   const notesEl = document.getElementById("notes");
   const drawerEl = document.getElementById("notes-drawer");
   const gripEl = document.getElementById("notes-grip");
+  const diffBannerEl = document.getElementById("diff-banner");
+  const diffBannerTextEl = document.getElementById("diff-banner-text");
+  const diffMarkReadEl = document.getElementById("diff-markread");
 
-  const state = { deliverable: { content: "", version: "" }, notes: "", annotations: [], activeId: null, tab: "comments" };
+  const state = { deliverable: { content: "", version: "" }, notes: "", annotations: [], activeId: null, tab: "comments", viewedVersion: null, diffMode: false, oldViewedContent: "" };
 
   const chat = initChat(chatPanelEl, API);
   const history = initHistory(historyPanelEl, API);
@@ -161,7 +169,68 @@ export function initViewer(root, project, slug) {
     }
   }
 
-  function renderDoc() { docEl.innerHTML = renderMarkdown(state.deliverable.content); anchorAll(); }
+  function renderDoc() {
+    if (state.diffMode) {
+      docEl.innerHTML = renderDocDiff(state.oldViewedContent, state.deliverable.content, renderMarkdown);
+      diffBannerEl.hidden = false;
+      diffBannerTextEl.textContent = `Changes since v${(state.viewedVersion || "").slice(0, 8)} → v${(state.deliverable.version || "").slice(0, 8)}`;
+    } else {
+      docEl.innerHTML = renderMarkdown(state.deliverable.content);
+      diffBannerEl.hidden = true;
+      anchorAll();
+    }
+    enhanceCodeBlocks(docEl);
+  }
+
+  // ---- code blocks: syntax highlighting + mermaid ----
+  function highlightCode(root) {
+    if (!window.hljs) return;
+    for (const code of root.querySelectorAll("pre code")) {
+      if (code.classList.contains("language-mermaid")) continue;
+      if (code.dataset.highlighted) continue;
+      try { window.hljs.highlightElement(code); code.dataset.highlighted = "yes"; } catch {}
+    }
+  }
+
+  let mermaidLoading = null;
+  function loadMermaid() {
+    if (window.mermaid) return Promise.resolve(window.mermaid);
+    if (mermaidLoading) return mermaidLoading;
+    mermaidLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+      s.onload = () => { try { window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" }); } catch {} resolve(window.mermaid); };
+      s.onerror = () => reject(new Error("mermaid load failed"));
+      document.head.appendChild(s);
+    });
+    return mermaidLoading;
+  }
+
+  async function renderMermaid(root) {
+    const blocks = [...root.querySelectorAll("pre code.language-mermaid")];
+    if (blocks.length === 0) return;
+    try {
+      const mermaid = await loadMermaid();
+      const nodes = [];
+      for (const code of blocks) {
+        const pre = code.parentElement;
+        if (!pre) continue;
+        const div = document.createElement("div");
+        div.className = "mermaid";
+        div.textContent = code.textContent;
+        pre.replaceWith(div);
+        nodes.push(div);
+      }
+      await mermaid.run({ nodes });
+    } catch {
+      // offline / load failed: leave rendered as a code block
+    }
+  }
+
+  async function enhanceCodeBlocks(root) {
+    highlightCode(root);
+    await renderMermaid(root);
+  }
 
   function renderBody(text) {
     const raw = window.marked ? window.marked.parse(text || "") : esc(text);
@@ -241,6 +310,7 @@ export function initViewer(root, project, slug) {
 
   function positionFab() {
     removeFab();
+    if (state.diffMode) return; // don't allow commenting on a diff view
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
@@ -315,7 +385,25 @@ export function initViewer(root, project, slug) {
     const annos = c.annotations || [];
     const sig = commentSig(annos);
     const versionChanged = d.version !== state.deliverable.version;
-    const changed = versionChanged || n.content !== state.notes || sig !== lastCommentSig;
+    let needRender = versionChanged || n.content !== state.notes || sig !== lastCommentSig;
+
+    // Inline diff: compare current deliverable to the version the human last
+    // actively looked at (viewedVersion, stored server-side in .viewed.json).
+    const viewed = s.viewedVersion || null;
+    if (viewed === null) {
+      // First ever look: baseline so future edits diff against this version.
+      state.viewedVersion = d.version; state.diffMode = false; state.oldViewedContent = "";
+      fetch(`${API}/viewed`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: d.version }) }).catch(() => {});
+    } else if (viewed !== d.version) {
+      if (state.viewedVersion !== viewed || state.oldViewedContent === "" || versionChanged) {
+        try { const r = await fetch(`${API}/versions/${viewed}`); const vd = await r.json(); state.oldViewedContent = vd.content || ""; }
+        catch { state.oldViewedContent = ""; }
+      }
+      state.viewedVersion = viewed; state.diffMode = true; needRender = true;
+    } else {
+      state.viewedVersion = viewed; state.diffMode = false;
+    }
+
     state.deliverable = d; state.notes = n.content; state.annotations = annos;
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
@@ -324,7 +412,7 @@ export function initViewer(root, project, slug) {
     notesEl.textContent = n.content || "(no notes yet)";
     // Only re-render when something actually changed, so an in-progress text
     // selection in the document is not blown away by no-op refreshes.
-    if (changed) { renderDoc(); renderThreads(); }
+    if (needRender) { renderDoc(); renderThreads(); }
     lastCommentSig = sig;
     // Chat is cheap and stateless to refresh; history only when its tab is open
     // or the deliverable version changed (a new snapshot may have appeared).
@@ -356,6 +444,13 @@ export function initViewer(root, project, slug) {
   }
 
   gripEl.addEventListener("click", () => drawerEl.classList.toggle("open"));
+
+  diffMarkReadEl.addEventListener("click", async () => {
+    await fetch(`${API}/viewed`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: state.deliverable.version }) });
+    state.viewedVersion = state.deliverable.version;
+    state.diffMode = false;
+    renderDoc();
+  });
 
   runRefresh().then(connectSSE);
 }
