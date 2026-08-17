@@ -446,20 +446,20 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
 
 /* ---- floating TOC ---- */
 .toc-rail {
-  position: fixed; left: 8px; top: 56px; width: 200px;
-  max-height: calc(100vh - 72px); overflow: auto;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-  padding: 8px 10px; z-index: 30; font-size: 12.5px;
+  position: fixed; left: 12px; top: 60px; width: 196px;
+  max-height: calc(100vh - 76px); overflow: auto;
+  background: transparent; border: none; border-radius: 0;
+  padding: 0; z-index: 30; font-size: 12.5px;
 }
-.toc-rail .toc-title { font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 10.5px; padding: 2px 4px 6px; }
+.toc-rail .toc-title { font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; padding: 0 6px 8px; opacity: 0.65; }
 .toc-list { list-style: none; margin: 0; padding: 0; }
-.toc-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--ink); }
-.toc-item:hover { background: var(--hover); }
-.toc-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.toc-item .dot { width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: 0 0 auto; }
+.toc-item { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px; cursor: pointer; color: var(--muted); transition: color 0.12s; }
+.toc-item:hover { color: var(--ink); background: transparent; }
+.toc-item.active { color: var(--ink); font-weight: 600; background: transparent; }
+.toc-item .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; flex: 0 0 auto; }
 .toc-item.has-changes .dot { background: var(--accent); }
 .toc-item.toc-h2 { padding-left: 16px; }
-.toc-item.toc-h3 { padding-left: 28px; color: var(--muted); }
+.toc-item.toc-h3 { padding-left: 28px; }
 .toc-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- minimap ---- */
