@@ -93,17 +93,21 @@ html, body {
 
 .doc-wrap {
   position: relative;
-  max-width: 1120px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 36px 48px 120px 224px; /* left room for the floating TOC */
+  padding: 36px 48px 120px 208px; /* left room for the floating TOC */
 }
-.doc-wrap.comments-on { padding-right: 312px; } /* right room for margin notes */
+.doc-wrap.comments-on { padding-right: 300px; } /* right room for margin notes */
+/* When Comments tab is active, the margin rail IS the comment area; drop the
+   420px sidebar so the document isn't squeezed by both. */
+.app.comments-on { grid-template-columns: 1fr; }
+.app.comments-on > .side { display: none; }
 
 /* margin-note rail: shares the document scroll, cards positioned by anchor Y */
 .margin-rail {
   position: absolute;
-  top: 0; right: 24px; bottom: 0;
-  width: 280px;
+  top: 0; right: 20px; bottom: 0;
+  width: 272px;
   display: none;
 }
 .doc-wrap.comments-on .margin-rail { display: block; }
@@ -495,3 +499,15 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
   .comment-fab { box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
   .margin-rail .thread { box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
 }
+
+/* resolved margin notes: greyed, collapsed to just the excerpt */
+.margin-rail .thread.resolved { opacity: 0.62; border-style: dashed; }
+.margin-rail .thread.resolved .excerpt { color: var(--muted); }
+.margin-rail .thread.resolved .msg-list,
+.margin-rail .thread.resolved .reply-box { display: none; }
+.margin-rail .thread .resolve-btn {
+  margin-right: auto; background: transparent; border: 1px solid var(--line);
+  color: var(--muted); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 11px;
+}
+.margin-rail .thread .resolve-btn:hover { color: var(--accent); border-color: var(--accent); }
+.margin-rail .thread.resolved .resolve-btn { color: var(--agent); border-color: var(--agent); }

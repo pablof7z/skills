@@ -49,6 +49,7 @@ function readChat(dir: string) {
     .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(d, f), "utf8")); } catch { return null; } }).filter(Boolean);
 }
 function readSeen(dir: string) { return readJson(path.join(dir, ".seen.json"), { lastSeenAt: null as string | null }); }
+function readResolved(dir: string) { return readJson(path.join(dir, ".resolved.json"), {} as Record<string, any>); }
 function computeUnread(annos: any[], lastSeenAt: string | null) {
   return annos.filter((a) => {
     if (String(a?.creator?.name || "").toLowerCase() === "user") return false;
@@ -79,8 +80,10 @@ function scanActionable() {
   for (const s of listSessions()) {
     if (s.project !== myProject) continue; // only wake for this session's project
     const annos = readComments(s.dir);
+    const resolved = readResolved(s.dir);
     const replied = new Set(annos.filter((a) => a.motivation === "replying" && a.target?.id).map((a) => a.target.id));
     for (const a of annos) {
+      if (resolved[a.id]) continue; // resolved comments are not actionable
       if (a.motivation !== "replying" && !(a.target && a.target.id) && String(a.creator?.name || "").toLowerCase() !== "agent" && !replied.has(a.id)) {
         items.push({ kind: "comment", id: a.id, project: s.project, slug: s.slug, text: a.body?.value || "" });
       }
