@@ -160,6 +160,28 @@ async function handleSession(req, res, root, project, slug, rest) {
     broadcast(explorerClients, "sessions", {});
     return sendJson(res, 200, next);
   }
+  // Chat (file-queue; agent writes reply files directly, viewer renders live)
+  if (rest === "chat" && m === "GET") return sendJson(res, 200, { messages: S.readChat(dir) });
+  if (rest === "chat" && m === "POST") {
+    const data = await readBody(req).catch(() => null);
+    if (!data) return sendJson(res, 400, { error: "bad json" });
+    const msg = {
+      id: `urn:uuid:${S.uuid()}`,
+      role: "user",
+      text: String(data.text ?? "").slice(0, 8000),
+      created: S.nowIso(),
+    };
+    S.writeChatMessage(dir, msg);
+    return sendJson(res, 201, msg);
+  }
+  // Versions (history + per-version content for diffing)
+  if (rest === "versions" && m === "GET") return sendJson(res, 200, { versions: S.readVersions(dir) });
+  if (rest.startsWith("versions/") && m === "GET") {
+    const v = rest.slice("versions/".length);
+    const content = S.readVersionContent(dir, v);
+    if (content === null) return sendJson(res, 404, { error: "version not found" });
+    return sendJson(res, 200, { version: v, content });
+  }
   return sendJson(res, 404, { error: "not found" });
 }
 
@@ -174,6 +196,12 @@ function main() {
       if (filename) {
         const segs = filename.split(path.sep);
         if (segs.length >= 2 && S.isSessionDir(segs[1])) {
+          // Ignore viewer-internal writes that are not content changes:
+          // .seen.json (written on every view) and versions/ (derived snapshots).
+          // Otherwise marking-seen would feedback-loop into endless refreshes.
+          const leaf = segs[segs.length - 1];
+          const sub = segs[2];
+          if (leaf === S.SEEN_FILE || sub === S.VERSIONS_DIR) return;
           const key = `${segs[0]}/${segs[1]}`;
           broadcast(sessionClientsFor(key), "refresh", {});
           return;
@@ -194,6 +222,8 @@ function main() {
       if (p === "/main.mjs") return serveStatic(res, "main.mjs");
       if (p === "/viewer.mjs") return serveStatic(res, "viewer.mjs");
       if (p === "/explorer.mjs") return serveStatic(res, "explorer.mjs");
+      if (p === "/chat.mjs") return serveStatic(res, "chat.mjs");
+      if (p === "/history.mjs") return serveStatic(res, "history.mjs");
       if (p === "/styles.css") return serveStatic(res, "styles.css");
       if (p.startsWith("/vendor/")) return serveStatic(res, p.slice(1));
 
@@ -201,7 +231,7 @@ function main() {
       if (p === "/api/sessions" && req.method === "GET") return sendJson(res, 200, { sessions: S.listSessions(root) });
       if (p === "/api/events" && req.method === "GET") { sseStart(res); explorerClients.add(res); return; }
 
-      const sess = p.match(/^\/api\/session\/([^/]+)\/([^/]+)\/([^/]+)$/);
+      const sess = p.match(/^\/api\/session\/([^/]+)\/([^/]+)\/(.+)$/);
       if (sess) return await handleSession(req, res, root, sess[1], sess[2], sess[3]);
 
       // SPA fallback: serve index.html for non-API routes (e.g. /session/...)

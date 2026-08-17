@@ -43,7 +43,8 @@ Every whiteboard session lives in a shared, uncommitted directory outside any re
 ├── deliverable.md    # outward-facing doc the agent constantly updates; becomes the deliverable
 ├── notes.md          # append-only log: user explicit statements, subagent findings, corrections
 ├── versions/         # auto-snapshots of deliverable.md per content version (viewer-managed)
-└── comments/         # W3C Web Annotation JSON files (one per comment or reply)
+├── comments/         # W3C Web Annotation JSON files (one per comment or reply)
+└── chat/             # chat messages between human and agent (one JSON per message)
 ```
 
 Resolve `<project-slug>` as:
@@ -222,24 +223,29 @@ node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
 
 The viewer auto-snapshots `deliverable.md` into `versions/<sha12>.md` on every change, so a comment's anchored version can always be recovered even after later edits. Opening a session marks it seen and clears its unread badge.
 
-### Watch for new comments and reply
+### Watch for new comments and chat, and reply
 
-The human will leave comments in the viewer, not in chat. To respond, run the comment watcher for the current session as a background monitor:
+The human will leave comments in the viewer and may also send chat messages from the viewer's Chat tab — not in the host conversation. To respond, run the inbox watcher for the current session as a background monitor:
 
 ```bash
 node "<skill-dir>/whiteboard/viewer/wait-for-comment.mjs" "<session-dir>"
 ```
 
-It baselines existing comments, then exits (printing the new annotation's `urn:uuid:…` id) as soon as a new top-level human comment without an agent reply appears. Wire its completion to wake you (the monitor's `onDone` prompt), then:
+It baselines existing items, then exits (printing a token) as soon as there is a new actionable item: a top-level human comment with no agent reply, or a human chat message with no agent chat reply after it. The token is `comment:<urn:uuid>` or `chat:<urn:uuid>`. Wire its completion to wake you (the monitor's `onDone` prompt), then handle by kind:
 
+**`comment:<id>`** — an anchored question on the deliverable:
 1. Read the new comment from its file in `comments/`.
 2. Answer it. Often the answer also changes `deliverable.md` or adds a `notes.md` entry — make those edits too.
 3. Write a **reply annotation** file into `comments/` with `motivation: "replying"`, `creator.name: "agent"`, and `target: { id: <parent urn:uuid>, type: "Annotation" }` so the reply threads under the question in the viewer. The W3C Web Annotation shape is specified in [references/annotations.md](references/annotations.md).
-4. Relaunch the watcher for the next comment.
 
-The viewer's filesystem watch picks up the reply file and renders it live; no restart needed.
+**`chat:<id>`** — a free-form message from the webapp chat tab:
+1. Read the message from its file in `chat/` (JSON: `{ id, role, text, created }`).
+2. Respond appropriately — this is a normal turn of conversation about the session. Update `deliverable.md` and/or `notes.md` if the message changes the model, and answer any question it raises.
+3. Write an **agent chat reply** file into `chat/` with `role: "agent"`, `creator`-free shape `{ id: "urn:uuid:…", role: "agent", text, created }` so it renders in the viewer's Chat tab. (The viewer reads any `.json` in `chat/` with those fields.)
 
-Do not answer a comment only in chat — the human is reviewing in the viewer, so the reply must live in `comments/` to appear there. Use chat to surface that you replied and to discuss anything the comment surfaced that changes the direction.
+In both cases, relaunch the watcher for the next item. The viewer's filesystem watch picks up the new file and renders it live; no restart needed.
+
+Do not answer a comment or chat only in the host conversation — the human is reviewing in the viewer, so the reply must live in `comments/` or `chat/` to appear there. Use the host conversation to surface that you replied and to discuss anything that changes the direction.
 
 ## Convergence and Promotion
 

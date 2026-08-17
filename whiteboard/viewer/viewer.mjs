@@ -1,7 +1,10 @@
 // Whiteboard session viewer. Renders one session's deliverable.md, anchors W3C
 // Web Annotation comments to the document text, threads replies, and keeps live
 // via SSE. Marks the session seen on load and on each refresh so unread badges
-// clear.
+// clear. Sidebar has Comments, Chat, and History (diff) tabs.
+
+import { initChat } from "./chat.mjs";
+import { initHistory } from "./history.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -32,10 +35,16 @@ export function initViewer(root, project, slug) {
       </main>
       <aside class="side">
         <div class="side-head">
-          <h2>Comments</h2>
+          <div class="tabs">
+            <span class="tab active" data-tab="comments">Comments</span>
+            <span class="tab" data-tab="chat">Chat</span>
+            <span class="tab" data-tab="history">History</span>
+          </div>
           <span class="count" id="count">0</span>
         </div>
         <div class="side-scroll" id="threads"></div>
+        <div class="side-scroll" id="chat-panel" hidden></div>
+        <div class="side-scroll" id="history-panel" hidden></div>
       </aside>
     </div>
     <div class="notes-drawer" id="notes-drawer">
@@ -45,6 +54,8 @@ export function initViewer(root, project, slug) {
 
   const docEl = document.getElementById("doc");
   const threadsEl = document.getElementById("threads");
+  const chatPanelEl = document.getElementById("chat-panel");
+  const historyPanelEl = document.getElementById("history-panel");
   const countEl = document.getElementById("count");
   const titleEl = document.getElementById("title");
   const statusEl = document.getElementById("status");
@@ -54,7 +65,21 @@ export function initViewer(root, project, slug) {
   const drawerEl = document.getElementById("notes-drawer");
   const gripEl = document.getElementById("notes-grip");
 
-  const state = { deliverable: { content: "", version: "" }, notes: "", annotations: [], activeId: null };
+  const state = { deliverable: { content: "", version: "" }, notes: "", annotations: [], activeId: null, tab: "comments" };
+
+  const chat = initChat(chatPanelEl, API);
+  const history = initHistory(historyPanelEl, API);
+
+  function setTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll(".side-head .tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+    threadsEl.hidden = tab !== "comments";
+    chatPanelEl.hidden = tab !== "chat";
+    historyPanelEl.hidden = tab !== "history";
+    if (tab === "chat") chat.refresh().then(() => chat.focus && chat.focus());
+    if (tab === "history") history.refresh();
+  }
+  document.querySelectorAll(".side-head .tab").forEach((t) => t.addEventListener("click", () => setTab(t.dataset.tab)));
 
   // ---- text-node offset mapping ----
   function cumulativeOffsets(rootNode) {
@@ -272,28 +297,53 @@ export function initViewer(root, project, slug) {
   const getJSON = (p) => fetch(p).then((r) => r.json());
   async function postComment(payload) {
     await fetch(`${API}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    await refreshComments();
+    await runRefresh();
   }
   async function markSeen() { try { await fetch(`${API}/seen`, { method: "POST" }); } catch {} }
+
+  const commentSig = (annos) => annos.map((a) => `${a.id}:${a.created || ""}`).sort().join("|");
+  let lastCommentSig = "";
+  let seenMarkedFor = "";
+  let refreshTimer = null;
+  let refreshInFlight = false;
+  let refreshPending = false;
 
   async function refreshAll() {
     const [s, d, n, c] = await Promise.all([
       getJSON(`${API}/session`), getJSON(`${API}/deliverable`), getJSON(`${API}/notes`), getJSON(`${API}/comments`),
     ]);
-    state.deliverable = d; state.notes = n.content; state.annotations = c.annotations || [];
+    const annos = c.annotations || [];
+    const sig = commentSig(annos);
+    const versionChanged = d.version !== state.deliverable.version;
+    const changed = versionChanged || n.content !== state.notes || sig !== lastCommentSig;
+    state.deliverable = d; state.notes = n.content; state.annotations = annos;
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;
     versionEl.textContent = `v${(d.version || "").slice(0, 8)}`;
     notesEl.textContent = n.content || "(no notes yet)";
-    renderDoc(); renderThreads();
-    markSeen();
+    // Only re-render when something actually changed, so an in-progress text
+    // selection in the document is not blown away by no-op refreshes.
+    if (changed) { renderDoc(); renderThreads(); }
+    lastCommentSig = sig;
+    // Chat is cheap and stateless to refresh; history only when its tab is open
+    // or the deliverable version changed (a new snapshot may have appeared).
+    chat.refresh();
+    if (state.tab === "history" || versionChanged) history.refresh();
+    // Mark seen only when the comment set actually changed, to avoid a
+    // .seen.json write -> fs.watch -> refresh feedback loop.
+    if (sig !== seenMarkedFor) { seenMarkedFor = sig; markSeen(); }
   }
-  async function refreshComments() {
-    const c = await getJSON(`${API}/comments`);
-    state.annotations = c.annotations || [];
-    renderDoc(); renderThreads();
-    markSeen();
+
+  function scheduleRefresh() {
+    if (refreshInFlight) { refreshPending = true; return; }
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => { refreshTimer = null; runRefresh(); }, 120);
+  }
+  async function runRefresh() {
+    refreshInFlight = true;
+    try { await refreshAll(); } finally { refreshInFlight = false; }
+    if (refreshPending) { refreshPending = false; scheduleRefresh(); }
   }
 
   // ---- SSE ----
@@ -301,11 +351,11 @@ export function initViewer(root, project, slug) {
     const es = new EventSource(`${API}/events`);
     es.addEventListener("open", () => { connEl.textContent = "live"; connEl.classList.remove("bad"); });
     es.addEventListener("error", () => { connEl.textContent = "reconnecting…"; connEl.classList.add("bad"); });
-    es.addEventListener("refresh", () => refreshAll());
+    es.addEventListener("refresh", scheduleRefresh);
     return es;
   }
 
   gripEl.addEventListener("click", () => drawerEl.classList.toggle("open"));
 
-  refreshAll().then(connectSSE);
+  runRefresh().then(connectSSE);
 }

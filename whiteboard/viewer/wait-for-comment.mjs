@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// Whiteboard comment watcher for the agent.
+// Whiteboard inbox watcher for the agent.
 //
-// Watches <session-dir>/comments/ and exits (printing the new comment's
-// annotation id) as soon as a NEW top-level human comment appears that has no
-// agent reply yet. The agent runs this via a background monitor; when it exits,
-// the onDone prompt wakes the agent so it can read the comment and write a
-// reply annotation file. Then the agent relaunches this watcher for the next
-// comment.
+// Watches <session-dir>/comments/ and <session-dir>/chat/ and exits as soon as
+// there is a NEW actionable item the agent must respond to:
+//   - a top-level human comment with no agent reply, or
+//   - a human chat message with no agent chat reply after it.
+// Prints a token on stdout identifying the item:
+//   comment:<urn:uuid>   -> reply by writing a reply annotation file in comments/
+//   chat:<urn:uuid>      -> reply by writing an agent chat message file in chat/
+// The agent runs this via a background monitor; its onDone prompt wakes the
+// agent. Then the agent responds and relaunches this watcher for the next item.
 //
 // Usage: node wait-for-comment.mjs <session-dir> [--timeout 0]
-//   --timeout <sec>   if > 0, exit with code 2 ("idle") after that many seconds
-//                     with no new comment. Default 0 = wait forever.
-//
-// Exit codes: 0 = new actionable comment found (id printed on stdout);
-//             2 = timeout elapsed with no new comment.
+//   --timeout <sec>   if > 0, exit code 2 ("idle") after that many seconds with
+//                     no new actionable item. Default 0 = wait forever.
+// Exit codes: 0 = actionable item found (token on stdout); 2 = timeout/idle.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -37,38 +38,48 @@ if (!sessionDir) {
 }
 
 const COMMENTS = path.join(sessionDir, "comments");
+const CHAT = path.join(sessionDir, "chat");
 
-function readComments() {
-  if (!fs.existsSync(COMMENTS)) return [];
-  return fs.readdirSync(COMMENTS)
+function readJsonDir(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(COMMENTS, f), "utf8")); } catch { return null; } })
+    .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return null; } })
     .filter(Boolean);
 }
 
-function isTopLevel(a) {
+function isTopLevelComment(a) {
   return a && a.motivation !== "replying" && !(a.target && a.target.id);
 }
 function isUser(a) {
-  const n = String((a.creator && a.creator.name) || "").toLowerCase();
-  return n !== "agent";
+  return String((a.creator && a.creator.name) || "").toLowerCase() !== "agent";
 }
-function replyIds(annos) {
+function repliedCommentIds(annos) {
   return new Set(annos.filter((a) => a.motivation === "replying" && a.target && a.target.id).map((a) => a.target.id));
 }
 
-// Baseline: ids of comments that existed at start, so we only fire on NEW ones.
-const baseline = new Set(readComments().map((a) => a.id));
+// Baseline ids present at start so we only fire on NEW items.
+const baseComments = new Set(readJsonDir(COMMENTS).map((a) => a.id));
+const baseChat = new Set(readJsonDir(CHAT).map((m) => m.id));
 const deadline = timeout > 0 ? Date.now() + timeout * 1000 : 0;
 
 function scan() {
-  const annos = readComments();
-  const replied = replyIds(annos);
+  // Comments: new top-level human comment with no reply.
+  const annos = readJsonDir(COMMENTS);
+  const replied = repliedCommentIds(annos);
   for (const a of annos) {
-    if (!isTopLevel(a) || !isUser(a)) continue;
-    if (baseline.has(a.id)) continue;
+    if (!isTopLevelComment(a) || !isUser(a)) continue;
+    if (baseComments.has(a.id)) continue;
     if (replied.has(a.id)) continue;
-    return a;
+    return { kind: "comment", id: a.id };
+  }
+  // Chat: new human message with no agent message after it.
+  const msgs = readJsonDir(CHAT).sort((a, b) => (a.created || "").localeCompare(b.created || ""));
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== "user" || baseChat.has(m.id)) continue;
+    const hasAgentAfter = msgs.slice(i + 1).some((x) => x.role === "agent" && (x.created || "") >= (m.created || ""));
+    if (!hasAgentAfter) return { kind: "chat", id: m.id };
   }
   return null;
 }
@@ -76,7 +87,7 @@ function scan() {
 function tick() {
   const found = scan();
   if (found) {
-    process.stdout.write(found.id + "\n");
+    process.stdout.write(`${found.kind}:${found.id}\n`);
     process.exit(0);
   }
   if (deadline && Date.now() > deadline) {
