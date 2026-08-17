@@ -223,10 +223,6 @@ function renderThreads() {
       <div class="reply-box">
         <textarea placeholder="Reply…"></textarea>
         <div class="row">
-          <select title="reply as">
-            <option value="user">user</option>
-            <option value="agent">agent</option>
-          </select>
           <button class="cancel">cancel</button>
           <button class="send" disabled>Reply</button>
         </div>
@@ -261,14 +257,13 @@ function wireReply(card, parent) {
   const ta = card.querySelector("textarea");
   const send = card.querySelector(".send");
   const cancel = card.querySelector(".cancel");
-  const sel = card.querySelector("select");
   const onInput = () => { send.disabled = ta.value.trim().length === 0; };
   ta.addEventListener("input", onInput);
   send.addEventListener("click", async () => {
     const text = ta.value.trim();
     if (!text) return;
     send.disabled = true;
-    await postComment({ text, replyTo: parent.id, creator: sel.value });
+    await postComment({ text, replyTo: parent.id, creator: "user" });
     ta.value = "";
   });
   cancel.addEventListener("click", () => { ta.value = ""; send.disabled = true; });
