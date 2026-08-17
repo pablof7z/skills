@@ -114,7 +114,8 @@ async function handleSession(req, res, root, project, slug, rest) {
   if (rest === "session" && m === "GET") {
     const man = S.readManifest(dir);
     const d = S.readDeliverable(dir);
-    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, deliverableVersion: d.version });
+    const viewed = S.readViewed(dir);
+    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, deliverableVersion: d.version, viewedVersion: viewed.version });
   }
   if (rest === "deliverable" && m === "GET") {
     const d = S.readDeliverable(dir);
@@ -151,6 +152,16 @@ async function handleSession(req, res, root, project, slug, rest) {
     S.writeSeen(dir, S.nowIso());
     broadcast(explorerClients, "sessions", {});
     return sendJson(res, 200, { lastSeenAt: S.readSeen(dir).lastSeenAt });
+  }
+  if (rest === "viewed" && m === "GET") {
+    return sendJson(res, 200, S.readViewed(dir));
+  }
+  if (rest === "viewed" && m === "POST") {
+    const data = await readBody(req).catch(() => ({}));
+    const d = S.readDeliverable(dir);
+    const version = (data && data.version) || d.version;
+    S.writeViewed(dir, version);
+    return sendJson(res, 200, { version, at: S.nowIso() });
   }
   if (rest === "manifest" && m === "PATCH") {
     const data = await readBody(req).catch(() => null);
@@ -201,7 +212,7 @@ function main() {
           // Otherwise marking-seen would feedback-loop into endless refreshes.
           const leaf = segs[segs.length - 1];
           const sub = segs[2];
-          if (leaf === S.SEEN_FILE || sub === S.VERSIONS_DIR) return;
+          if (leaf === S.SEEN_FILE || leaf === S.VIEWED_FILE || sub === S.VERSIONS_DIR) return;
           const key = `${segs[0]}/${segs[1]}`;
           broadcast(sessionClientsFor(key), "refresh", {});
           return;

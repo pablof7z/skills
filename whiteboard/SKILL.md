@@ -82,6 +82,10 @@ Shape it to fit the session — a plan, proposal, spec, design memo, or short br
 
 Keep it skimmable. This is for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in `notes.md`.
 
+The viewer renders the deliverable as markdown with syntax highlighting and diagrams, so prefer rich, precise content over prose:
+- **Fenced code blocks with a language** get syntax highlighting — use ```` ```rust ```` , ```` ```ts ```` , ```` ```bash ```` , etc. (common language tags).
+- **Mermaid blocks** (```` ```mermaid ```` ) render as diagrams in the viewer — use them for architecture, state, sequence, and flow diagrams instead of describing shapes in prose.
+
 ### notes.md — the append-only log
 
 Append, do not rewrite. Each entry is a timestamped bullet under a dated heading. Capture the trail that produced the deliverable:
