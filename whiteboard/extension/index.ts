@@ -1,8 +1,11 @@
-// Whiteboard pi extension (minimal v1).
+// Whiteboard pi extension (block-model aware).
 //
 // Owns the whiteboard viewer lifecycle, natively wakes the agent on new human
-// comments/chat, and shows an unread badge in the pi footer. Portable skill
-// stays harness-agnostic; this is the pi-specific accelerator.
+// comments/chat, shows an unread badge in the pi footer, and dispatches `/wb`
+// to the `wb` CLI. Supports the new block document model (document.json) while
+// keeping the legacy comments/ scan path for sessions that still use
+// deliverable.md. Portable skill stays harness-agnostic; this is the pi-specific
+// accelerator.
 //
 // Verified against docs/extensions.md:
 //  - no background resources from the factory; defer to session_start, tear down
@@ -17,11 +20,16 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn, exec } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import {
+  listSessions, loadDoc, isActionable, legacyActionable, sessionUnread,
+} from "./scan.mjs";
+import { applyWbSession } from "./resolve.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VIEWER_DIR = path.join(__dirname, "..", "viewer");
 const SERVER = path.join(VIEWER_DIR, "server.mjs");
+const CLI = path.join(__dirname, "..", "cli", "main.mjs");
 const ROOT = path.join(os.homedir(), "whiteboard");
 const PORT = Number(process.env.WHITEBOARD_PORT || "4318");
 const VIEWER_URL = `http://127.0.0.1:${PORT}`;
@@ -30,84 +38,43 @@ const VIEWER_URL = `http://127.0.0.1:${PORT}`;
 // the repo/dir the pi session is working in. Override with WHITEBOARD_PROJECT.
 const myProject = process.env.WHITEBOARD_PROJECT || path.basename(process.cwd());
 
-const isSessionDir = (n: string) => /^\d{4}-\d{2}-.+/.test(n);
 const nowIso = () => new Date().toISOString();
-
-function readJson(p: string, fallback: any) {
-  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; }
-}
-function readComments(dir: string) {
-  const d = path.join(dir, "comments");
-  if (!fs.existsSync(d)) return [];
-  return fs.readdirSync(d).filter((f) => f.endsWith(".json"))
-    .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(d, f), "utf8")); } catch { return null; } }).filter(Boolean);
-}
-function readChat(dir: string) {
-  const d = path.join(dir, "chat");
-  if (!fs.existsSync(d)) return [];
-  return fs.readdirSync(d).filter((f) => f.endsWith(".json"))
-    .map((f) => { try { return JSON.parse(fs.readFileSync(path.join(d, f), "utf8")); } catch { return null; } }).filter(Boolean);
-}
-function readSeen(dir: string) { return readJson(path.join(dir, ".seen.json"), { lastSeenAt: null as string | null }); }
-function readResolved(dir: string) { return readJson(path.join(dir, ".resolved.json"), {} as Record<string, any>); }
-function computeUnread(annos: any[], lastSeenAt: string | null) {
-  return annos.filter((a) => {
-    if (String(a?.creator?.name || "").toLowerCase() === "user") return false;
-    return !lastSeenAt || (a.created || "") > lastSeenAt;
-  }).length;
-}
-function listSessions() {
-  const out: any[] = [];
-  if (!fs.existsSync(ROOT)) return out;
-  for (const project of fs.readdirSync(ROOT)) {
-    const pd = path.join(ROOT, project);
-    if (!fs.statSync(pd).isDirectory()) continue;
-    for (const name of fs.readdirSync(pd)) {
-      if (!isSessionDir(name)) continue;
-      const dir = path.join(pd, name);
-      if (!fs.statSync(dir).isDirectory()) continue;
-      const annos = readComments(dir);
-      const seen = readSeen(dir);
-      out.push({ project, slug: name, dir, unread: computeUnread(annos, seen.lastSeenAt) });
-    }
-  }
-  return out;
-}
-
-// New actionable items the agent must respond to.
-function scanActionable() {
-  const items: { kind: "comment" | "chat"; id: string; project: string; slug: string; text: string }[] = [];
-  for (const s of listSessions()) {
-    if (s.project !== myProject) continue; // only wake for this session's project
-    const annos = readComments(s.dir);
-    const resolved = readResolved(s.dir);
-    const replied = new Set(annos.filter((a) => a.motivation === "replying" && a.target?.id).map((a) => a.target.id));
-    for (const a of annos) {
-      if (resolved[a.id]) continue; // resolved comments are not actionable
-      if (a.motivation !== "replying" && !(a.target && a.target.id) && String(a.creator?.name || "").toLowerCase() !== "agent" && !replied.has(a.id)) {
-        items.push({ kind: "comment", id: a.id, project: s.project, slug: s.slug, text: a.body?.value || "" });
-      }
-    }
-    const msgs = readChat(s.dir).sort((a: any, b: any) => (a.created || "").localeCompare(b.created || ""));
-    for (let i = 0; i < msgs.length; i++) {
-      const m = msgs[i];
-      if (m.role !== "user") continue;
-      const hasAgentAfter = msgs.slice(i + 1).some((x: any) => x.role === "agent" && (x.created || "") >= (m.created || ""));
-      if (!hasAgentAfter) items.push({ kind: "chat", id: m.id, project: s.project, slug: s.slug, text: m.text || "" });
-    }
-  }
-  return items;
-}
+const excerpt = (t: string, n = 120) => t.slice(0, n).replace(/\s+/g, " ").trim();
 
 async function isViewerUp() {
   try { const r = await fetch(`${VIEWER_URL}/api/sessions`); return r.ok; } catch { return false; }
+}
+
+// Split `/wb <args…>` honoring single/double quotes so a quoted body like
+// `wb comment goal "some text"` survives as one argv element.
+function tokenize(s: string): string[] {
+  const out: string[] = [];
+  let cur = "", quote = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quote) {
+      if (ch === quote) quote = "";
+      else if (ch === "\\" && i + 1 < s.length) cur += s[++i];
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (cur) { out.push(cur); cur = ""; }
+    } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
 }
 
 export default function (pi: ExtensionAPI) {
   let watcher: ReturnType<typeof fs.watch> | null = null;
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  // Wake-dedupe: handled keys (`<kind>:<id>`) we've already woken for, and per
+  // session the set of block-doc comment ids we've already seen (so only NEW
+  // comments since the last rev wake the agent).
   const handled = new Set<string>();
+  const seenComments = new Map<string, Set<string>>(); // sessionKey -> ids
 
   // The viewer is a persistent, self-healing daemon: spawn-if-down, detached so
   // it survives pi restarts/reloads, and never killed by the extension. A
@@ -123,21 +90,55 @@ export default function (pi: ExtensionAPI) {
   function updateStatus(ctx: any) {
     if (!ctx?.hasUI) return;
     let unread = 0;
-    try { unread = listSessions().reduce((n, s) => n + (s.unread || 0), 0); } catch {}
+    try {
+      for (const s of listSessions(ROOT)) if (s.project === myProject) unread += sessionUnread(s);
+    } catch {}
     ctx.ui.setStatus("whiteboard", unread > 0 ? `📓 ${unread} unread` : "📓 whiteboard");
   }
 
+  // Baseline every actionable item so only NEW ones wake the agent. For block-doc
+  // sessions, also record the set of existing comment ids (rev-based "new"
+  // detection: document.json has no per-comment rev, so we diff ids).
+  function baseline() {
+    for (const s of listSessions(ROOT)) {
+      if (s.project !== myProject) continue;
+      if (s.blockDoc) {
+        const doc = loadDoc(s.dir);
+        const ids = new Set<string>((doc?.comments || []).map((c: any) => c.id));
+        seenComments.set(`${s.project}/${s.slug}`, ids);
+        for (const c of doc?.comments || []) if (isActionable(c)) handled.add(`blockcomment:${c.id}`);
+      } else {
+        for (const it of legacyActionable(s.dir)) handled.add(`${it.kind}:${it.id}`);
+      }
+    }
+  }
+
   function poke(ctx: any) {
-    const items = scanActionable();
-    for (const it of items) {
-      const key = `${it.kind}:${it.id}`;
-      if (handled.has(key)) continue;
-      handled.add(key);
-      const where = `${it.project}/${it.slug}`;
-      const body = it.text.slice(0, 240).replace(/\s+/g, " ").trim();
-      const replyIn = it.kind === "comment" ? "comments/ (write a reply annotation)" : "chat/ (write an agent chat message)";
-      const msg = `[whiteboard] New ${it.kind} in ${where}:\n"${body}"\n\nRead it and reply in that session's ${replyIn} dir so it appears in the viewer.`;
-      try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
+    for (const s of listSessions(ROOT)) {
+      if (s.project !== myProject) continue; // only wake for this session's project
+      const where = `${s.project}/${s.slug}`;
+      if (s.blockDoc) {
+        const doc = loadDoc(s.dir);
+        if (!doc) continue;
+        const seen = seenComments.get(where) || new Set<string>();
+        for (const c of (doc.comments || [])) {
+          if (!isActionable(c) || seen.has(c.id)) continue;
+          seen.add(c.id);
+          handled.add(`blockcomment:${c.id}`);
+          const msg = `[whiteboard] New comment on block "${c.block}" in ${where}: "${excerpt(c.body)}". Reply with \`wb reply ${c.id} "<text>"\` then \`wb resolve ${c.id}\`.`;
+          try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
+        }
+        seenComments.set(where, seen);
+      } else {
+        for (const it of legacyActionable(s.dir)) {
+          const key = `${it.kind}:${it.id}`;
+          if (handled.has(key)) continue;
+          handled.add(key);
+          const replyIn = it.kind === "comment" ? "comments/ (write a reply annotation)" : "chat/ (write an agent chat message)";
+          const msg = `[whiteboard] New ${it.kind} in ${where}:\n"${excerpt(it.text, 240)}"\n\nRead it and reply in that session's ${replyIn} dir so it appears in the viewer.`;
+          try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
+        }
+      }
     }
     updateStatus(ctx);
   }
@@ -153,8 +154,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await ensureViewer();
+    // Expose the current whiteboard session for myProject so `wb` resolves it.
+    const cur = applyWbSession(myProject, ROOT);
+    if (cur && ctx?.hasUI) ctx.ui.notify(`whiteboard session: ${cur.project}/${cur.slug}`, "info");
     // Baseline existing actionable items so only NEW ones wake the agent.
-    for (const it of scanActionable()) handled.add(`${it.kind}:${it.id}`);
+    baseline();
     startWatcher(ctx);
     updateStatus(ctx);
     if (heartbeat) clearInterval(heartbeat);
@@ -173,11 +177,22 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("wb", {
-    description: "Open the whiteboard viewer in the browser",
-    handler: async (_args, ctx) => {
-      await ensureViewer();
-      exec(`open "${VIEWER_URL}/"`);
-      ctx.ui.notify(`whiteboard: ${VIEWER_URL}`, "info");
+    description: "Whiteboard: `/wb` shows status; `/wb <args…>` runs the wb CLI",
+    handler: async (args: string, ctx: any) => {
+      const argv = (args || "").trim();
+      if (!argv) {
+        await ensureViewer();
+        const cur = process.env.WB_SESSION || "(none)";
+        ctx.ui.notify(`whiteboard\n  session: ${cur}\n  viewer:   ${VIEWER_URL}/`, "info");
+        return;
+      }
+      // Dispatch `/wb <args…>` to the wb CLI and print stdout/stderr to the user.
+      const parts = tokenize(argv);
+      execFile(process.execPath, [CLI, ...parts], { cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+        const out = [stdout, stderr].filter(Boolean).join("\n").trim();
+        if (out) ctx.ui.notify(out, err ? "error" : "info");
+        else if (err) ctx.ui.notify(`wb: ${err.message}`, "error");
+      });
     },
   });
 }
