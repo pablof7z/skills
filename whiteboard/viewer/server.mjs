@@ -228,15 +228,17 @@ function main() {
       const p = decodeURIComponent(u.pathname);
       if (req.method === "OPTIONS") return sendJson(res, 204, {});
 
-      // Static assets
+      // Static assets: serve any existing file in the viewer dir (modules,
+      // css, vendor libs) with the correct MIME so relative ES-module imports
+      // like /docdiff.mjs resolve instead of hitting the SPA fallback.
       if (p === "/" || p === "/index.html") return serveStatic(res, "index.html");
-      if (p === "/main.mjs") return serveStatic(res, "main.mjs");
-      if (p === "/viewer.mjs") return serveStatic(res, "viewer.mjs");
-      if (p === "/explorer.mjs") return serveStatic(res, "explorer.mjs");
-      if (p === "/chat.mjs") return serveStatic(res, "chat.mjs");
-      if (p === "/history.mjs") return serveStatic(res, "history.mjs");
-      if (p === "/styles.css") return serveStatic(res, "styles.css");
-      if (p.startsWith("/vendor/")) return serveStatic(res, p.slice(1));
+      if (!p.startsWith("/api/")) {
+        const rel = p.slice(1);
+        const full = path.join(VIEWER_DIR, rel);
+        if (full.startsWith(VIEWER_DIR) && fs.existsSync(full) && !fs.statSync(full).isDirectory()) {
+          return serveStatic(res, rel);
+        }
+      }
 
       // API
       if (p === "/api/sessions" && req.method === "GET") return sendJson(res, 200, { sessions: S.listSessions(root) });
