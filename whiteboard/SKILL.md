@@ -1,6 +1,6 @@
 ---
 name: whiteboard
-description: "Process for iterative exploration with the user. Proactively load this skill when a clear task becomes open-ended: direction is fuzzy, options keep shifting, or probes point into unknown work."
+description: "Exploration that always opens the research field beyond what the user asked. Proactively load for any non-trivial question, design, or system discussion — including factual and probing questions, architecture, systems, agents, workflows, products, protocols, skills, prompts, and implementation strategy. Research the literal question with verified facts, then proactively bring in adjacent and relevant context the user may not have thought to ask about, surfaced with context. Do not load for pure execution tasks (direct implementation or edit, code review, CI fix, release, direct GitHub/PR work), simple prompt rewrite, or one-shot prompt optimization."
 ---
 
 # Whiteboard
@@ -9,7 +9,19 @@ description: "Process for iterative exploration with the user. Proactively load 
 
 Treat ambiguous design discussion as exploration first. This includes architecture, systems, agents, workflows, products, protocols, skills, prompts, implementation strategy, and other complex iterative design spaces. Name the session, keep notes automatically, help the user converge, and avoid implementation or canonical project artifacts until a direction has actually emerged.
 
-If this skill was loaded for a simple one-off question, simple prompt rewrite, one-shot prompt optimization, direct implementation/edit request, code review, CI fix, release, direct GitHub/PR task, or a no-write environment, stop using it, do not create notes, and answer the user's direct request normally. Do use it for complex prompt, skill, agent, workflow, product, protocol, or system-design exploration when the user is iterating across alternatives and uncertainty.
+If this skill was loaded for a pure execution task (direct implementation/edit request, code review, CI fix, release, direct GitHub/PR task), a simple prompt rewrite, one-shot prompt optimization, or a no-write environment, stop using it, do not create notes, and handle the task directly. Do use it for any non-trivial question or design discussion, including factual and probing questions — the skill's job is to research the literal question and then proactively open the field beyond it.
+
+## Research And Epistemic Discipline
+
+Whiteboard is exploration, not a license to speculate. The user is depending on you to know what is actually true before the design conversation can move. Research first; assert only what you have verified.
+
+- Research before you assert. Before stating how something works, what exists, how many parts it has, or what a name refers to, inspect the source, docs, logs, runtime, or prior art that would settle it. If you cannot verify it right now, either go verify it or explicitly mark it as a guess. Never present a guess as fact.
+- Separate fact from speculation in every response. Researched facts get stated plainly with their source; unverified claims get tagged as hypothesis, assumption, or "not yet checked". Never smooth a guess into confident prose. Never include an unverified claim without disclosing that it is unverified. If the claim is anywhere near material to the design being considered, do not leave it as a disclosed guess — proactively settle it with a source/runtime check before you rely on it. A guess that stays a guess near a decision is a latent defect.
+- Use real names only. Never invent terminology, module names, file paths, function names, config keys, statuses, or counts. If you do not know the real name, say so and go find it. A made-up word is worse than "I don't know yet".
+- No false analogies. Only use an analogy when it matches the actual mechanism. If the analogy would misrepresent how the thing really behaves, describe the mechanism directly instead.
+- Answer the literal question first. When the user asks "how does A work?", answer how A works. Do not pivot to "we should redesign A" or "here is my recommended direction" until the factual question is answered and a decision is actually on the table.
+- Verify once, not incrementally. Do not state an unverified claim, then half-correct it, then correct it again. If a claim you stated is challenged or you realize you never verified it, stop, recheck the source fully, and replace the claim with what you find. One clean correction beats a walk-back chain.
+- "I don't know yet" is acceptable and expected. Saying you don't know, then researching with the source-inspection and adjacent-exploration tools available to you, is far better than a confident wrong answer.
 
 ## Start the Session
 
@@ -84,7 +96,30 @@ Use the full template in [references/note-schema-and-examples.md](references/not
 
 ## Exploration Loop
 
-At each turn, update `deliverable.md` (retroactively, as the live truth) and append to `notes.md` (as the trail) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful synthesis.
+At each turn, update `deliverable.md` (retroactively, as the live truth) and append to `notes.md` (as the trail) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis below when a real decision is open.
+
+### Always Explore Via Subagent
+
+The main agent must always dispatch a subagent to research the user's question and to open the adjacent field. The main agent never performs source inspection, runtime checks, doc/issue/ADR reads, or adjacent exploration directly in the main thread. The main agent's role is to frame the question, dispatch one or more subagents with a bounded prompt, collect their results, update the note, and synthesize the response.
+
+This keeps the main thread honest: the synthesis is built from verified subagent findings, not from the main agent's priors, and it prevents the speculate-then-walk-back pattern inline. The main agent may reason about and combine subagent results, but the underlying facts must come from a dispatched exploration, not from memory or inference.
+
+If no subagent or multi-agent tooling is available in this environment, say so explicitly to the user, record the limitation in the note, and do not substitute speculation. Either obtain the tooling or stop and ask the user how to proceed — never guess in place of a subagent check.
+
+### Answer The Literal Question, Then Open The Field
+
+The skill always does two things, in order:
+
+1. Answer what the user actually asked, with verified facts from source, docs, runtime, or prior art. Do not pivot to a redesign or recommendation until the literal question is answered.
+2. Proactively open the research field beyond the literal question: chase down adjacent and relevant context the user may not have thought to ask about — prior art, ownership boundaries, hidden constraints, related code paths, failure modes, comparable systems, terminology pressure. Surface each finding with context: what you checked, what you found, and why it bears on the user's question. Never drop a bare answer to a question the user did not ask.
+
+Apply the decision-frontier framing below only when there is an actual choice for the user to make: competing directions, a real tradeoff, or a design the user is actively revising. For a purely factual question, the response is the verified answer plus the proactively gathered adjacent context — not a recommended direction or a synthesis of options the user never raised.
+
+### Get Ahead Of The Next Move
+
+When you have good certainty about where the user is likely to take the inquiry or design next, dispatch a subagent in that direction proactively, before the user asks. Use the same bounded-result format. Only do this when the next move is genuinely likely — do not speculatively fire subagents in every possible direction. The goal is to have verified findings ready, with context, so the next turn is already derisked instead of starting cold.
+
+Surface a proactively-gathered-ahead finding the same way as any adjacent finding: what you checked, what you found, why you expected it to be the next move, and how it bears on the current question. If the user then goes a different direction, the finding is still useful context or a noted rejected option — never wasted.
 
 ### Allocate Attention By Decision Relevance
 
@@ -107,11 +142,11 @@ Optimize for understanding before action. Answer probing questions directly, but
 - what direction appears to be emerging
 - what the next useful question or check is
 
-Prefer these actions while the status is `exploring`:
+Prefer these actions while the status is `exploring`, all dispatched as subagent tasks rather than done inline:
 
 - inspect existing source, docs, issues, plans, ADRs, logs, or runtime paths that bear on the question
 - compare alternatives against ownership boundaries, invariants, failure modes, and integration risks
-- ask a focused question only when local context cannot disambiguate the direction safely
+- ask the user a focused question only when subagent findings cannot disambiguate the direction safely
 - identify what evidence would change the recommendation
 
 Do not edit implementation files merely because a plausible direction appears.
@@ -145,7 +180,7 @@ Do not merge unrelated explorations just because they happened in the same conve
 
 ## Adjacent Exploration
 
-When an adjacent question would materially derisk the discussion, dispatch a background agent without asking the user first. Use available multi-agent or subagent tooling when present. If no background-agent tool is available, do a short read-only exploration in the main thread and record that limitation in the notes.
+Adjacent exploration is part of the subagent dispatch above, not a separate fallback. When an adjacent question would materially derisk the discussion, dispatch a background subagent without asking the user first, using the template below. The main agent does not perform adjacent exploration inline.
 
 Prefer one high-leverage adjacent exploration at a time. Do not launch background work for curiosity, obvious facts, or questions unlikely to materially affect the design.
 
@@ -169,7 +204,7 @@ Confidence: [low/medium/high]
 Suggested note update: [optional]
 ```
 
-Summarize the result into `notes.md`. Bring only the relevant conclusion back to the user. If the result contradicts the current model, surface that clearly and update `deliverable.md`. Do not paste large background reports into the main conversation.
+Summarize the result into `notes.md`. Bring only the relevant conclusion back to the user, framed with context: what was checked, what was found, and why it bears on the user's question or the current design. Never drop a bare answer to a question the user did not ask — if the finding is worth surfacing, say what it is and why it matters. If the result contradicts the current model, surface that clearly and update `deliverable.md`. Do not paste large background reports into the main conversation.
 
 ## Live Viewer and Comments
 

@@ -1,0 +1,18 @@
+{
+  "agent_name": "Codex",
+  "completed_at": null,
+  "created_at": 1784040000,
+  "duration": 67.536,
+  "error": null,
+  "harness": "codex",
+  "id": "structured-markdown",
+  "media_handoff_delay": 0,
+  "output_file": "/Users/pablofernandez/.agents/skills/tts/sessions/019f6021-3224-7762-a069-f33b203f9226/briefs/1784038782-5596-6198/message.mp3",
+  "session_id": "visual-review",
+  "started_at": null,
+  "status": "queued",
+  "subject": "Structured Markdown visual review",
+  "text": "# Verification matrix\n\n| Claim | Method | Command/scenario | Result | Artifact |\n|:------|:-------|:-----------------|:------:|---------:|\n| API exists | source inspection | public interface | Verified | Source |\n| App fold | unit test | nested state | Passing | Test log |\n| Facade behavior | scripted integration | mixed response | Verified | Receipt |\n| Restart/recovery | persistent restart | process handoff | Passing | Session |\n| Platform parity | native suite | light and dark | Verified | Screenshot |\n\n## Failure-path coverage\n\n- [ ] Source unavailable remains explicit.\n- [x] Mixed relay response stays distinguishable.\n- [ ] Missing signer pins expected identity.\n- [x] Receipt observation cancellation is bounded.\n- [ ] At-most-once ambiguity is not retried blindly.",
+  "voice": "af_nova",
+  "workspace": "/Users/pablofernandez/Work/skills"
+}

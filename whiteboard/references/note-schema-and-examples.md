@@ -130,6 +130,7 @@ Session directory slugs are lowercase hyphen-case, with a year-month date prefix
 
 Use the skill for:
 
+- "How does the relay identity model work?" (a factual question — research it, then proactively bring in adjacent context)
 - "How does the relay identity model work? What if app accounts owned it instead?"
 - "I am not sure whether Trellis should split this at phase boundaries or runtime boundaries."
 - "Compare the queue ownership designs before we implement anything."
