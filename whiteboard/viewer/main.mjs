@@ -4,6 +4,13 @@
 import { initExplorer } from "./explorer.mjs";
 import { initViewer } from "./viewer.mjs";
 
+// Register the footnote extension once. The UMD globals (window.marked,
+// window.markedFootnote) are set by classic scripts in index.html, which run
+// before this deferred module.
+if (window.marked && window.markedFootnote) {
+  try { window.marked.use(window.markedFootnote()); } catch (e) { console.warn("footnote extension failed:", e); }
+}
+
 function route() {
   const root = document.getElementById("root");
   root.innerHTML = "";

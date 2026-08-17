@@ -383,3 +383,22 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
 
 /* code blocks with hljs */
 #doc pre code.hljs { background: transparent; padding: 0; }
+/* markdown footnotes (marked-footnote) */
+#doc sup a[href^="#footnote-"], .chat-msg sup a[href^="#footnote-"] {
+  font-size: 0.72em; vertical-align: super; line-height: 0;
+  color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent);
+  padding: 0 1px; margin-left: 1px;
+}
+#doc sup a[href^="#footnote-"]:hover, .chat-msg sup a[href^="#footnote-"]:hover { background: var(--hover); }
+#doc .footnotes, .chat-msg .footnotes {
+  margin-top: 1.6em; padding-top: 0.6em; border-top: 1px solid var(--line);
+  font-size: 0.86em; color: var(--muted);
+}
+#doc .footnotes ol, .chat-msg .footnotes ol { padding-left: 1.4em; margin: 0.4em 0; }
+#doc .footnotes li, .chat-msg .footnotes li { margin: 0.3em 0; }
+#doc .footnotes a[data-footnote-backref], .chat-msg .footnotes a[data-footnote-backref] {
+  text-decoration: none; color: var(--muted); margin-left: 0.4em;
+}
+#doc .footnotes a[data-footnote-backref]:hover, .chat-msg .footnotes a[data-footnote-backref]:hover { color: var(--accent); }
+/* screen-reader-only label stays hidden visually but available to AT */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
