@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "installs": [
+    {
+      "profile": "visual-language-partner",
+      "name": "Visual Language Partner",
+      "summary": "Develops original visual narratives with a person while learning their evolving visual language from explicit ratings, edits, and direction.",
+      "harness": "opencode",
+      "scope": "project",
+      "source": "pablof7z/agents",
+      "sourceKind": "git",
+      "target": "/Users/pablofernandez/Work/skills/.opencode/agents/visual-language-partner.md",
+      "installedAt": "2026-07-21T22:52:06.036Z",
+      "contentSha256": "316c860625ba923c74c601954c211ffe9a4be29b92fd5217d99bfa0d204ff34a",
+      "agentHome": "/Users/pablofernandez/.agents/homes/visual-language-partner",
+      "supportRoots": [
+        {
+          "kind": "references",
+          "path": "/Users/pablofernandez/.agents/homes/visual-language-partner/references"
+        },
+        {
+          "kind": "scripts",
+          "path": "/Users/pablofernandez/.agents/homes/visual-language-partner/scripts"
+        }
+      ],
+      "supportTargets": [
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/default-workflows/create-visual.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/default-workflows/discover-style.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/default-workflows/explore-style.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/feedback-and-learning.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/narration-grammar.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/onboarding.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/operating-model.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/story-structures.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/templates/rating-event.example.json",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/templates/style-profile.template.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/visual-communication.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/references/visual-grammar.md",
+        "/Users/pablofernandez/.agents/homes/visual-language-partner/scripts/visual_language_state.py"
+      ],
+      "skillTargets": [],
+      "installedSkills": [],
+      "dryRun": false
+    }
+  ]
+}

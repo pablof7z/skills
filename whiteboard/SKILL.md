@@ -1,6 +1,6 @@
 ---
 name: whiteboard
-description: "Process for iterative exploration with the user. Proactively load this skill when a clear task becomes open-ended: direction is fuzzy, options keep shifting, or probes point into unknown work."
+description: "Iterative design exploration with the user across alternatives, objections, and tradeoffs. Proactively load when a clear task becomes genuinely open-ended design work: direction is fuzzy, options keep shifting, or the user is comparing or revising approaches. Do not load for factual or probing questions (\"how does X work?\", \"what does X do?\", \"where is X?\", \"does X exist?\"), lookups, simple prompt rewrites, one-shot prompt optimization, direct implementation or edit requests, code review, CI fixes, releases, or direct GitHub/PR work — research and answer those directly instead."
 ---
 
 # Whiteboard
@@ -9,7 +9,19 @@ description: "Process for iterative exploration with the user. Proactively load 
 
 Treat ambiguous design discussion as exploration first. This includes architecture, systems, agents, workflows, products, protocols, skills, prompts, implementation strategy, and other complex iterative design spaces. Name the session, keep notes automatically, help the user converge, and avoid implementation or canonical project artifacts until a direction has actually emerged.
 
-If this skill was loaded for a simple one-off question, simple prompt rewrite, one-shot prompt optimization, direct implementation/edit request, code review, CI fix, release, direct GitHub/PR task, or a no-write environment, stop using it, do not create notes, and answer the user's direct request normally. Do use it for complex prompt, skill, agent, workflow, product, protocol, or system-design exploration when the user is iterating across alternatives and uncertainty.
+If this skill was loaded for a simple one-off question, simple prompt rewrite, one-shot prompt optimization, direct implementation/edit request, code review, CI fix, release, direct GitHub/PR task, a no-write environment, or any factual or probing question that has a researchable answer, stop using it, do not create notes, and answer the user's direct request normally with verified facts. Do use it for complex prompt, skill, agent, workflow, product, protocol, or system-design exploration when the user is iterating across alternatives and uncertainty.
+
+## Research And Epistemic Discipline
+
+Whiteboard is exploration, not a license to speculate. The user is depending on you to know what is actually true before the design conversation can move. Research first; assert only what you have verified.
+
+- Research before you assert. Before stating how something works, what exists, how many parts it has, or what a name refers to, inspect the source, docs, logs, runtime, or prior art that would settle it. If you cannot verify it right now, either go verify it or explicitly mark it as a guess. Never present a guess as fact.
+- Separate fact from speculation in every response. Researched facts get stated plainly with their source; unverified claims get tagged as hypothesis, assumption, or "not yet checked". Never smooth a guess into confident prose.
+- Use real names only. Never invent terminology, module names, file paths, function names, config keys, statuses, or counts. If you do not know the real name, say so and go find it. A made-up word is worse than "I don't know yet".
+- No false analogies. Only use an analogy when it matches the actual mechanism. If the analogy would misrepresent how the thing really behaves, describe the mechanism directly instead.
+- Answer the literal question first. When the user asks "how does A work?", answer how A works. Do not pivot to "we should redesign A" or "here is my recommended direction" until the factual question is answered and a decision is actually on the table.
+- Verify once, not incrementally. Do not state an unverified claim, then half-correct it, then correct it again. If a claim you stated is challenged or you realize you never verified it, stop, recheck the source fully, and replace the claim with what you find. One clean correction beats a walk-back chain.
+- "I don't know yet" is acceptable and expected. Saying you don't know, then researching with the source-inspection and adjacent-exploration tools available to you, is far better than a confident wrong answer.
 
 ## Start the Session
 
@@ -72,7 +84,13 @@ Keep observations, assumptions, hypotheses, constraints, preferences, decisions,
 
 ## Exploration Loop
 
-At each turn, update the note with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful synthesis.
+At each turn, update the note with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis below when a real decision is open.
+
+### Factual And Probing Questions
+
+When the user asks a factual or probing question ("how does X work?", "what does X do?", "where is X defined?", "does X exist?", "how many X are there?"), treat it as a research task, not a design decision. Answer it directly with verified facts from source, docs, runtime, or prior art before doing anything else. Do not apply the decision-frontier framing below to a question that has a researchable answer, and do not redirect the user toward a redesign or recommendation they did not ask for.
+
+Only shift into the decision-frontier framing when there is an actual choice for the user to make: competing directions, a real tradeoff, or a design the user is actively revising. If the question is purely "what is true here?", the response is the verified answer plus honest caveats — not a recommended direction or a synthesis of options.
 
 ### Allocate Attention By Decision Relevance
 

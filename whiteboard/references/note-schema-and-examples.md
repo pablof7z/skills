@@ -17,7 +17,7 @@ Status: exploring
 
 ## Current Working Model
 
-- <Best current explanation or proposed model>
+- <Best current explanation or proposed model, grounded in evidence gathered so far. This is a hypothesis pending verification, not a confident claim; replace it when evidence contradicts it>
 
 ## Observations
 
@@ -117,11 +117,15 @@ Use the skill for:
 Do not use the skill for:
 
 - "What is an ADR?"
+- "How does the relay identity model work?" (a factual question with a researchable answer — research and answer it directly)
+- "Where is the queue ownership code defined?" / "Does a relay identity type exist?"
 - "Implement the queue ownership fix."
 - "Review this PR."
 - "Fix the failing CI job."
 - "Rewrite this prompt."
 - "Optimize this prompt once."
+
+A factual question only becomes a whiteboard session if it grows into iterative comparison, objection, or revision across turns. Until then, answer it with research.
 
 If a simple question becomes iterative across turns with alternatives, objections, or changed direction, start the note at that point and include the prior context in the first entry.
 
@@ -140,6 +144,8 @@ Keep these categories separate:
 - rejected options: alternatives ruled out or deferred
 - risks: ways the direction could fail or be expensive to reverse
 - open questions: uncertainty that could change the direction
+
+Research before recording a fact. If an entry in Observations or Current Working Model has not been verified against source, docs, logs, or runtime, mark it as an assumption or hypothesis instead. Never record a guess as an observation, and never invent names, paths, counts, or statuses — go find the real value first. When evidence contradicts the working model, replace the stale entry rather than appending a correction underneath it.
 
 When background exploration contradicts the working model, record the contradiction under `Evidence Gathered` and update `Current Working Model` rather than burying it.
 
