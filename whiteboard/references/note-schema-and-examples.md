@@ -1,11 +1,18 @@
-# Note Schema And Examples
+# Notes Log Schema And Examples
 
-Read this file when creating or refreshing a whiteboard exploration note, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
+Read this file when creating or refreshing a session's `notes.md`, checking trigger boundaries, or promoting a converged exploration into a durable project artifact. For comment/reply files, read [annotations.md](annotations.md) instead.
 
-## Note Template
+The session workspace holds two files with different disciplines (see `SKILL.md` → Session Workspace):
+
+- **`deliverable.md`** — the outward document. Rewritten retroactively as the live truth. Becomes the durable artifact on promotion.
+- **`notes.md`** — the append-only log. This file. Captures the trail that produced the deliverable.
+
+## notes.md Structure
+
+`notes.md` has two parts: a structured **state block** at the top that you edit in place, and an **append-only log** below it that you only ever append to.
 
 ```markdown
-# <Session name>
+# <Session name> — notes log
 
 Date: <YYYY-MM-DD>
 Project/context: <repo, module, product, or conversation context>
@@ -33,7 +40,7 @@ Status: exploring
 
 ## Assumptions
 
-- <Memory, prior preference, likely convention, or unverified context; include how to verify it>
+- <Unverified context or likely convention; include how to verify it>
 
 ## Open Questions
 
@@ -51,14 +58,6 @@ Status: exploring
 
 - <Source, runtime behavior, issue, log, ADR, user statement, or code path>
 
-## Adjacent Checks
-
-- Adjacent check: <question>
-  Finding: <1-3 sentence synthesis>
-  Implication: <how this affects the current design>
-  Confidence: <low/medium/high>
-  Suggested note update: <optional>
-
 ## Alternatives Considered
 
 - <Alternative>: <why it helps, why it may fail>
@@ -74,7 +73,22 @@ Status: exploring
 ## Follow-Up Artifacts
 
 - <ADR, issue, spec, roadmap entry, PR, or planning note after promotion>
+
+---
+
+## Log
+
+### <YYYY-MM-DD>
+
+- <HH:MM> <Entry: user statement, subagent finding (compact, with source), adjacent check, or correction.>
+- <HH:MM> Correction: <what the user corrected and the corrected model.>
+- Adjacent check: <question>
+  Finding: <1-3 sentence synthesis>
+  Implication: <how this affects the current design>
+  Confidence: <low/medium/high>
 ```
+
+The state block is edited in place as the model evolves (replace stale entries). The log below the `---` is append-only: add timestamped entries, never rewrite them. When a correction changes the model, update the state block above **and** append a `Correction:` entry below.
 
 Status values:
 
@@ -85,6 +99,17 @@ Status values:
 
 Do not promote a hypothesis, preference, or repeated suggestion into a decision unless the user explicitly agrees or the conversation clearly converges.
 
+## deliverable.md Shape
+
+`deliverable.md` has no fixed template — shape it to the session (plan, proposal, spec, design memo). It must always carry:
+
+- **Requirements and constraints** the user has stated, in a dedicated current section.
+- The core question and current working model.
+- The viable options and the emerging direction, with the decision frontier visible.
+- Open questions and material risks.
+
+Keep it skimmable for the human; summarize verified findings, keep the raw trail in `notes.md`.
+
 ## Naming
 
 Session names should be short, searchable, and specific:
@@ -92,14 +117,13 @@ Session names should be short, searchable, and specific:
 - `NMP relay identity model exploration`
 - `Trellis phase-boundary design exploration`
 - `Podcast queue ownership exploration`
-- `tenex-edge awareness routing exploration`
 - `skill trigger boundary exploration`
 - `agent handoff workflow exploration`
 
-File slugs should be lowercase hyphen-case:
+Session directory slugs are lowercase hyphen-case, with a year-month date prefix:
 
 ```text
-2026-07-09-nmp-relay-identity-model-exploration.md
+~/whiteboard/nmp/2026-07-nmp-relay-identity-model/
 ```
 
 ## Trigger Examples
@@ -123,13 +147,13 @@ Do not use the skill for:
 - "Rewrite this prompt."
 - "Optimize this prompt once."
 
-If a simple question becomes iterative across turns with alternatives, objections, or changed direction, start the note at that point and include the prior context in the first entry.
+If a simple question becomes iterative across turns with alternatives, objections, or changed direction, start the workspace at that point and include the prior context in the first log entry.
 
 ## Update Discipline
 
-Keep notes compact. Prefer bullets with concrete nouns, paths, issue numbers, command names, logs, and direct user decisions. Do not copy long background-agent reports into the note; summarize key facts, conflicts, risks, and implications.
+Keep both files compact. Prefer bullets with concrete nouns, paths, issue numbers, command names, logs, and direct user decisions. Do not copy long subagent reports into either file; summarize key facts, conflicts, risks, and implications in `notes.md`, and only the decision-relevant synthesis in `deliverable.md`.
 
-Keep these categories separate:
+Keep these categories separate (in the `notes.md` state block):
 
 - observations: checked facts and direct user statements
 - assumptions: unverified context or likely conventions
@@ -141,48 +165,23 @@ Keep these categories separate:
 - risks: ways the direction could fail or be expensive to reverse
 - open questions: uncertainty that could change the direction
 
-When background exploration contradicts the working model, record the contradiction under `Evidence Gathered` and update `Current Working Model` rather than burying it.
-
-When the user corrects an interpretation, revise the affected sections retroactively. Do not append a correction below stale assumptions while leaving the stale assumption active.
+When exploration contradicts the working model, update the state block's `Current Working Model` and `Observations` in place, record the contradiction under `Evidence Gathered`, and append a log entry. Update `deliverable.md` to match. Do not leave stale claims standing in the deliverable while a correction sits only in the log.
 
 ## Adjacent Check Examples
 
-Good adjacent checks include:
+Good adjacent checks include prior art or prior ADRs/issues/PRs, existing ownership boundaries, hidden protocol/dependency/platform constraints, terminology pressure, comparable systems, failure modes and cost of being wrong, security/privacy implications, operational complexity, reversibility, and runtime evidence that can confirm or falsify the working model.
 
-- prior art or prior ADRs/issues/PRs that may already settle the question
-- existing ownership boundaries that may contradict the proposed direction
-- hidden protocol, dependency, platform, or compatibility constraints
-- terminology and naming pressure that could reveal a confused model
-- comparable systems, sibling projects, or similar modules
-- failure modes and cost of being wrong
-- security and privacy implications
-- operational complexity, release risk, migration burden, and testability
-- reversibility: whether a wrong decision can be unwound cheaply
-- runtime evidence that can confirm or falsify the working model
-
-Prefer one high-leverage adjacent check at a time. Do not launch background work for curiosity, obvious facts, or questions unlikely to materially affect the design.
-
-Use this compact result format:
-
-```text
-Adjacent check: [question]
-Finding: [1-3 sentence synthesis]
-Implication: [how this affects the current design]
-Confidence: [low/medium/high]
-Suggested note update: [optional]
-```
+Prefer one high-leverage adjacent check at a time. Use the compact `Finding / Implication / Confidence` form, recorded in the log.
 
 ## Promotion Checklist
 
-Before creating or updating a durable artifact, confirm the note has:
+Before promoting to a durable artifact, confirm the session has:
 
 - a chosen or strongly implied direction
 - at least one alternative considered and rejected or deferred
 - evidence supporting the direction
-- observations, assumptions, hypotheses, constraints, preferences, risks, and open questions separated clearly
+- observations, assumptions, hypotheses, constraints, preferences, risks, and open questions separated clearly in `notes.md`
 - known unresolved risks or a statement that none are material
 - the target artifact type that matches project convention
 
-Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues. Create a new durable artifact only when no suitable existing artifact exists.
-
-Keep exploration notes under the agent private home (`~/.agents/home/{identifier}/whiteboard/<project-slug>/`). Promote to a durable project artifact only after the session is `decided` and the user is ready for that next step.
+Shape the durable artifact from `deliverable.md`, carrying its requirements/constraints section over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in both files and set `manifest.json` status to `decided` (then `archived`).
