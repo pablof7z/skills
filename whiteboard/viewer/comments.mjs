@@ -21,6 +21,36 @@ function renderBody(text, renderMarkdown) {
   return window.DOMPurify ? window.DOMPurify.sanitize(raw, SANITIZE_OPTS) : raw;
 }
 
+// Whitespace-flexible quote matcher. The document's textContent preserves
+// raw newlines and multi-space runs from block structure, but a stored
+// TextQuoteSelector.exact comes from a browser selection (collapsed spaces) or
+// from raw markdown. To re-anchor without mutating either side, we escape the
+// query and turn each whitespace run into `\s+`, so "live demo doc for"
+// matches "live demo\ndoc for". The returned index is a real offset into the
+// unmodified haystack; nothing in the DOM or stored selector is changed.
+function wsPattern(s) {
+  return String(s ?? "")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\s+/g, "\\s+");
+}
+export function quoteMatch(hay, exact, prefix, suffix) {
+  if (!exact) return null;
+  const e = wsPattern(exact);
+  const s = suffix ? wsPattern(suffix) : "";
+  let m;
+  if (prefix) m = new RegExp("(" + wsPattern(prefix) + ")(" + e + ")" + s).exec(hay);
+  else if (suffix) m = new RegExp("(" + e + ")(" + s + ")").exec(hay);
+  else m = new RegExp("(" + e + ")").exec(hay);
+  if (!m) return null;
+  const pfx = prefix ? m[1].length : 0;
+  const ex = prefix ? m[2] : m[1];
+  return { start: m.index + pfx, end: m.index + pfx + ex.length };
+}
+export function quoteIndex(hay, exact, prefix, suffix) {
+  const r = quoteMatch(hay, exact, prefix, suffix);
+  return r ? r.start : -1;
+}
+
 export function initComments({ docEl, railEl, state, renderMarkdown, postComment, getVersion, onChange, onToggleResolve }) {
   const isAttention = (a) => a && a.motivation === "highlighting";
   const isTopLevel = (a) => a && a.motivation !== "replying" && !(a.target && a.target.id) && !isAttention(a);
@@ -45,13 +75,6 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
   function offsetOf(rootNode, target, off) {
     for (const { node, start } of cumulativeOffsets(rootNode)) if (node === target) return start + off;
     return -1;
-  }
-  function quoteIndex(hay, exact, prefix, suffix) {
-    if (!exact) return -1;
-    if (prefix && suffix) { const i = hay.indexOf(prefix + exact + suffix); if (i !== -1) return i + prefix.length; }
-    if (prefix) { const i = hay.indexOf(prefix + exact); if (i !== -1) return i + prefix.length; }
-    if (suffix) { const i = hay.indexOf(exact + suffix); if (i !== -1) return i; }
-    return hay.indexOf(exact);
   }
   function wrapRangeByOffsets(rootNode, start, end, annoId, cls) {
     if (start < 0 || end <= start) return false;
@@ -90,10 +113,9 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
     const sel = (a.target && a.target.selector) || [];
     const tq = sel.find((s) => s.type === "TextQuoteSelector");
     const tp = sel.find((s) => s.type === "TextPositionSelector");
-    let start = tq ? quoteIndex(docEl.textContent, tq.exact, tq.prefix, tq.suffix) : -1;
-    if (start === -1 && tp) start = tp.start;
-    const len = tq && tq.exact ? tq.exact.length : (tp ? tp.end - tp.start : 0);
-    const end = start === -1 ? -1 : start + len;
+    let start = -1, end = -1;
+    if (tq) { const r = quoteMatch(docEl.textContent, tq.exact, tq.prefix, tq.suffix); if (r) { start = r.start; end = r.end; } }
+    if (start === -1 && tp) { start = tp.start; end = tp.end; }
     if (start === -1) { a._anchored = false; a._start = -1; return; }
     const id = a.id.split(":").pop();
     a._anchored = wrapRangeByOffsets(docEl, start, end, id, cls);
