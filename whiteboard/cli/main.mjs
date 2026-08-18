@@ -61,6 +61,17 @@ function parse(argv) {
 
 function out(obj) { process.stdout.write(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2) + "\n"); }
 
+// A child process can't mutate its parent's env, so `wb new`/`wb use` can't update
+// WB_SESSION. If a harness pinned WB_SESSION to a different session, it shadows
+// the just-written ~/.wb/current for subsequent commands. Warn so the agent knows
+// to pass --session (or unset WB_SESSION) for the rest of the turn.
+function warnEnvPin(project, slug) {
+  const env = process.env.WB_SESSION;
+  const target = `${project}/${slug}`;
+  if (env && env !== target)
+    process.stderr.write(`note: WB_SESSION env is "${env}" (pinned by your harness); pass --session ${target} or unset WB_SESSION for this session.\n`);
+}
+
 async function main() {
   const { positional, flags } = parse(process.argv.slice(2));
   const [cmd, ...rest] = positional;
@@ -94,6 +105,7 @@ async function main() {
       }
       setCurrent(project, slug);
       stampOwner(dir, process.env.WB_OWNER);
+      warnEnvPin(project, slug);
       return out(`created ${project}/${slug} → ${dir}\n`);
     }
     case "list": {
@@ -107,6 +119,7 @@ async function main() {
       const project = projectFromCwd();
       setCurrent(project, slugify(slug));
       stampOwner(sessionDir(project, slugify(slug)), process.env.WB_OWNER);
+      warnEnvPin(project, slugify(slug));
       return out(`using ${project}/${slugify(slug)}\n`);
     }
     case "read": {

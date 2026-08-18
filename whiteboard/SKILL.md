@@ -84,6 +84,10 @@ The document is the fold over `changes/<rev>.json` (append-only; no `document.js
 
 ```bash
 wb new <slug> [--from <md-file>]                # create a block-doc session
+#  --from <md-file>: import an existing markdown doc VERBATIM, split into blocks
+#  by H1/H2 heading (block name = heading slug; content before the first heading
+#  -> an "intro" block; H3+ stay inside their parent block; code-fence safe).
+#  Use this to scaffold a session from a doc, notes, or an ADR in one command.
 wb use <slug>                                    # set current session (claims it for this agent)
 wb read [--md|--json]                            # project the doc (default: tagged <name>…</name>)
 wb note "trail entry"                            # append to notes.md
@@ -110,7 +114,11 @@ wb change send                                   # COMMIT staged ops as one chan
 wb change discard                                # abort the staging transaction
 # Pass --by <your-name> (or set AGENT_NAME) so wb records you as the change author.
 # Scope: --session <project>/<slug> → WB_SESSION env → ~/.wb/current. Set
-# WB_SESSION to the current session (or pass --session) so wb targets it.
+# WB_SESSION to the current session (or pass --session) so wb targets it. A
+# harness may pin WB_SESSION to a session; `wb new`/`wb use` update ~/.wb/current
+# but cannot change the env var (a child can't mutate its parent's env), so if
+# WB_SESSION is set to a different session wb warns — pass --session for the new
+# one until the env is refreshed.
 ```
 
 Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block boundaries:
