@@ -15,7 +15,7 @@ import {
   loadDoc, readChanges, appendChange, fold, validateOps, changeIdFor, selectorFor,
   attachOp, replyOp, resolveOp, detachOp, amendOp, flagOp,
 } from "./doc.mjs";
-import { slugify } from "./store.mjs";
+import { slugify, agentName } from "./store.mjs";
 import { applyUnifiedDiff } from "./patch.mjs";
 
 const STAGING = ".staging.json";
@@ -58,7 +58,7 @@ export function startChange(session, { title, summary, by }) {
     const ch = sendChange(session, { by: existing.by });
     note = `auto-sent stale change "${ch.title}" (rev ${ch.rev}). `;
   }
-  saveStaging(session, { title, summary: summary || null, by: by || "agent", ops: [], startedAt: new Date().toISOString() });
+  saveStaging(session, { title, summary: summary || null, by: by || agentName(), ops: [], startedAt: new Date().toISOString() });
   return `${note}started "${title}". Stage ops with \`wb change <edit|add|move|rename|remove|comment|reply|resolve|unresolve|flag|attention|amend|detach>\`, then \`wb change send\`.`;
 }
 
@@ -78,7 +78,7 @@ export function sendChange(session, { by } = {}) {
   const doc = loadDoc(session.dir);
   if (!doc) throw new Error(`no document in ${session.dir}`);
   validateOps(doc, st.ops); // re-check against the live doc in case a change landed meanwhile
-  const ch = appendChange(session.dir, { id: changeIdFor(st.title), title: st.title, by: by || st.by || "agent", summary: st.summary, ops: st.ops });
+  const ch = appendChange(session.dir, { id: changeIdFor(st.title), title: st.title, by: by || st.by || agentName(), summary: st.summary, ops: st.ops });
   clearStaging(session);
   return ch;
 }
@@ -117,7 +117,7 @@ function summarizeOp(o) {
 
 // Dispatch `wb change <sub> …` — build one intent op and stage it.
 export function stageSubcommand(session, sub, positional, flags) {
-  const by = flags.by || "agent";
+  const by = flags.by || agentName();
   const want = (n, usage) => { if (positional.length < n) throw new Error(usage); };
   switch (sub) {
     case "edit": {

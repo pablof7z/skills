@@ -90,7 +90,7 @@ async function main() {
         const md = fs.readFileSync(flags.from, "utf8");
         const blocks = parseMarkdownToBlocks(md);
         const ops = blocks.map((b) => ({ op: "add", name: b.name, md: b.md }));
-        appendChange(dir, { id: "initial", title: "Initial import", by: "agent", ops });
+        appendChange(dir, { id: "initial", title: "Initial import", ops });
       }
       setCurrent(project, slug);
       stampOwner(dir, process.env.WB_OWNER);
@@ -125,7 +125,7 @@ async function main() {
       if (first === "status") return out(statusChange(s) + "\n");
       if (first && isChangeSub(first)) return out(stageSubcommand(s, first, rest.slice(1), flags) + "\n");
       const title = flags.title || first;
-      return out(startChange(s, { title, summary: flags.summary, by: flags.by || "agent" }) + "\n");
+      return out(startChange(s, { title, summary: flags.summary, by: flags.by }) + "\n");
     }
     case "note": {
       const s = session();

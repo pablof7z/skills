@@ -314,6 +314,10 @@ wb change detach <thread-id>                     # stage: remove an attachment
 wb change status                                 # peek at staged ops
 wb change send                                   # COMMIT staged ops as one change
 wb change discard                                # abort the staging transaction
+# Identify yourself: pass --by <your-name> (or set AGENT_NAME / AGENT_IDENTITY)
+# using your stable agent name per the home-directory skill. wb records it as the
+# change author and auto-stamps provenance (pid, iTerm pane GUID, pi session id)
+# it gathers from the environment — you never pass provenance yourself.
 ```
 
 Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block names and boundaries:

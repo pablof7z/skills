@@ -16,7 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { versionHash, validName, slugify } from "./store.mjs";
+import { versionHash, validName, slugify, agentName, provenance } from "./store.mjs";
 
 export const CHANGES = "changes";
 const PAD = 6;
@@ -40,12 +40,12 @@ export function readChanges(dir) {
 }
 
 // Append a change: allocates the next free rev atomically (link EXCL).
-export function appendChange(dir, { id, title, by = "agent", summary = null, ops }) {
+export function appendChange(dir, { id, title, by = agentName(), summary = null, ops, via }) {
   const d = changesDir(dir);
   fs.mkdirSync(d, { recursive: true });
   const maxRev = readChanges(dir).reduce((m, c) => Math.max(m, c.rev || 0), 0);
   for (let rev = maxRev + 1; rev < maxRev + 1024; rev++) {
-    const change = { rev, id: id || `rev-${rev}`, title: title || null, at: nowIso(), by, summary, ops };
+    const change = { rev, id: id || `rev-${rev}`, title: title || null, at: nowIso(), by, summary, ops, via: via || provenance() };
     const target = path.join(d, `${padded(rev)}.json`);
     const tmp = path.join(d, `.tmp-${process.pid}-${rev}.json`);
     fs.writeFileSync(tmp, JSON.stringify(change, null, 2) + "\n");
@@ -174,10 +174,10 @@ export function loadDoc(dir) {
 }
 
 // ---- op builders (used by the CLI and the viewer) ----
-export function attachOp(kind, block, { body = null, selector = null, motivation = null, by = "agent", id = newId() } = {}) {
+export function attachOp(kind, block, { body = null, selector = null, motivation = null, by = agentName(), id = newId() } = {}) {
   return { op: "attach", id, kind, block, by, body, selector, motivation, at: nowIso() };
 }
-export function replyOp(to, body, { by = "agent", id = newId() } = {}) {
+export function replyOp(to, body, { by = agentName(), id = newId() } = {}) {
   return { op: "reply", to, id, by, body: String(body), at: nowIso() };
 }
 export function resolveOp(id, resolved = true) {
