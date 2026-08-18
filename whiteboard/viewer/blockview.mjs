@@ -95,7 +95,7 @@ export function initBlockViewer(rootEl, project, slug) {
           <button class="diff-toggle" id="diff-toggle" type="button" title="Show changes">⇄</button>
           <span class="conn" id="conn">live</span>
         </div>
-        <div class="diff-bar" id="diff-bar" hidden><label class="diff-label">before <div id="diff-before" class="rev-picker"></div></label><span class="diff-arrow">→</span><label class="diff-label">after <div id="diff-after" class="rev-picker"></div></label><button class="diff-markread" id="diff-markread" type="button">Done</button></div>
+        <div class="diff-bar" id="diff-bar" hidden><div id="diff-before" class="rev-picker"></div><span class="diff-arrow">→</span><div id="diff-after" class="rev-picker"></div><button class="diff-markread" id="diff-markread" type="button">Done</button></div>
         <div class="doc-scroll" id="doc-scroll">
           <div class="doc-wrap doc-wrap-block comments-on" id="doc-wrap">
             <article id="doc"></article>

@@ -25,23 +25,52 @@ export function ago(iso) {
   return new Date(t).toISOString().slice(0, 10);
 }
 
+// Turn a change's machine title (set by the CLI for one-op changes, e.g.
+// "edit open-questions", "resolve c-1a2b", "comment on goal") into a human-friendly
+// label. Named multi-op changes already carry a human-written title and are
+// returned unchanged. Falls back to "rev N" when there is no title.
+function humanizeTitle(title, rev) {
+  if (!title) return `rev ${rev}`;
+  const t = String(title);
+  const m = (re, fn) => { const x = t.match(re); return x ? fn(x) : null; };
+  return (
+    m(/^add (.+)$/, (x) => `Added “${x[1]}”`) ||
+    m(/^edit (.+)$/, (x) => `Edited “${x[1]}”`) ||
+    m(/^move (.+)$/, (x) => `Moved “${x[1]}”`) ||
+    m(/^rename (.+?)→(.+)$/, (x) => `Renamed “${x[1]}” → “${x[2]}”`) ||
+    m(/^remove (.+)$/, (x) => `Removed “${x[1]}”`) ||
+    m(/^comment on (.+)$/, (x) => `Comment on “${x[1]}”`) ||
+    m(/^attention on (.+)$/, (x) => `Flagged “${x[1]}” for attention`) ||
+    m(/^set (.+?) on (.+)$/, (x) => `Set ${x[1]} on “${x[2]}”`) ||
+    m(/^clear (.+?) on (.+)$/, (x) => `Cleared ${x[1]} on “${x[2]}”`) ||
+    m(/^reply to .+$/, () => "Replied to a comment") ||
+    m(/^resolve .+$/, () => "Resolved a comment") ||
+    m(/^unresolve .+$/, () => "Reopened a comment") ||
+    m(/^detach .+$/, () => "Detached a comment") ||
+    m(/^amend .+$/, () => "Edited a comment") ||
+    t
+  );
+}
+
 // Options for the rev picker: each { value, title, meta, group }. Per-revision
-// options show the change's TITLE (what the agent named it) + "N changes · ago".
-// Shortcuts (Current, Last viewed) are pinned at the top. Dedup by value.
+// options show a HUMAN-FRIENDLY title + "N change(s) · ago"; the closed button
+// shows only the title, the opened panel shows title + meta. Shortcuts (Current,
+// Last viewed) are pinned at the top. Dedup by value.
 export function buildPickerOptions(revisions, currentRev, viewedRev) {
   const out = []; const seen = new Set();
   const revBy = new Map((revisions || []).map((r) => [r.rev, r]));
   const cur = revBy.get(currentRev);
+  const ch = (n) => `${n} change${n === 1 ? "" : "s"}`;
   const push = (value, title, meta, group) => {
     const key = String(value); if (seen.has(key)) return; seen.add(key);
     out.push({ value, title, meta, group });
   };
-  push("current", "Current", cur ? `${cur.changes || 0} changes · ${ago(cur.at)}` : "now", "shortcut");
+  push("current", "Current", cur ? `${ch(cur.changes || 0)} · ${ago(cur.at)}` : "now", "shortcut");
   if (viewedRev && viewedRev !== currentRev) {
     const v = revBy.get(viewedRev);
-    push(viewedRev, "Last viewed (Done)", v ? `${v.changes || 0} changes · ${ago(v.at)}` : "—", "shortcut");
+    push(viewedRev, "Last viewed (Done)", v ? `${ch(v.changes || 0)} · ${ago(v.at)}` : "—", "shortcut");
   }
-  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, `${r.changes || 0} changes · ${ago(r.at)}`, "rev");
+  for (const r of revisions || []) push(r.rev, humanizeTitle(r.title, r.rev), `${ch(r.changes || 0)} · ${ago(r.at)}`, "rev");
   return out;
 }
 
@@ -55,7 +84,7 @@ function mountRevPicker(container, options, value) {
   const find = (v) => cur.find((o) => String(o.value) === String(v)) || cur[0];
   const renderBtn = () => {
     const o = find(container.value);
-    container.innerHTML = `<button type="button" class="rev-picker-btn"><span class="rp-title">${esc(o?.title || "—")}</span><span class="rp-meta">${esc(o?.meta || "")}</span><span class="rp-caret">▾</span></button>`;
+    container.innerHTML = `<button type="button" class="rev-picker-btn"><span class="rp-title">${esc(o?.title || "—")}</span><span class="rp-caret">▾</span></button>`;
     container.querySelector(".rev-picker-btn").addEventListener("click", (e) => { e.stopPropagation(); panel ? close() : open(); });
   };
   function open() {
