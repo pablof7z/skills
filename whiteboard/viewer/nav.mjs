@@ -8,11 +8,14 @@
 //  - attention pill: "⚑ N to review" — DocuSign-style jump to the next agent
 //    attention marker, cycling.
 
+import { initTocRail } from "./toc-rail.mjs";
+
 export function initNav({ docScroll, docEl, state }) {
   const rail = document.createElement("nav");
   rail.className = "toc-rail";
   rail.innerHTML = `<div class="toc-title">Outline</div><ol class="toc-list"></ol>`;
   document.body.appendChild(rail);
+  const toc = initTocRail(rail);
 
   const minimap = document.createElement("div");
   minimap.className = "minimap";
@@ -177,6 +180,7 @@ export function initNav({ docScroll, docEl, state }) {
 
   function destroy() {
     docScroll.removeEventListener("scroll", onScroll);
+    toc.destroy();
     rail.remove(); minimap.remove(); barTop.remove(); barBottom.remove(); attBar.remove();
   }
 

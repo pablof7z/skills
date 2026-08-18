@@ -6,6 +6,7 @@
 // separate viewer.mjs path; this module only runs for model === "blocks".
 
 import { initCodeBlocks } from "./codeblocks.mjs";
+import { initTocRail } from "./toc-rail.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -115,6 +116,7 @@ export function initBlockViewer(rootEl, project, slug) {
   const docEl = document.getElementById("doc");
   const railEl = document.getElementById("margin-rail");
   const tocList = document.getElementById("toc-list");
+  initTocRail(document.getElementById("toc-rail"));
   const titleEl = document.getElementById("title");
   const statusEl = document.getElementById("status");
   const versionEl = document.getElementById("version");
