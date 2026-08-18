@@ -543,3 +543,20 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
   .margin-rail .thread.attention { background: #2a2308; }
   .attention-bar { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
 }
+
+/* ---- block-document viewer (document.json) ---- */
+.app.block-app { grid-template-columns: 1fr; }
+.doc-wrap-block { max-width: 1080px; }
+.block { padding: 2px 0 18px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.block:last-child { border-bottom: none; }
+.block-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
+.block-name { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted, #6b7280); letter-spacing: 0.02em; }
+.block-flag { font-size: 12px; font-weight: 700; padding: 1px 5px; border-radius: 6px; }
+.flag-attention { background: #fde68a; color: #92400e; }
+.flag-decided { background: #d1fae5; color: #065f46; }
+.flag-superseded { background: #e5e7eb; color: #6b7280; text-decoration: line-through; }
+@media (prefers-color-scheme: dark) {
+  .flag-attention { background: #4a3502; color: #fde68a; }
+  .flag-decided { background: #052e1a; color: #6ee7b7; }
+  .flag-superseded { background: #2a2a2a; color: #9ca3af; }
+}

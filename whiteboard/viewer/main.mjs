@@ -3,6 +3,7 @@
 
 import { initExplorer } from "./explorer.mjs";
 import { initViewer } from "./viewer.mjs";
+import { initBlockViewer } from "./blockview.mjs";
 
 // Register the footnote extension once. The UMD globals (window.marked,
 // window.markedFootnote) are set by classic scripts in index.html, which run
@@ -11,12 +12,20 @@ if (window.marked && window.markedFootnote) {
   try { window.marked.use(window.markedFootnote()); } catch (e) { console.warn("footnote extension failed:", e); }
 }
 
-function route() {
+async function route() {
   const root = document.getElementById("root");
   root.innerHTML = "";
   const m = location.pathname.match(/^\/session\/([^/]+)\/([^/]+)(?:\/)?$/);
   if (m) {
-    initViewer(root, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
+    const project = decodeURIComponent(m[1]);
+    const slug = decodeURIComponent(m[2]);
+    // Decide render path by session model: block-doc (document.json) vs legacy
+    // deliverable.md. Fetch metadata first so we route before building DOM.
+    try {
+      const s = await fetch(`/api/session/${encodeURIComponent(project)}/${encodeURIComponent(slug)}/session`).then((r) => r.json());
+      if (s.model === "blocks") return initBlockViewer(root, project, slug);
+    } catch {}
+    initViewer(root, project, slug);
   } else {
     initExplorer(root);
   }
