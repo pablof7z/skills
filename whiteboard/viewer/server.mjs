@@ -15,6 +15,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import * as S from "./lib/session.mjs";
+import * as B from "./lib/blockdoc.mjs";
 
 const VIEWER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORT = 4318;
@@ -108,6 +109,7 @@ async function handleSession(req, res, root, project, slug, rest) {
   const dir = sessionDir(root, project, slug);
   if (!dir) return sendJson(res, 404, { error: "session not found" });
   S.ensureDirs(dir);
+  const blockDoc = B.isBlockDoc(dir);
   const key = `${project}/${slug}`;
   const m = req.method;
 
@@ -115,8 +117,11 @@ async function handleSession(req, res, root, project, slug, rest) {
     const man = S.readManifest(dir);
     const d = S.readDeliverable(dir);
     const viewed = S.readViewed(dir);
-    const resolved = S.readResolved(dir);
-    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, deliverableVersion: d.version, viewedVersion: viewed.version, resolved });
+    const resolved = blockDoc ? B.resolvedMap(dir) : S.readResolved(dir);
+    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, model: blockDoc ? "blocks" : "markdown", deliverableVersion: blockDoc ? (B.getDocument(dir)?.hash || "") : d.version, viewedVersion: viewed.version, resolved });
+  }
+  if (rest === "document" && m === "GET" && blockDoc) {
+    return sendJson(res, 200, B.getDocument(dir));
   }
   if (rest === "deliverable" && m === "GET") {
     const d = S.readDeliverable(dir);
@@ -124,11 +129,16 @@ async function handleSession(req, res, root, project, slug, rest) {
     return sendJson(res, 200, d);
   }
   if (rest === "notes" && m === "GET") return sendJson(res, 200, { content: S.readNotes(dir) });
-  if (rest === "comments" && m === "GET") return sendJson(res, 200, { annotations: S.readComments(dir) });
+  if (rest === "comments" && m === "GET") return sendJson(res, 200, blockDoc ? B.getComments(dir) : { annotations: S.readComments(dir) });
   if (rest === "events" && m === "GET") { sseStart(res); sessionClientsFor(key).add(res); return; }
   if (rest === "comments" && m === "POST") {
     const data = await readBody(req).catch(() => null);
     if (!data) return sendJson(res, 400, { error: "bad json" });
+    if (blockDoc) {
+      if (!data.block) return sendJson(res, 400, { error: "block required" });
+      const c = B.postComment(dir, { block: data.block, text: data.text, selector: data.selector, creator: data.creator || "user" });
+      return sendJson(res, 201, c);
+    }
     const creator = data.creator || "user";
     const anno = {
       "@context": "http://www.w3.org/ns/anno.jsonld",
@@ -164,11 +174,15 @@ async function handleSession(req, res, root, project, slug, rest) {
     S.writeViewed(dir, version);
     return sendJson(res, 200, { version, at: S.nowIso() });
   }
-  if (rest === "resolved" && m === "GET") return sendJson(res, 200, S.readResolved(dir));
+  if (rest === "resolved" && m === "GET") return sendJson(res, 200, blockDoc ? B.resolvedMap(dir) : S.readResolved(dir));
   if (rest === "resolved" && m === "POST") {
     const data = await readBody(req).catch(() => ({}));
     const id = data && data.id;
     if (!id) return sendJson(res, 400, { error: "id required" });
+    if (blockDoc) {
+      const map = B.resolve(dir, id, data.resolved, data.by || "user");
+      return sendJson(res, 200, map);
+    }
     const map = S.setResolved(dir, id, data.resolved ? (data.by || "user") : null);
     return sendJson(res, 200, map);
   }
