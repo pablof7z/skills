@@ -104,7 +104,7 @@ export function initBlockViewer(rootEl, project, slug) {
         </div>
       </main>
     </div>
-    <nav class="toc-rail" id="toc-rail"><div class="toc-title">Blocks</div><ol class="toc-list" id="toc-list"></ol></nav>
+    <nav class="toc-rail" id="toc-rail"><div class="toc-title">Contents</div><ol class="toc-list" id="toc-list"></ol></nav>
     <div class="notes-drawer" id="notes-drawer"><div class="grip" id="notes-grip">▾ Notes log</div><pre id="notes"></pre></div>`;
 
   const docEl = document.getElementById("doc");
@@ -244,18 +244,25 @@ export function initBlockViewer(rootEl, project, slug) {
     }
   }
 
+  // TOC lists the rendered headings (h1/h2/h3) inside each block — the actual
+  // titles/subtitles — instead of the block name slugs. A block with no heading
+  // falls back to its name so it stays navigable. Indentation reuses the
+  // existing .toc-h2/.toc-h3 classes; needs-attention dot is per block.
   function renderTOC() {
     tocList.innerHTML = "";
-    for (const b of state.doc?.blocks || []) {
+    const append = (text, level, att, el) => {
       const li = document.createElement("li");
-      const att = (b.flags || []).includes("needs-attention");
-      li.className = "toc-item" + (att ? " has-attention" : "");
-      li.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="toc-text">${esc(b.name)}</span>`;
-      li.addEventListener("click", () => {
-        const sec = docEl.querySelector(`section[data-block-id="${cssEscape(b.name)}"]`);
-        if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      li.className = "toc-item toc-h" + level + (att ? " has-attention" : "");
+      li.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="toc-text">${esc(text)}</span>`;
+      li.addEventListener("click", () => el.scrollIntoView({ behavior: "smooth", block: "start" }));
       tocList.appendChild(li);
+    };
+    for (const b of state.doc?.blocks || []) {
+      const sec = docEl.querySelector(`section[data-block-id="${cssEscape(b.name)}"]`);
+      const heads = sec ? [...sec.querySelectorAll("h1, h2, h3")] : [];
+      const att = (b.flags || []).includes("needs-attention");
+      if (!heads.length) { append(b.name, 1, att, sec || docEl); continue; }
+      for (const h of heads) append(h.textContent, Number(h.tagName.slice(1)), att, h);
     }
   }
 
