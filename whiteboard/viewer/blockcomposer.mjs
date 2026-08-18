@@ -46,7 +46,7 @@ function selectorsFor(blockMd, range, sel) {
   return { exact, prefix, suffix };
 }
 
-export function initBlockComposer({ docEl, postComment }) {
+export function initBlockComposer({ docEl, postComment, railEl }) {
   let fab = null;
   let composer = null;
   const removeFab = () => { if (fab) { fab.remove(); fab = null; } };
@@ -79,18 +79,23 @@ export function initBlockComposer({ docEl, postComment }) {
     closeComposer();
     const block = blockNameOf(blockMd);
     const selector = selectorsFor(blockMd, range, sel);
-    const rect = range.getBoundingClientRect();
+    const sec = blockMd.parentElement;
+    const anchorY = sec ? sec.offsetTop : 0;
     composer = document.createElement("div");
     composer.className = "composer";
-    composer.style.left = `${rect.left + window.scrollX}px`;
-    composer.style.top = `${rect.top + window.scrollY - 6}px`;
-    composer.innerHTML = `<textarea placeholder="Comment on \`${esc(block || "")}\`…"></textarea><div class="row"><button class="cancel">Cancel</button><button class="send" disabled>Comment</button></div>`;
-    document.body.appendChild(composer);
+    composer.style.position = "absolute";
+    composer.style.top = `${anchorY}px`;
+    composer.style.left = "0";
+    composer.style.right = "6px";
+    composer.style.width = "auto";
+    composer.innerHTML = `<div class="composer-quote">“${esc(selector.exact || "")}"</div><textarea placeholder="Comment… (⌘↵ to send)"></textarea><div class="row"><button class="cancel">Cancel</button><button class="send" disabled>Comment</button></div>`;
+    railEl.appendChild(composer);
     const ta = composer.querySelector("textarea");
     const send = composer.querySelector(".send");
     const cancel = composer.querySelector(".cancel");
     ta.focus();
     ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
+    ta.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send.click(); } });
     cancel.addEventListener("click", closeComposer);
     send.addEventListener("click", async () => {
       const text = ta.value.trim();

@@ -7,7 +7,7 @@
 
 import { initCodeBlocks } from "./codeblocks.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
-import { initDiffMode } from "./blockdiff.mjs";
+import { initDiffMode, ago } from "./blockdiff.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -129,6 +129,7 @@ export function initBlockViewer(rootEl, project, slug) {
 
   const composer = initBlockComposer({
     docEl,
+    railEl,
     postComment: async (p) => {
       await fetch(`${API}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
       await runRefresh();
@@ -157,23 +158,25 @@ export function initBlockViewer(rootEl, project, slug) {
     }
   }
 
-  // Render one comment as a margin card. The resolve button lives in the excerpt
-  // row (always visible/clickable), NOT in the reply box. isResolved controls the
-  // toggle label; resolved cards are NOT faded (they only differ by label).
+  // Render one comment as a margin card. The resolve button lives in the reply
+  // row footer (pushed left by its margin-right:auto), NOT in the excerpt. The
+  // excerpt shows the anchored selected text (if any) plus a relative time.
+  // isResolved controls the toggle label; resolved cards are NOT faded (they
+  // only differ by label).
   function renderCard(b, c, anchorY, lastBottom, isResolved) {
     const card = document.createElement("div");
     card.className = "thread" + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "") + (state.collapsed[c.id] ? " collapsed" : "");
     card.dataset.annoId = c.id;
-    const when = (c.at || "").replace("T", " ").slice(0, 16);
+    const quote = (c.selector && c.selector.exact) ? `<span class="excerpt-quote">“${esc(c.selector.exact)}”</span>` : "";
     let replies = "";
     for (const r of c.replies || []) {
-      const rw = (r.at || "").replace("T", " ").slice(0, 16);
-      replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when">${esc(rw)}</span><div class="body">${renderBody(r.body)}</div></div>`;
+      replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when" data-at="${esc(r.at)}">${ago(r.at)}</span><div class="body">${renderBody(r.body)}</div></div>`;
     }
-    card.innerHTML = `<div class="excerpt"><button class="collapse-btn" type="button" title="${state.collapsed[c.id] ? "Expand" : "Collapse"}">${state.collapsed[c.id] ? "▸" : "▾"}</button>on <code>${esc(b.name)}</code><span class="where">@ ${esc(when)}</span><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Resolve"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
+    card.innerHTML = `<div class="excerpt"><button class="collapse-btn" type="button" title="${state.collapsed[c.id] ? "Expand" : "Collapse"}">${state.collapsed[c.id] ? "▸" : "▾"}</button>${quote}<span class="where" data-at="${esc(c.at)}">${ago(c.at)}</span></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Resolve"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
     const ta = card.querySelector("textarea");
     const send = card.querySelector(".send");
     ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
+    ta.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send.click(); } });
     send.addEventListener("click", async () => {
       const text = ta.value.trim(); if (!text) return;
       send.disabled = true;
@@ -281,6 +284,10 @@ export function initBlockViewer(rootEl, project, slug) {
   diffAfterEl.addEventListener("change", () => { state.afterRev = diffAfterEl.value === "current" ? "current" : Number(diffAfterEl.value); diff.render(); });
   diffMarkReadEl.addEventListener("click", diff.markRead);
   runRefresh().then(connectSSE);
+
+  // Auto-refresh the relative time labels every 30s without a full re-render
+  // (a full re-render would wipe in-progress reply textareas).
+  setInterval(() => { railEl.querySelectorAll("[data-at]").forEach((el) => { el.textContent = ago(el.dataset.at); }); }, 30000);
 }
 
 function cssEscape(s) {
