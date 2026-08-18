@@ -59,6 +59,21 @@ function computeUnread(annos, lastSeenAt) {
   }).length;
 }
 
+// Human chat messages with no agent reply after them — shared by the legacy
+// and block-doc scan paths. Block-doc sessions also have a chat/ queue (the
+// viewer's chat sidebar writes to it), so the block-doc wake path needs this too.
+export function chatActionable(dir) {
+  const msgs = readChat(dir).sort((a, b) => (a.created || "").localeCompare(b.created || ""));
+  const out = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== "user") continue;
+    const hasAgentAfter = msgs.slice(i + 1).some((x) => x.role === "agent" && (x.created || "") >= (m.created || ""));
+    if (!hasAgentAfter) out.push({ kind: "chat", id: m.id, block: null, text: m.text || "" });
+  }
+  return out;
+}
+
 // Legacy actionable items: top-level human comment with no agent reply, or a
 // human chat message with no agent chat reply after it.
 export function legacyActionable(dir) {
@@ -72,13 +87,7 @@ export function legacyActionable(dir) {
       items.push({ kind: "comment", id: a.id, block: null, text: a.body?.value || "" });
     }
   }
-  const msgs = readChat(dir).sort((a, b) => (a.created || "").localeCompare(b.created || ""));
-  for (let i = 0; i < msgs.length; i++) {
-    const m = msgs[i];
-    if (m.role !== "user") continue;
-    const hasAgentAfter = msgs.slice(i + 1).some((x) => x.role === "agent" && (x.created || "") >= (m.created || ""));
-    if (!hasAgentAfter) items.push({ kind: "chat", id: m.id, block: null, text: m.text || "" });
-  }
+  for (const it of chatActionable(dir)) items.push(it);
   return items;
 }
 

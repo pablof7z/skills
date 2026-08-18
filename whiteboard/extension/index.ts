@@ -22,7 +22,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, execFile } from "node:child_process";
 import {
-  listSessions, loadDoc, isActionable, legacyActionable, sessionUnread,
+  listSessions, loadDoc, isActionable, legacyActionable, chatActionable, sessionUnread,
 } from "./scan.mjs";
 import { applyWbSession } from "./resolve.mjs";
 
@@ -123,6 +123,7 @@ export default function (pi: ExtensionAPI) {
         const ids = new Set<string>((doc?.comments || []).map((c: any) => c.id));
         seenComments.set(`${s.project}/${s.slug}`, ids);
         for (const c of doc?.comments || []) if (isActionable(c)) handled.add(`blockcomment:${c.id}`);
+        for (const it of chatActionable(s.dir)) handled.add(`chat:${it.id}`);
       } else {
         for (const it of legacyActionable(s.dir)) handled.add(`${it.kind}:${it.id}`);
       }
@@ -146,6 +147,13 @@ export default function (pi: ExtensionAPI) {
             try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
           }
           seenComments.set(where, seen);
+          for (const it of chatActionable(s.dir)) {
+            const key = `chat:${it.id}`;
+            if (handled.has(key)) continue;
+            handled.add(key);
+            const msg = `[whiteboard] New chat in ${where}:\n"${excerpt(it.text, 240)}"\n\nRead it and reply in that session's chat/ dir (write an agent chat message) so it appears in the viewer.`;
+            try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed", e); }
+          }
         } else {
           for (const it of legacyActionable(s.dir)) {
             const key = `${it.kind}:${it.id}`;
