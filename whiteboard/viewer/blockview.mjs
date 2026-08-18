@@ -9,6 +9,7 @@ import { initCodeBlocks } from "./codeblocks.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
 import { initDiffMode, ago } from "./blockdiff.mjs";
 import { initChat } from "./chat.mjs";
+import { quoteMatch } from "./comments.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -31,19 +32,18 @@ function renderMarkdown(md) {
 }
 function renderBody(text) { return renderMarkdown(text); }
 
-// Wrap the first occurrence of selector.exact (verified by prefix/suffix) in a
-// <mark> within a block's rendered DOM. Returns true if highlighted.
+// Wrap the first occurrence of selector.exact (whitespace-flexibly, verified
+// by prefix/suffix) in a <mark> within a block's rendered DOM. Returns true if
+// highlighted. Reuses the quote matcher from comments.mjs so a quote that
+// crosses a rendered block/line boundary (textContent has a newline where the
+// stored exact has a space) still anchors, and the highlight span uses the real
+// match end instead of exact.length (which can cut the mark short when the
+// rendered text has more whitespace chars than the stored exact).
 function highlightIn(blockMd, selector) {
   if (!selector || !selector.exact) return false;
-  const text = blockMd.textContent;
-  let start = text.indexOf(selector.exact);
-  if (start === -1) return false;
-  if (selector.prefix && text.slice(Math.max(0, start - selector.prefix.length), start) !== selector.prefix) {
-    const pi = text.indexOf(selector.prefix);
-    if (pi !== -1) start = pi + selector.prefix.length;
-  }
-  const end = start + selector.exact.length;
-  return wrapRange(blockMd, start, end);
+  const r = quoteMatch(blockMd.textContent, selector.exact, selector.prefix, selector.suffix);
+  if (!r) return false;
+  return wrapRange(blockMd, r.start, r.end);
 }
 
 // Walk text nodes, split, and wrap [start,end) in a <mark class=wb-anno>.
