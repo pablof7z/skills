@@ -2,7 +2,7 @@
 // Default strategy: each top-level heading (## …) starts a new block named by
 // the heading slug, carrying the heading + its body. Content before the first
 // heading becomes a block named "intro". Duplicate slugs get -2, -3 suffixes.
-// This is one-time; the agent can split further with `wb write add`.
+// This is one-time; the agent can split further with `wb change add`.
 
 import { slugify } from "./store.mjs";
 

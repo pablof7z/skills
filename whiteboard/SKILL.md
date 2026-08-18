@@ -291,17 +291,29 @@ Run `wb` from the skill's `bin/wb` shim or `node <skill-dir>/whiteboard/cli/main
 ```bash
 wb new <slug> [--from <md-file>]                # create a block-doc session
 wb read [--md|--json]                            # project: tagged <name>…</name> (default) / plain md / raw tree
-wb write add <name> [--before X|--after X] < f.md # add a block (content: --text|--file|stdin)
-wb write edit <name> < f.md                       # replace a block's markdown
-wb write move <name> --after X                    # reorder
-wb write rename <old> <new>                       # rename (cascades comments)
-wb write remove <name> [name…]                    # delete block(s) + their comments
-wb flag <name> needs-attention|--off             # set/clear a block flag
-wb comment <name> "text" [--exact "quote"]       # comment on a block (auto selector with --exact)
-wb reply <comment-id> "text"                      # reply in a thread
-wb attention <name> "reason"                      # flag needs-attention + comment
-wb resolve <comment-id> [--unresolve]            # resolve a comment
 wb note "trail entry"                             # append to notes.md
+# Mutations: ONE interface — a staging transaction. `wb change "<title>"` opens it
+# (only one at a time), `wb change <op> …` stages ops, `wb change send` commits them
+# as one change (one rev, one human title). Ops are intent — comment/reply/resolve/
+# flag ids + attachment state are derived for you. A staging left open >5m auto-sends
+# when you next start a new `wb change "<title>"`.
+wb change "<title>" [--summary S]                # START a staging transaction
+wb change edit <block> (--file f|- | --text T | --diff f|-)   # stage: replace a block's md (or apply a block-scoped diff)
+wb change add <name> [--before X|--after X] (--file f|- | --text T)   # stage: add a block
+wb change move <name> --before X|--after X       # stage: reorder
+wb change rename <old> <new>                      # stage: rename (cascades comments)
+wb change remove <name> [name…]                  # stage: delete block(s) + their comments
+wb change comment <name> "text" [--exact "quote"] # stage: comment on a block (auto selector with --exact)
+wb change reply <thread-id> "text"               # stage: reply in a thread
+wb change flag <name> <flag> [--clear]            # stage: set/clear a block flag (needs-attention|decided|…)
+wb change attention <name> "reason"               # stage: needs-attention flag + amber card
+wb change resolve <thread-id>                    # stage: resolve a comment
+wb change unresolve <thread-id>                  # stage: reopen a comment
+wb change amend <thread-id> [--text T] [--exact "quote"]   # stage: edit an attachment's body or anchor
+wb change detach <thread-id>                     # stage: remove an attachment
+wb change status                                 # peek at staged ops
+wb change send                                   # COMMIT staged ops as one change
+wb change discard                                # abort the staging transaction
 ```
 
 Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block names and boundaries:

@@ -187,6 +187,15 @@ export function detachOp(id) { return { op: "detach", id }; }
 export function amendOp(id, { body, selector } = {}) {
   const o = { op: "amend", id }; if (body !== undefined) o.body = body; if (selector !== undefined) o.selector = selector; return o;
 }
+// Build the op to set or clear a block flag (label attachment) against the
+// current (preview) doc. Set is idempotent (no-op if already set); clear is a
+// no-op if not set. Returns null when there's nothing to stage.
+export function flagOp(doc, block, flag, { value = true, body = null, by = "agent" } = {}) {
+  const existing = (doc.attachments || []).find((a) => a.block === block && a.kind === flag && a.state === "active");
+  if (!value) return existing ? detachOp(existing.id) : null;
+  if (existing) return null;
+  return attachOp(flag, block, { body, by });
+}
 export function changeIdFor(title) { return slugify(title) || null; }
 
 export function selectorFor(md, exact) {

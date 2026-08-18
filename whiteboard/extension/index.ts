@@ -164,7 +164,7 @@ export default function (pi: ExtensionAPI) {
             if (!isActionable(c) || seen.has(c.id)) continue;
             seen.add(c.id);
             handled.add(`blockcomment:${c.id}`);
-            const msg = `[whiteboard] New comment on block "${c.block}" in ${where}: "${excerpt(c.body)}". Reply with \`wb reply ${c.id} "<text>"\` then \`wb resolve ${c.id}\`.`;
+            const msg = `[whiteboard] New comment on block "${c.block}" in ${where}: "${excerpt(c.body)}" (id ${c.id}). Reply via \`wb change\`: \`wb change "Reply to ${c.id}"\` → \`wb change reply ${c.id} "<text>"\` → \`wb change resolve ${c.id}\` → \`wb change send\`.`;
             try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
           }
           seenComments.set(where, seen);

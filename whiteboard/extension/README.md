@@ -13,7 +13,7 @@ The whiteboard skill now uses a block-based `document.json` (not `deliverable.md
 - **`WB_SESSION` resolution.** On `session_start` the extension resolves the current whiteboard session for this pi session's project (`myProject` = cwd basename, or `WHITEBOARD_PROJECT`) and sets `process.env.WB_SESSION = "<project>/<slug>"` so `wb` CLI commands resolve it. Resolution order: `~/.wb/current.json[myProject]` → most-recently-modified session dir under `~/whiteboard/<myProject>/` → leave unset. The agent can override with `wb use <slug>`.
 - **Block-doc wake (scoped to this session's project).** A session is a block-doc session if `document.json` exists in its dir. The extension watches `~/whiteboard` and, on a `document.json` change, loads it and finds comments that are **new since the last-seen comment set** AND actionable (`author === "user"`, `resolved === false`, no reply in `replies[]` with `author === "agent"`). It baselines the existing comment ids per session on `session_start` so existing items don't wake. It wakes the agent via `pi.sendUserMessage(prompt, { deliverAs: "followUp" })` with:
   ```
-  [whiteboard] New comment on block "<block>" in <project>/<slug>: "<body excerpt>". Reply with `wb reply <comment-id> "<text>"` then `wb resolve <comment-id>`.
+  [whiteboard] New comment on block "<block>" in <project>/<slug>: "<body excerpt>" (id <comment-id>). Reply via `wb change`: `wb change "Reply to <id>"` → `wb change reply <comment-id> "<text>"` → `wb change resolve <comment-id>` → `wb change send`.
   ```
   Only sessions whose project === `myProject` wake this pi session.
 - **Legacy wake (unchanged path).** Sessions without `document.json` still use the `comments/` W3C-annotation + `chat/` scan, so existing sessions don't regress.
