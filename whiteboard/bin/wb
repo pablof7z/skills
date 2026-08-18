@@ -1,13 +1,15 @@
 #!/bin/sh
 # wb — whiteboard block document CLI shim.
-# Resolve symlinks so this works whether invoked directly, via a PATH symlink
-# (e.g. ~/.local/bin/wb -> here), or through the skill's bin/ path.
-self="$0"
-while [ -L "$self" ]; do
-  target=$(readlink "$self") || break
-  case "$target" in
-    /*) self="$target" ;;
-    *) dir=$(cd "$(dirname "$self")" && pwd); self="$dir/$target" ;;
+# Resolves its own symlink chain so it works when installed on PATH
+# (e.g. ~/.local/bin/wb -> .../whiteboard/bin/wb) regardless of where it's invoked.
+prog="$0"
+while [ -L "$prog" ]; do
+  dir=$(cd -P "$(dirname "$prog")" >/dev/null 2>&1 && pwd)
+  prog=$(readlink "$prog")
+  case "$prog" in
+    /*) ;;
+    *) prog="$dir/$prog" ;;
   esac
 done
-exec node "$(dirname "$self")/../cli/main.mjs" "$@"
+dir=$(cd -P "$(dirname "$prog")" >/dev/null 2>&1 && pwd)
+exec node "$dir/../cli/main.mjs" "$@"
