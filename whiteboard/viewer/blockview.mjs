@@ -115,7 +115,7 @@ export function initBlockViewer(rootEl, project, slug) {
   const drawerEl = document.getElementById("notes-drawer");
   const gripEl = document.getElementById("notes-grip");
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {} };
+  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {} };
 
   const composer = initBlockComposer({
     docEl,
@@ -152,7 +152,7 @@ export function initBlockViewer(rootEl, project, slug) {
   // toggle label; resolved cards are NOT faded (they only differ by label).
   function renderCard(b, c, anchorY, lastBottom, isResolved) {
     const card = document.createElement("div");
-    card.className = "thread" + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "");
+    card.className = "thread" + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "") + (state.collapsed[c.id] ? " collapsed" : "");
     card.dataset.annoId = c.id;
     const when = (c.at || "").replace("T", " ").slice(0, 16);
     let replies = "";
@@ -160,7 +160,7 @@ export function initBlockViewer(rootEl, project, slug) {
       const rw = (r.at || "").replace("T", " ").slice(0, 16);
       replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when">${esc(rw)}</span><div class="body">${renderBody(r.body)}</div></div>`;
     }
-    card.innerHTML = `<div class="excerpt">on <code>${esc(b.name)}</code><span class="where">@ ${esc(when)}</span><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Resolve"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
+    card.innerHTML = `<div class="excerpt"><button class="collapse-btn" type="button" title="${state.collapsed[c.id] ? "Expand" : "Collapse"}">${state.collapsed[c.id] ? "▸" : "▾"}</button>on <code>${esc(b.name)}</code><span class="where">@ ${esc(when)}</span><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Resolve"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
     const ta = card.querySelector("textarea");
     const send = card.querySelector(".send");
     ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
@@ -175,6 +175,11 @@ export function initBlockViewer(rootEl, project, slug) {
       e.stopPropagation();
       await fetch(`${API}/resolved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, resolved: !isResolved, by: "user" }) });
       await runRefresh();
+    });
+    card.querySelector(".collapse-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.collapsed[c.id] = !state.collapsed[c.id];
+      renderComments();
     });
     card.addEventListener("click", (e) => { if (e.target.closest(".reply-box")) return; state.activeId = c.id; railEl.querySelectorAll(".thread").forEach((t) => t.classList.toggle("active", t === card)); });
     railEl.appendChild(card);

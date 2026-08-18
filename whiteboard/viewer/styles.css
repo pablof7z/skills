@@ -128,6 +128,13 @@ html, body {
 .margin-rail .thread .excerpt .where { float: right; font-style: normal; opacity: 0.7; }
 .margin-rail .thread .msg-list { display: flex; flex-direction: column; gap: 6px; }
 .margin-rail .thread .reply-box { margin-top: 6px; }
+.margin-rail .thread .collapse-btn {
+  background: transparent; border: 0; color: var(--muted); cursor: pointer;
+  font-size: 11px; padding: 0 4px 0 0; line-height: 1; margin-right: 2px;
+}
+.margin-rail .thread .collapse-btn:hover { color: var(--accent); }
+.margin-rail .thread.collapsed .msg,
+.margin-rail .thread.collapsed .reply-box { display: none; }
 .margin-rail .thread .reply-box textarea { width: 100%; min-height: 38px; resize: vertical; font: inherit; font-size: 12.5px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); }
 
 #doc {
