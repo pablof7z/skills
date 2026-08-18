@@ -70,11 +70,25 @@ export default function (pi: ExtensionAPI) {
   let watcher: ReturnType<typeof fs.watch> | null = null;
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  // The pi session id of THIS agent. Whiteboard sessions record the id of the
+  // agent that should be notified in manifest.owner; we only wake for sessions
+  // we own. The other agent (e.g. one doing UI work in the same project) owns
+  // none of our sessions and so never wakes. Stable across /reload; changes
+  // only on /new, /fork, /switch (then re-claim via `wb use`).
+  let mySessionId: string | null = null;
   // Wake-dedupe: handled keys (`<kind>:<id>`) we've already woken for, and per
   // session the set of block-doc comment ids we've already seen (so only NEW
   // comments since the last rev wake the agent).
   const handled = new Set<string>();
   const seenComments = new Map<string, Set<string>>(); // sessionKey -> ids
+
+  // Only wake/count sessions this agent owns. Falls back to project-scoped if we
+  // couldn't determine our own session id (so the extension still works when
+  // getSessionId() is unavailable).
+  function mine(s: any): boolean {
+    if (!mySessionId) return s.project === myProject;
+    return s.owner === mySessionId;
+  }
 
   // The viewer is a persistent, self-healing daemon: spawn-if-down, detached so
   // it survives pi restarts/reloads, and never killed by the extension. A
@@ -92,7 +106,7 @@ export default function (pi: ExtensionAPI) {
       if (!ctx?.hasUI) return;
       let unread = 0;
       try {
-        for (const s of listSessions(ROOT)) if (s.project === myProject) unread += sessionUnread(s);
+        for (const s of listSessions(ROOT)) if (s.project === myProject && mine(s)) unread += sessionUnread(s);
       } catch {}
       ctx.ui.setStatus("whiteboard", unread > 0 ? `📓 ${unread} unread` : "📓 whiteboard");
     } catch { /* ctx may be stale after session replacement/reload; skip silently */ }
@@ -103,7 +117,7 @@ export default function (pi: ExtensionAPI) {
   // detection: document.json has no per-comment rev, so we diff ids).
   function baseline() {
     for (const s of listSessions(ROOT)) {
-      if (s.project !== myProject) continue;
+      if (s.project !== myProject || !mine(s)) continue;
       if (s.blockDoc) {
         const doc = loadDoc(s.dir);
         const ids = new Set<string>((doc?.comments || []).map((c: any) => c.id));
@@ -118,7 +132,7 @@ export default function (pi: ExtensionAPI) {
   function poke(ctx: any) {
     try {
       for (const s of listSessions(ROOT)) {
-        if (s.project !== myProject) continue; // only wake for this session's project
+        if (s.project !== myProject || !mine(s)) continue; // only wake for sessions this agent owns
         const where = `${s.project}/${s.slug}`;
         if (s.blockDoc) {
           const doc = loadDoc(s.dir);
@@ -163,6 +177,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await ensureViewer();
+    // Capture this agent's pi session id so we only wake for whiteboard
+    // sessions it owns (manifest.owner). Exposed to the `wb` CLI via WB_OWNER so
+    // `wb new`/`wb use` stamp the owner when creating/claiming a session.
+    try { mySessionId = ctx?.sessionManager?.getSessionId?.() || null; } catch { mySessionId = null; }
+    if (mySessionId) process.env.WB_OWNER = mySessionId;
     // Expose the current whiteboard session for myProject so `wb` resolves it.
     const cur = applyWbSession(myProject, ROOT);
     if (cur && ctx?.hasUI) ctx.ui.notify(`whiteboard session: ${cur.project}/${cur.slug}`, "info");

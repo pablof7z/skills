@@ -118,6 +118,30 @@ export function newDoc() {
   return { version: 1, docId: "deliverable", rev: 0, blocks: [], comments: [], hash: versionHash([]) };
 }
 
+// manifest.json helpers. The optional `owner` field is the pi session id that
+// should be notified for this whiteboard session; the extension only wakes that
+// agent (see extension/index.ts). Stamped on `wb new`/`wb use` from WB_OWNER.
+export function readManifest(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")); } catch { return null; }
+}
+
+function writeManifest(dir, m) {
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, ".manifest.json.tmp");
+  fs.writeFileSync(tmp, JSON.stringify(m, null, 2) + "\n");
+  fs.renameSync(tmp, path.join(dir, "manifest.json"));
+}
+
+// Claim this session for the given pi session id (no-op if already owned by it).
+export function stampOwner(dir, owner) {
+  if (!owner) return false;
+  const m = readManifest(dir) || { name: path.basename(dir), status: "exploring", project: "", createdAt: new Date().toISOString() };
+  if (m.owner === owner) return false;
+  m.owner = owner;
+  writeManifest(dir, m);
+  return true;
+}
+
 export function findBlock(doc, name) {
   return doc.blocks.find((b) => b.name === name) || null;
 }

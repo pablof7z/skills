@@ -106,7 +106,8 @@ export function listSessions(root) {
       const dir = path.join(pd, name);
       if (!fs.statSync(dir).isDirectory()) continue;
       const blockDoc = isBlockDoc(dir);
-      out.push({ project, slug: name, dir, blockDoc });
+      const manifest = readJson(path.join(dir, "manifest.json"), null);
+      out.push({ project, slug: name, dir, blockDoc, owner: manifest?.owner || null });
     }
   }
   return out;

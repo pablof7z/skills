@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   resolveSession, loadDoc, saveDoc, newDoc, setCurrent, listSessions,
-  sessionDir, projectFromCwd, slugify,
+  sessionDir, projectFromCwd, slugify, stampOwner,
 } from "./store.mjs";
 import {
   readTagged, readMd, readJson, writeAdd, writeEdit, writeMove,
@@ -93,6 +93,7 @@ async function main() {
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
         name: slug, status: "exploring", project, createdAt: new Date().toISOString(),
+        ...(process.env.WB_OWNER ? { owner: process.env.WB_OWNER } : {}),
       }, null, 2) + "\n");
       const doc = newDoc();
       if (flags.from) {
@@ -111,8 +112,10 @@ async function main() {
     case "use": {
       const slug = rest[0];
       if (!slug) throw new Error("usage: wb use <slug>");
-      setCurrent(projectFromCwd(), slugify(slug));
-      return out(`using ${projectFromCwd()}/${slugify(slug)}\n`);
+      const project = projectFromCwd();
+      setCurrent(project, slugify(slug));
+      stampOwner(sessionDir(project, slugify(slug)), process.env.WB_OWNER);
+      return out(`using ${project}/${slugify(slug)}\n`);
     }
     case "read": {
       const s = session();
