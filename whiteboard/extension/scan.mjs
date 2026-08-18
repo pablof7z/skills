@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { loadDoc, isBlockDocDir } from "../cli/doc.mjs";
 
 export const isSessionDir = (n) => /^\d{4}-\d{2}-.+/.test(n);
 
@@ -19,16 +20,10 @@ function readJson(p, fallback) {
 
 // ---- block-doc model ----
 
-export function docPath(dir) { return path.join(dir, "document.json"); }
-export function isBlockDoc(dir) { return fs.existsSync(docPath(dir)); }
-
-export function loadDoc(dir) {
-  const doc = readJson(docPath(dir), null);
-  if (!doc) return null;
-  doc.blocks = doc.blocks || [];
-  doc.comments = doc.comments || [];
-  return doc;
-}
+// Re-exported so the extension resolves block-doc sessions the same way the
+// CLI/viewer do (changes/ dir or legacy document.json).
+export const isBlockDoc = isBlockDocDir;
+export { loadDoc };
 
 export function isActionable(c) {
   if (!c || c.author !== "user") return false;

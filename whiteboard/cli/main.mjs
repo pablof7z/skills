@@ -1,31 +1,28 @@
 #!/usr/bin/env node
-// main.mjs — wb CLI entry point. Dispatches to store/blocks/annotations/migrate.
-// `wb read` defaults to the tagged <name>…</name> projection; --md plain, --json raw.
-// Mutations go through `wb write …` and the comment/flag family. Session scope is
-// resolved from --session / WB_SESSION / ~/.wb/current (see store.mjs).
+// main.mjs — wb CLI entry point. The document is an append-only change log
+// (changes/<rev>.json); every mutation appends one change (one atomic file).
+// `wb read` projects the fold; `wb change` appends N ops as a single named
+// change. Session scope: --session / WB_SESSION / ~/.wb/current (store.mjs).
 
 import fs from "node:fs";
 import path from "node:path";
 import {
-  resolveSession, loadDoc, saveDoc, newDoc, setCurrent, listSessions,
-  sessionDir, projectFromCwd, slugify, stampOwner,
+  resolveSession, setCurrent, listSessions, sessionDir, projectFromCwd, slugify, stampOwner,
 } from "./store.mjs";
-import {
-  readTagged, readMd, readJson, writeAdd, writeEdit, writeMove,
-  writeRename, writeRemove, setFlag,
-} from "./blocks.mjs";
-import {
-  addComment, addReply, resolveComment, markAttention,
-} from "./annotations.mjs";
+import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
+import {
+  loadDoc, appendChange, validateOps, changeIdFor, selectorFor,
+  commentOp, replyOp, resolveOp, attentionOp, isBlockDocDir,
+} from "./doc.mjs";
 
-const HELP = `wb — whiteboard block document CLI
-  wb new <slug> [--from <md-file>]   create a session (migrate markdown if --from)
+const HELP = `wb — whiteboard change-log document CLI
+  wb new <slug> [--from <md-file>]   create a session (optionally seed from markdown)
   wb list [--json]                   list sessions for this project
-  wb use <slug>                      set current session
+  wb use <slug>                      set current session (claims it for this agent)
   wb read [--md|--json] [slug]       project the doc (default: tagged <name>…</name>)
   wb write add <name> [--before X|--after X] [--text T|--file F|stdin]   add a block
-  wb write edit <name> [--text T|--file F|stdin]                         replace a block
+  wb write edit <name> [--text T|--file F|stdin]                        replace a block
   wb write move <name> --before X|--after X     reorder a block
   wb write rename <old> <new>                    rename (cascades comments)
   wb write remove <name> [name…]                 delete block(s) + their comments
@@ -35,6 +32,9 @@ const HELP = `wb — whiteboard block document CLI
   wb attention <name> [reason]                  flag needs-attention + comment
   wb resolve <comment-id> [--unresolve]          resolve/unresolve a comment
   wb note <text|--file>                          append to notes.md
+  wb change "<title>" [--summary S] --ops -|--file F   apply a named batch of ops as one change
+     ops (JSON array): {op:"add"|"edit"|"move"|"rename"|"remove"|"comment"|"reply"|"resolve"|"attention"|"flag", ...}
+The document = fold of changes/<rev>.json; each mutation appends one change.
 Scope: --session <project>/<slug> > WB_SESSION > ~/.wb/current (this project).
 Content: --text > --file > stdin (when piped). Default --by is "agent".`;
 
@@ -59,16 +59,34 @@ function readContent(flags, { allowStdin = true } = {}) {
   throw new Error("no content: pass --text, --file, or pipe via stdin");
 }
 
-function withDoc(session, fn) {
-  const { dir } = session;
-  const doc = loadDoc(dir);
-  if (!doc) throw new Error(`no document.json in ${dir} — run \`wb new\` or migrate first`);
-  const out = fn(doc);
-  saveDoc(dir, doc);
-  return out;
+// Read a JSON array of ops for `wb change`.
+function readOps(flags) {
+  let raw;
+  if (flags.ops !== undefined) raw = flags.ops === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(flags.ops, "utf8");
+  else if (flags.file) raw = fs.readFileSync(flags.file, "utf8");
+  else if (!process.stdin.isTTY) raw = fs.readFileSync(0, "utf8");
+  else throw new Error("no ops: pass --ops -|--ops <file>|--file <file>, or pipe JSON on stdin");
+  const ops = JSON.parse(raw);
+  if (!Array.isArray(ops) || ops.length === 0) throw new Error("ops must be a non-empty JSON array");
+  return ops;
 }
 
 function out(obj) { process.stdout.write(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2) + "\n"); }
+
+// Load the folded doc for a session (validates the session has a document).
+function docFor(session) {
+  const doc = loadDoc(session.dir);
+  if (!doc) throw new Error(`no document in ${session.dir} — run \`wb new\` first`);
+  return doc;
+}
+
+// Append one change (validating ops against the current fold first so a bad op
+// aborts before anything is written). Returns the written change.
+function applyChange(session, { id, title, by, summary, ops }) {
+  const doc = docFor(session);
+  validateOps(doc, ops);
+  return appendChange(session.dir, { id, by, summary, ops, title });
+}
 
 async function main() {
   const { positional, flags } = parse(process.argv.slice(2));
@@ -89,20 +107,21 @@ async function main() {
       else if (process.env.WB_SESSION) project = process.env.WB_SESSION.includes("/") ? process.env.WB_SESSION.split("/")[0] : projectFromCwd();
       else project = projectFromCwd();
       const dir = sessionDir(project, slug);
-      if (fs.existsSync(path.join(dir, "document.json"))) throw new Error(`session ${project}/${slug} already exists`);
-      fs.mkdirSync(dir, { recursive: true });
+      if (fs.existsSync(path.join(dir, "changes")) || fs.existsSync(path.join(dir, "document.json"))) throw new Error(`session ${project}/${slug} already exists`);
+      fs.mkdirSync(path.join(dir, "changes"), { recursive: true });
       fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({
         name: slug, status: "exploring", project, createdAt: new Date().toISOString(),
         ...(process.env.WB_OWNER ? { owner: process.env.WB_OWNER } : {}),
       }, null, 2) + "\n");
-      const doc = newDoc();
       if (flags.from) {
         const md = fs.readFileSync(flags.from, "utf8");
-        doc.blocks = parseMarkdownToBlocks(md);
+        const blocks = parseMarkdownToBlocks(md);
+        const ops = blocks.map((b) => ({ op: "add", name: b.name, md: b.md }));
+        appendChange(dir, { id: "initial", title: "Initial import", by: "agent", ops });
       }
-      saveDoc(dir, doc);
-      setCurrent(project, slugify(slug));
-      return out(`created ${project}/${slugify(slug)} → ${dir}\n`);
+      setCurrent(project, slug);
+      stampOwner(dir, process.env.WB_OWNER);
+      return out(`created ${project}/${slug} → ${dir}\n`);
     }
     case "list": {
       const project = flags.session ? flags.session.split("/")[0] : projectFromCwd();
@@ -120,45 +139,78 @@ async function main() {
     case "read": {
       const s = session();
       const doc = loadDoc(s.dir);
-      if (!doc) throw new Error(`no document.json in ${s.dir}`);
+      if (!doc) throw new Error(`no document in ${s.dir}`);
       if (flags.json) return out(readJson(doc));
       if (flags.md) return out(readMd(doc));
       return out(readTagged(doc));
     }
     case "write": {
       const [op, name, ...more] = rest;
-      if (op === "add") return out(withDoc(session(), (d) => writeAdd(d, slugify(name), readContent(flags), { before: flags.before, after: flags.after })?.name) + "\n");
-      if (op === "edit") return out(withDoc(session(), (d) => writeEdit(d, name, readContent(flags)) && `edited ${name}\n`));
-      if (op === "move") return out(withDoc(session(), (d) => writeMove(d, name, { before: flags.before, after: flags.after }) && `moved ${name}\n`));
-      if (op === "rename") return out(withDoc(session(), (d) => writeRename(d, name, more[0]) && `renamed ${name} → ${more[0]}\n`));
-      if (op === "remove") return out(withDoc(session(), (d) => writeRemove(d, [name, ...more]) && `removed ${[name, ...more].join(", ")}\n`));
-      throw new Error(`wb write <add|edit|move|rename|remove> …\n\n${HELP}`);
+      const by = flags.by || "agent";
+      const s = session();
+      let ops, title;
+      if (op === "add") { const n = slugify(name); ops = [{ op: "add", name: n, md: readContent(flags), before: flags.before, after: flags.after }]; title = `add ${n}`; }
+      else if (op === "edit") { ops = [{ op: "edit", name, md: readContent(flags) }]; title = `edit ${name}`; }
+      else if (op === "move") { ops = [{ op: "move", name, before: flags.before, after: flags.after }]; title = `move ${name}`; }
+      else if (op === "rename") { const to = slugify(more[0]); ops = [{ op: "rename", from: name, to }]; title = `rename ${name}→${to}`; }
+      else if (op === "remove") { ops = [{ op: "remove", names: [name, ...more] }]; title = `remove ${[name, ...more].join(", ")}`; }
+      else throw new Error(`wb write <add|edit|move|rename|remove> …\n\n${HELP}`);
+      const ch = applyChange(s, { by, ops, title });
+      return out(`${title} (rev ${ch.rev})\n`);
     }
     case "flag": {
       const [name, flag] = rest;
       const on = flags.off ? false : true;
-      return out(withDoc(session(), (d) => setFlag(d, name, flag, on) && `${on ? "set" : "cleared"} ${flag} on ${name}\n`));
+      const ch = applyChange(session(), { by: flags.by || "agent", ops: [{ op: "flag", name, flag, on }], title: `${on ? "set" : "clear"} ${flag} on ${name}` });
+      return out(`${on ? "set" : "cleared"} ${flag} on ${name} (rev ${ch.rev})\n`);
     }
     case "comment": {
       const [name] = rest;
       const body = flags.text !== undefined ? flags.text : (flags.file ? fs.readFileSync(flags.file, "utf8") : rest.slice(1).join(" "));
       if (!body) throw new Error("usage: wb comment <name> <text|--file> [--by who] [--exact …]");
-      return out(withDoc(session(), (d) => addComment(d, name, body, { by: flags.by || "agent", exact: flags.exact }).id) + "\n");
+      const by = flags.by || "agent";
+      const s = session();
+      const doc = docFor(s);
+      let selector = null;
+      if (flags.exact) {
+        const b = doc.blocks.find((x) => x.name === name);
+        if (!b) throw new Error(`no block "${name}"`);
+        selector = selectorFor(b.md, flags.exact);
+      }
+      const op = commentOp(name, body, { by, selector });
+      validateOps(doc, [op]);
+      const ch = appendChange(s.dir, { title: `comment on ${name}`, by, ops: [op] });
+      return out(`${op.id} (rev ${ch.rev})\n`);
     }
     case "reply": {
       const [id] = rest;
       const body = flags.text !== undefined ? flags.text : rest.slice(1).join(" ");
-      return out(withDoc(session(), (d) => addReply(d, id, body, { by: flags.by || "agent" }).id) + "\n");
+      const by = flags.by || "agent";
+      const op = replyOp(id, body, { by });
+      const ch = applyChange(session(), { title: `reply to ${id}`, by, ops: [op] });
+      return out(`${op.id} (rev ${ch.rev})\n`);
     }
     case "attention": {
       const [name] = rest;
       const reason = flags.text !== undefined ? flags.text : rest.slice(1).join(" ");
-      return out(withDoc(session(), (d) => markAttention(d, name, reason, { by: flags.by || "agent" }).id) + "\n");
+      const by = flags.by || "agent";
+      const op = attentionOp(name, reason || "Needs your attention.", { by });
+      const ch = applyChange(session(), { title: `attention on ${name}`, by, ops: [op] });
+      return out(`${op.id} (rev ${ch.rev})\n`);
     }
     case "resolve": {
       const [id] = rest;
       const resolved = !flags.unresolve;
-      return out(withDoc(session(), (d) => resolveComment(d, id, resolved) && `${resolved ? "resolved" : "unresolved"} ${id}\n`));
+      const op = resolveOp(id, resolved);
+      const ch = applyChange(session(), { title: `${resolved ? "resolve" : "unresolve"} ${id}`, by: flags.by || "agent", ops: [op] });
+      return out(`${resolved ? "resolved" : "unresolved"} ${id} (rev ${ch.rev})\n`);
+    }
+    case "change": {
+      const title = flags.title || rest[0];
+      if (!title) throw new Error('usage: wb change "<title>" [--summary S] --ops -|--file F');
+      const ops = readOps(flags);
+      const ch = applyChange(session(), { id: changeIdFor(title), title, by: flags.by || "agent", summary: flags.summary || null, ops });
+      return out(`change "${title}" applied (rev ${ch.rev}, ${ops.length} ops) → changes/${String(ch.rev).padStart(6, "0")}.json\n`);
     }
     case "note": {
       const s = session();

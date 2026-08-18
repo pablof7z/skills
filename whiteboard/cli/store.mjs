@@ -1,8 +1,6 @@
-// store.mjs — document.json load/save (atomic), session resolution, version hash.
-// A whiteboard session lives at <root>/<project>/<session-slug>/ with a
-// document.json holding { version, docId, rev, blocks[], comments[] }.
-// Blocks are { name, md, flags? }; array order is document order. There is no
-// deliverable.md on disk — document.json is the source of truth.
+// store.mjs — session resolution, manifest, and version hashing. The block
+// document itself (changes/ log, fold, load) lives in doc.mjs; this module is
+// the lower-level plumbing shared by both the CLI and the viewer/extension.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -53,9 +51,7 @@ export function resolveSession({ session, cwd = process.cwd() } = {}) {
   return { project: p, slug: s, dir: path.join(ROOT, p, s) };
 }
 
-export function sessionDir(project, slug) {
-  return path.join(ROOT, project, slug);
-}
+export function sessionDir(project, slug) { return path.join(ROOT, project, slug); }
 
 function readCurrent() {
   try { return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch { return null; }
@@ -74,7 +70,7 @@ export function listSessions(project) {
   try { entries = fs.readdirSync(base, { withFileTypes: true }); } catch { return []; }
   return entries.filter((e) => e.isDirectory())
     .map((e) => e.name)
-    .filter((name) => fs.existsSync(path.join(base, name, "manifest.json")) || fs.existsSync(path.join(base, name, "document.json")));
+    .filter((name) => fs.existsSync(path.join(base, name, "manifest.json")) || fs.existsSync(path.join(base, name, "changes")));
 }
 
 // Stable canonical JSON for hashing: object keys sorted, no whitespace.
@@ -87,35 +83,6 @@ function canonical(value) {
 
 export function versionHash(blocks) {
   return crypto.createHash("sha256").update(canonical(blocks)).digest("hex").slice(0, 12);
-}
-
-export function loadDoc(dir) {
-  const f = path.join(dir, "document.json");
-  if (!fs.existsSync(f)) return null;
-  const doc = JSON.parse(fs.readFileSync(f, "utf8"));
-  doc.blocks = doc.blocks || [];
-  doc.comments = doc.comments || [];
-  return doc;
-}
-
-// Atomic write: temp file + rename. Bumps rev and recomputes version.
-export function saveDoc(dir, doc) {
-  if (!doc.blocks) doc.blocks = [];
-  if (!doc.comments) doc.comments = [];
-  doc.rev = (doc.rev || 0) + 1;
-  doc.version = 1;
-  doc.docId = doc.docId || "deliverable";
-  doc.hash = versionHash(doc.blocks);
-  doc.updatedAt = new Date().toISOString();
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, ".document.json.tmp");
-  fs.writeFileSync(tmp, JSON.stringify(doc, null, 2) + "\n");
-  fs.renameSync(tmp, path.join(dir, "document.json"));
-  return doc;
-}
-
-export function newDoc() {
-  return { version: 1, docId: "deliverable", rev: 0, blocks: [], comments: [], hash: versionHash([]) };
 }
 
 // manifest.json helpers. The optional `owner` field is the pi session id that
@@ -140,19 +107,4 @@ export function stampOwner(dir, owner) {
   m.owner = owner;
   writeManifest(dir, m);
   return true;
-}
-
-export function findBlock(doc, name) {
-  return doc.blocks.find((b) => b.name === name) || null;
-}
-
-export function requireBlock(doc, name) {
-  const b = findBlock(doc, name);
-  if (!b) throw new Error(`no block named "${name}"`);
-  return b;
-}
-
-export function uniqueName(doc, name) {
-  validName(name);
-  if (findBlock(doc, name)) throw new Error(`block "${name}" already exists`);
 }
