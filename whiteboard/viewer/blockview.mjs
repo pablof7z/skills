@@ -92,6 +92,7 @@ export function initBlockViewer(rootEl, project, slug) {
           <a class="back" href="/">← sessions</a>
           <span class="title" id="title">Whiteboard</span>
           <span class="status" id="status">exploring</span>
+          <div class="view-tabs" id="view-tabs"><span class="view-tab active" data-view="document">Document</span><span class="view-tab" data-view="notes">Notes</span></div>
           <button class="diff-toggle" id="diff-toggle" type="button" title="Show changes">⇄</button>
           <button class="chat-toggle" id="chat-toggle" type="button" title="Chat with the agent">Chat</button>
           <span class="conn" id="conn">live</span>
@@ -103,11 +104,11 @@ export function initBlockViewer(rootEl, project, slug) {
             <div class="margin-rail" id="margin-rail" aria-label="Comments"></div>
           </div>
         </div>
+        <div class="notes-view" id="notes-view" hidden></div>
       </main>
     </div>
     <nav class="toc-rail" id="toc-rail"><div class="toc-title">Contents</div><ol class="toc-list" id="toc-list"></ol></nav>
-    <aside class="chat-side" id="chat-side" hidden><div class="chat-head"><span class="chat-head-title">Chat</span><button class="chat-close" id="chat-close" type="button" aria-label="Close chat">✕</button></div><div id="chat-mount"></div></aside>
-    <div class="notes-drawer" id="notes-drawer"><div class="grip" id="notes-grip">▾ Notes log</div><pre id="notes"></pre></div>`;
+    <aside class="chat-side" id="chat-side" hidden><div class="chat-head"><span class="chat-head-title">Chat</span><button class="chat-close" id="chat-close" type="button" aria-label="Close chat">✕</button></div><div id="chat-mount"></div></aside>`;
 
   const docEl = document.getElementById("doc");
   const railEl = document.getElementById("margin-rail");
@@ -115,9 +116,10 @@ export function initBlockViewer(rootEl, project, slug) {
   const titleEl = document.getElementById("title");
   const statusEl = document.getElementById("status");
   const connEl = document.getElementById("conn");
-  const notesEl = document.getElementById("notes");
-  const drawerEl = document.getElementById("notes-drawer");
-  const gripEl = document.getElementById("notes-grip");
+  const docScrollEl = document.getElementById("doc-scroll");
+  const notesViewEl = document.getElementById("notes-view");
+  const viewTabsEl = document.getElementById("view-tabs");
+  const tocRailEl = document.getElementById("toc-rail");
   const diffBarEl = document.getElementById("diff-bar");
   const diffToggleEl = document.getElementById("diff-toggle");
   const diffBeforeEl = document.getElementById("diff-before");
@@ -129,7 +131,7 @@ export function initBlockViewer(rootEl, project, slug) {
   const chatCloseEl = document.getElementById("chat-close");
   const docWrapEl = document.getElementById("doc-wrap");
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
+  const state = { doc: null, notes: "", view: "document", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
     diffMode: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, diffBeforeDoc: null, diffAfterDoc: null };
 
   const composer = initBlockComposer({
@@ -285,7 +287,7 @@ export function initBlockViewer(rootEl, project, slug) {
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;
-    notesEl.textContent = n.content || "(no notes yet)";
+    notesViewEl.innerHTML = n.content ? renderMarkdown(n.content) : "<p class=\"empty-notes\">No notes yet.</p>";
     renderBlocks();
     await codeblocks.enhance(docEl);
     renderComments();
@@ -298,6 +300,7 @@ export function initBlockViewer(rootEl, project, slug) {
     if (auto && state.viewedRev > 0 && state.viewedRev < (d.rev ?? 0) &&
         state.revisions.some((r) => r.rev > state.viewedRev && r.rev <= (d.rev ?? 0) && r.blocks > 0)) {
       await diff.enter();
+      setView("document");
     }
   }
 
@@ -316,7 +319,15 @@ export function initBlockViewer(rootEl, project, slug) {
     return es;
   }
 
-  gripEl.addEventListener("click", () => drawerEl.classList.toggle("open"));
+  function setView(v) {
+    state.view = v;
+    viewTabsEl.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("active", t.dataset.view === v));
+    docScrollEl.hidden = (v !== "document");
+    notesViewEl.hidden = (v !== "notes");
+    tocRailEl.hidden = (v !== "document");
+    diffBarEl.hidden = (v !== "document") || !state.diffMode;
+  }
+  viewTabsEl.addEventListener("click", (e) => { const tab = e.target.closest(".view-tab"); if (tab) setView(tab.dataset.view); });
   diffToggleEl.addEventListener("click", () => state.diffMode ? diff.exit() : diff.enter());
   diffBeforeEl.addEventListener("change", () => { state.beforeRev = diffBeforeEl.value === "current" ? "current" : Number(diffBeforeEl.value); diff.render(); });
   diffAfterEl.addEventListener("change", () => { state.afterRev = diffAfterEl.value === "current" ? "current" : Number(diffAfterEl.value); diff.render(); });
