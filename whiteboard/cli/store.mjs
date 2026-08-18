@@ -113,9 +113,14 @@ export function stampOwner(dir, owner) {
 // cooperation needed). Mirrors the home-directory skill's agent-name resolver:
 // AGENT_IDENTITY → AGENT_NAME → AGENT_SLUG → AGENT_IDENTIFIER → NAME → WB_BY,
 // normalized to [a-z0-9._-], falling back to "agent".
+// Known harness signatures → stable name, checked after AI_AGENT. Grow as needed.
+const HARNESS = [["PI_CODING_AGENT", "pi"], ["CLAUDECODE", "claude"]];
+
 export function agentName() {
-  const raw = process.env.AGENT_IDENTITY || process.env.AGENT_NAME || process.env.AGENT_SLUG
-    || process.env.AGENT_IDENTIFIER || process.env.NAME || process.env.WB_BY || "";
+  const explicit = process.env.AGENT_IDENTITY || process.env.AGENT_NAME || process.env.AGENT_SLUG
+    || process.env.AGENT_IDENTIFIER || process.env.NAME || process.env.WB_BY;
+  let raw = explicit || process.env.AI_AGENT || "";
+  if (!raw) for (const [k, name] of HARNESS) if (process.env[k]) { raw = name; break; }
   if (!raw) return "agent";
   const n = String(raw).toLowerCase().replace(/[^a-z0-9._-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   return n || "agent";
