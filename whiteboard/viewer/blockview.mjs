@@ -8,6 +8,7 @@
 import { initCodeBlocks } from "./codeblocks.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
 import { initDiffMode, ago } from "./blockdiff.mjs";
+import { initChat } from "./chat.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -93,6 +94,7 @@ export function initBlockViewer(rootEl, project, slug) {
           <span class="status" id="status">exploring</span>
           <span class="version" id="version">v—</span>
           <button class="diff-toggle" id="diff-toggle" type="button" title="Show changes">⇄</button>
+          <button class="chat-toggle" id="chat-toggle" type="button" title="Chat with the agent">Chat</button>
           <span class="conn" id="conn">live</span>
         </div>
         <div class="diff-bar" id="diff-bar" hidden><div id="diff-before" class="rev-picker"></div><span class="diff-arrow">→</span><div id="diff-after" class="rev-picker"></div><button class="diff-markread" id="diff-markread" type="button">Done</button></div>
@@ -105,6 +107,7 @@ export function initBlockViewer(rootEl, project, slug) {
       </main>
     </div>
     <nav class="toc-rail" id="toc-rail"><div class="toc-title">Contents</div><ol class="toc-list" id="toc-list"></ol></nav>
+    <aside class="chat-side" id="chat-side" hidden><div class="chat-head"><span class="chat-head-title">Chat</span><button class="chat-close" id="chat-close" type="button" aria-label="Close chat">✕</button></div><div id="chat-mount"></div></aside>
     <div class="notes-drawer" id="notes-drawer"><div class="grip" id="notes-grip">▾ Notes log</div><pre id="notes"></pre></div>`;
 
   const docEl = document.getElementById("doc");
@@ -122,6 +125,10 @@ export function initBlockViewer(rootEl, project, slug) {
   const diffBeforeEl = document.getElementById("diff-before");
   const diffAfterEl = document.getElementById("diff-after");
   const diffMarkReadEl = document.getElementById("diff-markread");
+  const chatSideEl = document.getElementById("chat-side");
+  const chatMountEl = document.getElementById("chat-mount");
+  const chatToggleEl = document.getElementById("chat-toggle");
+  const chatCloseEl = document.getElementById("chat-close");
   const docWrapEl = document.getElementById("doc-wrap");
   const codeblocks = initCodeBlocks();
   const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
@@ -286,6 +293,7 @@ export function initBlockViewer(rootEl, project, slug) {
     await codeblocks.enhance(docEl);
     renderComments();
     renderTOC();
+    chat.refresh();
     if (state.diffMode) { await diff.render(); return; }
     // A block-changing change came in since the user last clicked “Done”: jump
     // into the diff, comparing last-viewed → current. Only on live (SSE)
@@ -301,6 +309,7 @@ export function initBlockViewer(rootEl, project, slug) {
     diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl,
     onExit: () => { renderBlocks(); renderComments(); renderTOC(); },
   });
+  const chat = initChat(chatMountEl, API);
 
   function connectSSE() {
     const es = new EventSource(`${API}/events`);
@@ -315,6 +324,10 @@ export function initBlockViewer(rootEl, project, slug) {
   diffBeforeEl.addEventListener("change", () => { state.beforeRev = diffBeforeEl.value === "current" ? "current" : Number(diffBeforeEl.value); diff.render(); });
   diffAfterEl.addEventListener("change", () => { state.afterRev = diffAfterEl.value === "current" ? "current" : Number(diffAfterEl.value); diff.render(); });
   diffMarkReadEl.addEventListener("click", diff.markRead);
+  const openChat = () => { chatSideEl.hidden = false; chatToggleEl.classList.add("active"); chat.refresh().then(() => chat.focus && chat.focus()); };
+  const closeChat = () => { chatSideEl.hidden = true; chatToggleEl.classList.remove("active"); };
+  chatToggleEl.addEventListener("click", () => chatSideEl.hidden ? openChat() : closeChat());
+  chatCloseEl.addEventListener("click", closeChat);
   runRefresh().then(connectSSE);
 
   // Auto-refresh the relative time labels every 30s without a full re-render
