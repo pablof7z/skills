@@ -114,7 +114,7 @@ export function stampOwner(dir, owner) {
 // AGENT_IDENTITY → AGENT_NAME → AGENT_SLUG → AGENT_IDENTIFIER → NAME → WB_BY,
 // normalized to [a-z0-9._-], falling back to "agent".
 // Known harness signatures → stable name, checked after AI_AGENT. Grow as needed.
-const HARNESS = [["PI_CODING_AGENT", "pi"], ["CLAUDECODE", "claude"]];
+const HARNESS = [["PI_CODING_AGENT", "pi"], ["CLAUDECODE", "claude"], ["CODEX_HOME", "codex"]];
 
 export function agentName() {
   const explicit = process.env.AGENT_IDENTITY || process.env.AGENT_NAME || process.env.AGENT_SLUG
