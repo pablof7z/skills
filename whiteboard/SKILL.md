@@ -23,12 +23,18 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 - Verify once, not incrementally. Do not state an unverified claim, then half-correct it, then correct it again. If a claim you stated is challenged or you realize you never verified it, stop, recheck the source fully, and replace the claim with what you find. One clean correction beats a walk-back chain.
 - "I don't know yet" is acceptable and expected. Saying you don't know, then researching with the source-inspection and adjacent-exploration tools available to you, is far better than a confident wrong answer.
 
+## The One Rule: Mutate The Document Only Through `wb`
+
+The session document is an **append-only change log** of named markdown blocks. You **never hand-write the document** — no `deliverable.md`, no hand-edited `document.json`, no hand-written comment/annotation JSON files. Every mutation goes through the `wb` CLI, which appends one atomic change file. This is what gives you stable comment anchors, semantic change tracking, and a live viewer. If you find yourself writing session files by hand, stop and use `wb`.
+
+`wb` is installed on PATH (`~/.local/bin/wb`). If it is not on PATH in your environment, invoke the shim directly: `<skill-dir>/whiteboard/bin/wb` or `node <skill-dir>/whiteboard/cli/main.mjs …`.
+
 ## Start the Session
 
-1. Assign a concise human-readable session name using the main object plus uncertainty, such as `NMP relay identity model exploration`, `Trellis phase-boundary design exploration`, or `Podcast queue ownership exploration`.
-2. Create or select a session workspace (see [Session Workspace](#session-workspace)) without asking permission. Do not interrupt the discussion with a permission question.
-3. Record the initial context, the current working model, and the highest-value open questions in the workspace before or during the first substantive response.
-4. Launch the live viewer so the human can read and annotate the deliverable as it evolves (see [Live Viewer and Comments](#live-viewer-and-comments)).
+1. Assign a concise human-readable session name from the main object plus uncertainty, e.g. `NMP relay identity model exploration`.
+2. Create or select a session with `wb new <slug>` (or `wb use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
+3. Seed the document with the initial context, current working model, and highest-value open questions using `wb change` (see [Block Document Model](#block-document-model-wb-cli)).
+4. Launch the live viewer so the human can read and annotate as it evolves (see [Live Viewer and Comments](#live-viewer-and-comments)).
 5. Keep exploring until clarity emerges. Prefer source inspection, runtime evidence, focused questions, and tradeoff analysis over premature edits.
 
 Treat tentative language like "I think X might work" as a hypothesis, not approval to implement.
@@ -39,288 +45,75 @@ Every whiteboard session lives in a shared, uncommitted directory outside any re
 
 ```text
 ~/whiteboard/<project-slug>/YYYY-MM-<session-slug>/
-├── manifest.json     # name, status, project, createdAt
-├── deliverable.md    # outward-facing doc the agent constantly updates; becomes the deliverable
-├── notes.md          # append-only log: user explicit statements, subagent findings, corrections
-├── versions/         # auto-snapshots of deliverable.md per content version (viewer-managed)
-├── comments/         # W3C Web Annotation JSON files (one per comment or reply)
+├── manifest.json     # name, status, project, createdAt, owner
+├── changes/          # append-only change log: 000001.json, 000002.json, … (the source of truth)
+├── notes.md          # append-only trail (wb note)
 └── chat/             # chat messages between human and agent (one JSON per message)
 ```
 
-Resolve `<project-slug>` as:
+There is **no `deliverable.md`** and **no `comments/` directory** in a block-doc session. The document is the fold over `changes/`; comments/labels are attachments inside those change files (one unified `attach` op, discriminated by `kind`). The viewer reads the fold; the agent mutates it only via `wb`.
 
-1. The git repository name when inside a git work tree. Use the main repository directory name, not the worktree directory name:
-
-```bash
-basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
-```
-
-2. Otherwise the basename of the current working directory only (`basename "$PWD"`), never a full path.
-
-Resolve `<session-slug>` as a lowercase hyphen-case slug of the session name, e.g. `nmp-relay-identity-model`. Use `YYYY-MM` (year and month) as the date prefix, not the full day, so a session that spans days stays in one folder.
-
-Create the directory and `manifest.json` on first write. If an existing workspace clearly matches the same session, reuse it instead of creating another. Do not write session files into the project tree.
-
-The workspace is the single source of truth for the session. The viewer reads it; the agent reads and writes it. Keep everything the human needs to review inside this directory.
+Resolve `<project-slug>` as the git repository name when inside a git work tree (`basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`), otherwise `basename "$PWD"` — never a full path. Resolve `<session-slug>` as lowercase hyphen-case of the session name with a `YYYY-MM` date prefix (month, not day, so a session spanning days stays in one folder).
 
 If the environment cannot write the workspace, do not apply this skill.
 
-## Deliverable and Notes
+## Block Document and Notes
 
-The workspace holds two documents with different disciplines.
+The workspace holds the block document (the outward, live truth) and `notes.md` (the append-only trail), with different disciplines.
 
-### deliverable.md — the outward document
+### Block document — the outward document
 
-This is the artifact the human reads and annotates. It is the live truth of the session and becomes the deliverable when the session converges. Rewrite and reorganize it freely as the working model evolves; it is not append-only.
+This is the artifact the human reads and annotates. It is a sequence of **named markdown blocks** you mutate through `wb change` (retroactively — rewrite and reorganize freely as the working model evolves; it is not append-only). Shape it to fit the session — plan, proposal, spec, design memo, or short brief — rather than forcing a fixed template. Whatever the shape, it must always include:
 
-Shape it to fit the session — a plan, proposal, spec, design memo, or short brief — rather than forcing a fixed template. Whatever the shape, it must always include:
-
-- **Requirements and constraints the user has stated.** Keep a dedicated, current section listing every requirement and constraint the user made explicit. Add to it as new ones appear; never drop one without noting the user lifted it.
+- **Requirements and constraints the user has stated.** Keep a dedicated, current block (e.g. `constraints`) listing every requirement and constraint the user made explicit. Add to it as new ones appear; never drop one without noting the user lifted it.
 - The core question and current working model.
 - The viable options and the emerging direction, with the decision frontier visible.
 - Open questions and material risks.
 
 Keep it skimmable. This is for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in `notes.md`.
 
-The viewer renders the deliverable as markdown with syntax highlighting and diagrams, so prefer rich, precise content over prose:
-- **Fenced code blocks with a language** get syntax highlighting — use ```` ```rust ```` , ```` ```ts ```` , ```` ```bash ```` , etc. (common language tags).
-- **Mermaid blocks** (```` ```mermaid ```` ) render as diagrams in the viewer — use them for architecture, state, sequence, and flow diagrams instead of describing shapes in prose.
+The viewer renders blocks as markdown with syntax highlighting, Mermaid diagrams, and footnotes, so prefer rich, precise content over prose: ```` ```rust ```` , ```` ```mermaid ```` , and `[^1]` footnotes all render. Start each block with an `# H1` title (the TOC lists headings, not block names).
 
 ### notes.md — the append-only log
 
-Append, do not rewrite. Each entry is a timestamped bullet under a dated heading. Capture the trail that produced the deliverable:
+Append, do not rewrite (`wb note "entry"`). Each entry is a timestamped bullet under a dated heading. Capture the trail: things the user made explicit, compact subagent findings with source, corrections (`Correction (HH:MM): …`), and adjacent-check results in `Finding / Implication / Confidence` form. Use the template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) for the first `notes.md`.
 
-- Things the user made explicit (requirements, preferences, constraints, decisions).
-- Useful research subagents surfaced (compact findings with source, not full reports).
-- Corrections the user made, logged as they happen (`Correction (HH:MM): …`).
-- Adjacent-check results in the compact `Finding / Implication / Confidence` form.
+## Block Document Model (`wb` CLI)
 
-Also track the structured exploration state here (status, core question, working model, observations, assumptions, hypotheses, constraints, preferences, risks, open questions, alternatives, rejected options, decisions). Update the state by editing the structured block at the top of `notes.md`; append new evidence and corrections below it. The deliverable is the retroactively-updated truth; the log is the append-only trail that explains how it got there.
-
-Use the full template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) when creating the first `notes.md`. Keep observations, assumptions, hypotheses, constraints, preferences, decisions, rejected options, risks, and open questions distinct. Do not promote a hypothesis, preference, or repeated suggestion into a decision unless the user explicitly agrees or the conversation clearly converges.
-
-## Exploration Loop
-
-At each turn, update `deliverable.md` (retroactively, as the live truth) and append to `notes.md` (as the trail) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis below when a real decision is open.
-
-### Always Explore Via Subagent
-
-The main agent must always dispatch a subagent to research the user's question and to open the adjacent field. The main agent never performs source inspection, runtime checks, doc/issue/ADR reads, or adjacent exploration directly in the main thread. The main agent's role is to frame the question, dispatch one or more subagents with a bounded prompt, collect their results, update the note, and synthesize the response.
-
-This keeps the main thread honest: the synthesis is built from verified subagent findings, not from the main agent's priors, and it prevents the speculate-then-walk-back pattern inline. The main agent may reason about and combine subagent results, but the underlying facts must come from a dispatched exploration, not from memory or inference.
-
-If no subagent or multi-agent tooling is available in this environment, say so explicitly to the user, record the limitation in the note, and do not substitute speculation. Either obtain the tooling or stop and ask the user how to proceed — never guess in place of a subagent check.
-
-### Answer The Literal Question, Then Open The Field
-
-The skill always does two things, in order:
-
-1. Answer what the user actually asked, with verified facts from source, docs, runtime, or prior art. Do not pivot to a redesign or recommendation until the literal question is answered.
-2. Proactively open the research field beyond the literal question: chase down adjacent and relevant context the user may not have thought to ask about — prior art, ownership boundaries, hidden constraints, related code paths, failure modes, comparable systems, terminology pressure. Surface each finding with context: what you checked, what you found, and why it bears on the user's question. Never drop a bare answer to a question the user did not ask.
-
-Apply the decision-frontier framing below only when there is an actual choice for the user to make: competing directions, a real tradeoff, or a design the user is actively revising. For a purely factual question, the response is the verified answer plus the proactively gathered adjacent context — not a recommended direction or a synthesis of options the user never raised.
-
-### Get Ahead Of The Next Move
-
-When you have good certainty about where the user is likely to take the inquiry or design next, dispatch a subagent in that direction proactively, before the user asks. Use the same bounded-result format. Only do this when the next move is genuinely likely — do not speculatively fire subagents in every possible direction. The goal is to have verified findings ready, with context, so the next turn is already derisked instead of starting cold.
-
-Surface a proactively-gathered-ahead finding the same way as any adjacent finding: what you checked, what you found, why you expected it to be the next move, and how it bears on the current question. If the user then goes a different direction, the finding is still useful context or a noted rejected option — never wasted.
-
-### Allocate Attention By Decision Relevance
-
-Shape the response as a flexible attention gradient: move loosely from material least likely to need user input toward material most likely to need it. Do not turn this into mandatory sections, symbols, or a fixed template.
-
-- Compress explicit agreement and settled direction aggressively. A label or short bullet is usually enough; do not re-argue what the user already chose.
-- Keep strong agent-selected defaults brief and distinguish them from user-approved decisions as assumptions, proposed defaults, or emerging direction.
-- State supporting evidence compactly. Explain contrary evidence in proportion to how much it threatens the direction: mention mild caveats briefly or omit them, but give potential showstoppers enough context to evaluate.
-- Spend most of the explanation budget on the decision frontier. When the user needs to make a call, make the context vertically skimmable: what the choice controls, the viable options, the recommended default and why, and the meaningful consequence of each option.
-- When several choices remain, end with a very short recap of what deserves the user's attention next.
-
-Markers such as `✅` for agreement, `➡️` for a proposed default, or `❓` for a user decision can improve scanability, but they are illustrative rather than required. Preserve natural conversation, omit empty layers, and compress low-attention material before shortening decision context.
-
-Optimize for understanding before action. Answer probing questions directly, but keep the main thread oriented around the current decision frontier:
-
-- what is known
-- what is uncertain
-- which choice would change the design
-- what evidence would settle the uncertainty
-- what direction appears to be emerging
-- what the next useful question or check is
-
-Prefer these actions while the status is `exploring`, all dispatched as subagent tasks rather than done inline:
-
-- inspect existing source, docs, issues, plans, ADRs, logs, or runtime paths that bear on the question
-- compare alternatives against ownership boundaries, invariants, failure modes, and integration risks
-- ask the user a focused question only when subagent findings cannot disambiguate the direction safely
-- identify what evidence would change the recommendation
-
-Do not edit implementation files merely because a plausible direction appears.
-
-Do not mark a session `converging` merely because you have a preferred answer. Keep it `exploring` until the user has reacted to the direction or independent evidence has narrowed the realistic options.
-
-## User Overrides
-
-Obey direct user override commands immediately:
-
-- `show notes`: summarize or show the `notes.md` path and contents.
-- `show deliverable`: summarize or show the `deliverable.md` path and contents.
-- `open viewer`: (re)launch the live viewer for the current workspace and open it in the browser.
-- `rename this session`: rename the session and update `manifest.json` (and the workspace dir name if practical).
-- `stop tracking this`: mark the session `archived` in `manifest.json` and stop updating it.
-- `forget that`: remove or revise the affected content. Revise `deliverable.md` retroactively; log the removal in `notes.md`.
-- `that was not a decision`: move the item out of decisions and into hypothesis, preference, rejected option, or open question in `notes.md`, and reflect the change in `deliverable.md`.
-- `mark this as decided`: mark the session `decided` in `manifest.json`, unless doing so would create a false record; if unclear, record the user's command as the decision signal.
-- `split this into a new session`: create a separate workspace and move the relevant context.
-- `merge this with the previous session`: merge only related explorations and preserve distinct decisions/risks.
-- `save this now`: flush the current `deliverable.md` and `notes.md` without bypassing the convergence gate for canonical project artifacts.
-- `do not run background agents here`: stop proactive adjacent exploration for this session unless the user later re-enables it.
-
-When the user corrects an interpretation, update `deliverable.md` retroactively so it reflects the corrected model, and append the correction to `notes.md` as a log entry. Do not leave stale claims standing in the deliverable.
-
-## Session Boundaries
-
-Pause, close, or split the session when the user changes topics, moves into execution, starts a materially different design thread, the current thread becomes stale, or the user explicitly stops tracking.
-
-Do not merge unrelated explorations just because they happened in the same conversation. If implementation starts, carry the notes forward as context, but stop treating the execution work as open-ended exploration unless new unresolved design questions appear.
-
-## Adjacent Exploration
-
-Adjacent exploration is part of the subagent dispatch above, not a separate fallback. When an adjacent question would materially derisk the discussion, dispatch a background subagent without asking the user first, using the template below. The main agent does not perform adjacent exploration inline.
-
-Prefer one high-leverage adjacent exploration at a time. Do not launch background work for curiosity, obvious facts, or questions unlikely to materially affect the design.
-
-Good adjacent checks include prior art, existing code paths, ownership boundaries, hidden constraints, terminology or naming pressure, comparable systems, standards/protocol behavior, failure modes, migration/testing/performance risks, security or privacy implications, operational complexity, reversibility, cost of being wrong, sibling projects, and runtime evidence that could confirm or falsify the working model.
-
-Briefly tell the user what is being checked and why, for example:
-
-```text
-I am checking the ownership boundary and the existing runtime path to see whether that lines up with the design we are sketching.
-```
-
-Use this background-agent prompt template:
-
-```text
-Context: I am helping the user explore `<session name>`. We are not implementing yet. Current working model: `<short model>`. Open question: `<question>`. Explore `<specific adjacent area>` using available repo/source context. Do not produce a long report. Do not modify files. Return only this compact format:
-
-Adjacent check: [question]
-Finding: [1-3 sentence synthesis]
-Implication: [how this affects the current design]
-Confidence: [low/medium/high]
-Suggested note update: [optional]
-```
-
-Summarize the result into `notes.md`. Bring only the relevant conclusion back to the user, framed with context: what was checked, what was found, and why it bears on the user's question or the current design. Never drop a bare answer to a question the user did not ask — if the finding is worth surfacing, say what it is and why it matters. If the result contradicts the current model, surface that clearly and update `deliverable.md`. Do not paste large background reports into the main conversation.
-
-## Live Viewer and Comments
-
-The whiteboard root (`~/whiteboard`) has a localhost web viewer (`whiteboard/viewer`) that serves an **explorer** plus a per-session view. The explorer lists every project's sessions with **unread badges** (agent replies the human hasn't opened yet); each session view renders `deliverable.md` and lets the human select any span and write a comment anchored to that text **at the current document version**. Comments are W3C Web Annotation JSON files in `comments/`. The viewer watches the filesystem and re-renders live whenever any deliverable, notes, or comments change.
-
-### Launch the viewer
-
-Launch one viewer for the whole root (not per session) as a background monitor and open it in the browser:
-
-```bash
-node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
-```
-
-`<skill-dir>` is the directory containing this `SKILL.md`. The server binds to `127.0.0.1:4318` (override with `--port`) and serves every session under the root. Keep it running across sessions; tell the human the root URL (`http://127.0.0.1:4318/`) and the direct link to the current session: `http://127.0.0.1:4318/session/<project-slug>/<session-slug>`.
-
-**If the whiteboard pi extension is installed** (it auto-discovers from `~/.pi/agent/extensions/whiteboard/`), it already keeps the viewer running and watches for new comments/chat — do not launch the server or `wait-for-comment.mjs` yourself. It wakes you with a `[whiteboard] New …` message when a human comment or chat lands; follow the reply steps below. Use the bash recipes below only when the extension is not present.
-
-The viewer auto-snapshots `deliverable.md` into `versions/<sha12>.md` on every change, so a comment's anchored version can always be recovered even after later edits. Opening a session marks it seen and clears its unread badge.
-
-### Watch for new comments and chat, and reply
-
-The human will leave comments in the viewer and may also send chat messages from the viewer's Chat tab — not in the host conversation. To respond, run the inbox watcher for the current session as a background monitor:
-
-```bash
-node "<skill-dir>/whiteboard/viewer/wait-for-comment.mjs" "<session-dir>"
-```
-
-It baselines existing items, then exits (printing a token) as soon as there is a new actionable item: a top-level human comment with no agent reply, or a human chat message with no agent chat reply after it. The token is `comment:<urn:uuid>` or `chat:<urn:uuid>`. Wire its completion to wake you (the monitor's `onDone` prompt), then handle by kind:
-
-**`comment:<id>`** — an anchored question on the deliverable:
-1. Read the new comment from its file in `comments/`.
-2. Answer it. Often the answer also changes `deliverable.md` or adds a `notes.md` entry — make those edits too.
-3. Write a **reply annotation** file into `comments/` with `motivation: "replying"`, `creator.name: "agent"`, and `target: { id: <parent urn:uuid>, type: "Annotation" }` so the reply threads under the question in the viewer. The W3C Web Annotation shape is specified in [references/annotations.md](references/annotations.md).
-4. If the comment is fully settled (the question is answered and the change is in), **mark it resolved** so it stops counting as actionable and renders collapsed/greyed: POST to the running viewer `curl -sX POST http://127.0.0.1:4318/api/session/<project-slug>/<session-slug>/resolved -H 'Content-Type: application/json' -d '{"id":"<parent urn:uuid>","resolved":true,"by":"agent"}'` (or merge the id into `.resolved.json`). Resolved comments do not wake the agent. Either the human or the agent can resolve; unresolve the same way with `"resolved":false`.
-
-**`chat:<id>`** — a free-form message from the webapp chat tab:
-1. Read the message from its file in `chat/` (JSON: `{ id, role, text, created }`).
-2. Respond appropriately — this is a normal turn of conversation about the session. Update `deliverable.md` and/or `notes.md` if the message changes the model, and answer any question it raises.
-3. Write an **agent chat reply** file into `chat/` with `role: "agent"`, `creator`-free shape `{ id: "urn:uuid:…", role: "agent", text, created }` so it renders in the viewer's Chat tab. (The viewer reads any `.json` in `chat/` with those fields.)
-
-In both cases, relaunch the watcher for the next item. The viewer's filesystem watch picks up the new file and renders it live; no restart needed.
-
-Do not answer a comment or chat only in the host conversation — the human is reviewing in the viewer, so the reply must live in `comments/` or `chat/` to appear there. Use the host conversation to surface that you replied and to discuss anything that changes the direction.
-
-## Marking something for the human's attention
-
-When a section of `deliverable.md` needs the human to look at it (an open question pinned to specific text, a risk they must sign off on, a choice that is theirs to make), mark it with a **highlighting annotation**. The viewer renders it as an amber highlight in the document with a ⚑ flag, an amber margin card carrying your reason, and a floating "⚑ N to review" pill that jumps to the next marker (DocuSign-style). The human or you can dismiss it once reviewed (it reuses the resolve mechanism).
-
-Write a file into `comments/` named `<timestamp>-<idhint>-attention.json` with the W3C Web Annotation shape, `motivation: "highlighting"`, anchored to the exact text:
-
-```json
-{
-  "@context": "http://www.w3.org/ns/anno.jsonld",
-  "type": "Annotation",
-  "id": "urn:uuid:<uuid>",
-  "motivation": "highlighting",
-  "created": "<ISO>",
-  "creator": { "type": "Person", "name": "agent" },
-  "body": { "type": "TextualBody", "value": "Why this needs your attention (one or two sentences).", "format": "text/markdown", "language": "en" },
-  "target": {
-    "source": "deliverable.md",
-    "version": "<current 12-char sha>",
-    "selector": [
-      { "type": "TextQuoteSelector", "exact": "<exact quoted text>", "prefix": "<up to 32 chars before>", "suffix": "<up to 32 chars after>" },
-      { "type": "TextPositionSelector", "start": <n>, "end": <n> }
-    ]
-  }
-}
-```
-
-Get the selectors the same way the viewer does: `exact` is the verbatim text, `prefix`/`suffix` are ~32 chars of surrounding context, and `start`/`end` are character offsets within the document's text content. Use `highlighting` only for things that genuinely need the human — do not litter the document. Dismiss a marker by POSTing to the running viewer's `/api/session/<project-slug>/<session-slug>/resolved` with `{"id":"<urn:uuid>","resolved":true,"by":"agent"}`.
-
-## Block document model (`wb` CLI)
-
-The block model is the direction for the deliverable: the document is a sequence of **named markdown blocks** stored in `document.json` (no `deliverable.md` on disk). Each block is `{ name, md, flags? }` — a chunk of markdown with a stable name the agent picks (`goal`, `tradeoffs`, `open-questions`). Comments live inside `document.json`, anchored to the block `name` (with a `TextQuoteSelector` kept only as a repair hint for in-block span highlight). Flags (`needs-attention`, `decided`, `superseded`) are a set on the block. The agent reads and mutates the document **only through the `wb` CLI** (the pi extension wraps `wb` and sets `WB_SESSION`). This gives stable comment anchors (a comment stays attached to its block through edits to other blocks) and semantic change tracking.
-
-Run `wb` from the skill's `bin/wb` shim or `node <skill-dir>/whiteboard/cli/main.mjs …`. Core commands:
+The document is the fold over `changes/<rev>.json` (append-only; no `document.json` state file). Each `wb change send` appends one atomic change file with a human title and N ops. Any past version is the fold up to that rev. Comments and labels are one `attach` op discriminated by `kind` (`comment`, `needs-attention`, `decided`, …) — same anchor (block + optional selector), same lifecycle (active/resolved/removed); only the UI rendering differs per kind.
 
 ```bash
 wb new <slug> [--from <md-file>]                # create a block-doc session
-wb read [--md|--json]                            # project: tagged <name>…</name> (default) / plain md / raw tree
-wb note "trail entry"                             # append to notes.md
+wb use <slug>                                    # set current session (claims it for this agent)
+wb read [--md|--json]                            # project the doc (default: tagged <name>…</name>)
+wb note "trail entry"                            # append to notes.md
 # Mutations: ONE interface — a staging transaction. `wb change "<title>"` opens it
 # (only one at a time), `wb change <op> …` stages ops, `wb change send` commits them
-# as one change (one rev, one human title). Ops are intent — comment/reply/resolve/
-# flag ids + attachment state are derived for you. A staging left open >5m auto-sends
-# when you next start a new `wb change "<title>"`.
+# as one change (one rev, one title). Ops are intent — ids + attachment state are
+# derived for you. A staging left open >5m auto-sends when you next start a new one.
 wb change "<title>" [--summary S]                # START a staging transaction
-wb change edit <block> (--file f|- | --text T | --diff f|-)   # stage: replace a block's md (or apply a block-scoped diff)
 wb change add <name> [--before X|--after X] (--file f|- | --text T)   # stage: add a block
+wb change edit <block> (--file f|- | --text T | --diff f|-)           # stage: replace a block's md
 wb change move <name> --before X|--after X       # stage: reorder
-wb change rename <old> <new>                      # stage: rename (cascades comments)
-wb change remove <name> [name…]                  # stage: delete block(s) + their comments
+wb change rename <old> <new>                      # stage: rename (cascades attachments)
+wb change remove <name> [name…]                  # stage: delete block(s) + their attachments
 wb change comment <name> "text" [--exact "quote"] # stage: comment on a block (auto selector with --exact)
 wb change reply <thread-id> "text"               # stage: reply in a thread
-wb change flag <name> <flag> [--clear]            # stage: set/clear a block flag (needs-attention|decided|…)
-wb change attention <name> "reason"               # stage: needs-attention flag + amber card
 wb change resolve <thread-id>                    # stage: resolve a comment
 wb change unresolve <thread-id>                  # stage: reopen a comment
+wb change flag <name> <flag> [--clear]            # stage: set/clear a block label (needs-attention|decided|…)
+wb change attention <name> "reason"               # stage: needs-attention label + amber card
 wb change amend <thread-id> [--text T] [--exact "quote"]   # stage: edit an attachment's body or anchor
 wb change detach <thread-id>                     # stage: remove an attachment
 wb change status                                 # peek at staged ops
 wb change send                                   # COMMIT staged ops as one change
 wb change discard                                # abort the staging transaction
-# Identify yourself: pass --by <your-name> (or set AGENT_NAME / AGENT_IDENTITY)
-# using your stable agent name per the home-directory skill. wb records it as the
-# change author and auto-stamps provenance (pid, iTerm pane GUID, pi session id)
-# it gathers from the environment — you never pass provenance yourself.
+# Pass --by <your-name> (or set AGENT_NAME) so wb records you as the change author.
+# Scope: --session <project>/<slug> → WB_SESSION env → ~/.wb/current. The pi
+# extension sets WB_SESSION for you; pass --session explicitly if it points elsewhere.
 ```
 
-Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block names and boundaries:
+Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block boundaries:
 
 ```
 <goal>
@@ -332,20 +125,140 @@ We favor **named blocks** over flat markdown.
 </tradeoffs>
 ```
 
-Session scope resolves from `--session <project>/<slug>` → `WB_SESSION` env → `~/.wb/current` (set by `wb use`). The pi extension sets `WB_SESSION` for you. Prefer the block model for new sessions; the legacy `deliverable.md` + per-file W3C comment path (above) is being superseded and will be migrated in a follow-up once the viewer renders `document.json`.
+A typical first-turn seed:
+
+```bash
+wb new 2026-08-nmp-relay-identity-model
+wb change "seed session" 
+wb change add goal --text "# Goal\nResolve how NMP relay identity is modeled."
+wb change add constraints --text "# Constraints\n- Must survive key rotation."
+wb change add open-questions --text "# Open Questions\n- Is the relay identity per-key or per-session?"
+wb change send
+```
+
+## Exploration Loop
+
+At each turn, mutate the block document via `wb change` (retroactively, as the live truth) and append to `notes.md` via `wb note` (as the trail) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis below when a real decision is open.
+
+### Always Explore Via Subagent
+
+The main agent must always dispatch a subagent to research the user's question and to open the adjacent field. The main agent never performs source inspection, runtime checks, doc/issue/ADR reads, or adjacent exploration directly in the main thread. The main agent's role is to frame the question, dispatch one or more subagents with a bounded prompt, collect their results, update the note, and synthesize the response. This keeps the main thread honest: the synthesis is built from verified subagent findings, not from the main agent's priors. If no subagent tooling is available, say so explicitly, record the limitation, and do not substitute speculation.
+
+### Answer The Literal Question, Then Open The Field
+
+1. Answer what the user actually asked, with verified facts from source, docs, runtime, or prior art. Do not pivot to a redesign until the literal question is answered.
+2. Proactively open the research field beyond the literal question: chase adjacent and relevant context the user may not have thought to ask about — prior art, ownership boundaries, hidden constraints, related code paths, failure modes, comparable systems. Surface each finding with context: what you checked, what you found, and why it bears on the user's question. Never drop a bare answer to a question the user did not ask.
+
+Apply the decision-frontier framing only when there is an actual choice: competing directions, a real tradeoff, or a design the user is actively revising. For a purely factual question, the response is the verified answer plus proactively gathered adjacent context — not a recommended direction.
+
+### Get Ahead Of The Next Move
+
+When you have good certainty about where the user is likely to take the inquiry next, dispatch a subagent in that direction proactively, before the user asks. Use the same bounded-result format. Only do this when the next move is genuinely likely — do not speculatively fire subagents in every direction.
+
+### Allocate Attention By Decision Relevance
+
+Shape the response as a flexible attention gradient from material least likely to need user input toward material most likely to need it. Compress explicit agreement and settled direction aggressively; keep agent-selected defaults brief and distinguished from user-approved decisions; spend most of the explanation budget on the decision frontier. When several choices remain, end with a very short recap of what deserves the user's attention next. Markers like `✅`/`➡️`/`❓` are illustrative, not required.
+
+Prefer these actions while status is `exploring`, all dispatched as subagent tasks: inspect source/docs/issues/ADRs/logs/runtime; compare alternatives against ownership boundaries, invariants, failure modes, integration risks; ask the user a focused question only when subagent findings cannot disambiguate; identify what evidence would change the recommendation. Do not edit implementation files merely because a plausible direction appears. Do not mark a session `converging` merely because you have a preferred answer.
+
+## User Overrides
+
+Obey direct user override commands immediately:
+
+- `show notes`: `wb note` trail / show `notes.md`.
+- `show document`: `wb read` (or `wb read --md`).
+- `open viewer`: (re)launch the live viewer for the current session.
+- `rename this session`: `wb change rename` the relevant blocks / update `manifest.json`.
+- `stop tracking this`: mark the session `archived` in `manifest.json` and stop updating it.
+- `forget that`: remove or revise the affected block via `wb change edit`/`remove`; log the removal via `wb note`.
+- `that was not a decision`: move the item out of decisions into hypothesis/preference/rejected/open-question (edit the block via `wb change edit`, log via `wb note`).
+- `mark this as decided`: mark the session `decided` in `manifest.json`, unless doing so would create a false record.
+- `save this now`: `wb change send` any open staging.
+- `do not run background agents here`: stop proactive adjacent exploration unless the user re-enables it.
+
+When the user corrects an interpretation, update the block document retroactively via `wb change edit` so it reflects the corrected model, and append the correction to `notes.md` via `wb note`. Do not leave stale claims standing in the document.
+
+## Session Boundaries
+
+Pause, close, or split the session when the user changes topics, moves into execution, starts a materially different design thread, the current thread becomes stale, or the user explicitly stops tracking. Do not merge unrelated explorations just because they happened in the same conversation.
+
+## Adjacent Exploration
+
+Adjacent exploration is part of the subagent dispatch, not a separate fallback. When an adjacent question would materially derisk the discussion, dispatch a background subagent without asking first. Prefer one high-leverage adjacent exploration at a time. Good checks: prior art, existing code paths, ownership boundaries, hidden constraints, terminology pressure, comparable systems, standards behavior, failure modes, migration/testing/performance risks, security/privacy implications, reversibility, cost of being wrong, runtime evidence. Briefly tell the user what is being checked and why.
+
+Background-agent prompt template:
+
+```text
+Context: I am helping the user explore `<session name>`. Not implementing yet. Current working model: `<short model>`. Open question: `<question>`. Explore `<specific adjacent area>` using available repo/source context. Do not produce a long report. Do not modify files. Return only this compact format:
+
+Adjacent check: [question]
+Finding: [1-3 sentence synthesis]
+Implication: [how this affects the current design]
+Confidence: [low/medium/high]
+Suggested note update: [optional]
+```
+
+Summarize the result into `notes.md` (`wb note`). Bring only the relevant conclusion back to the user, framed with context. If the result contradicts the current model, surface that clearly and update the block document via `wb change`.
+
+## Live Viewer and Comments
+
+The whiteboard root (`~/whiteboard`) has a localhost web viewer (`whiteboard/viewer`) that serves an **explorer** plus a per-session view. The explorer lists every project's sessions with unread badges; each session view renders the block document and lets the human select any span and write a comment anchored to that block at the current version. The viewer watches the filesystem and re-renders live whenever a change file, note, or chat message lands.
+
+### Launch the viewer
+
+One viewer serves the whole root (not per session):
+
+```bash
+node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
+```
+
+`<skill-dir>` is the directory containing this `SKILL.md`. It binds to `127.0.0.1:4318` (override with `--port`). Tell the human the root URL (`http://127.0.0.1:4318/`) and the direct link to the current session: `http://127.0.0.1:4318/session/<project-slug>/<session-slug>` (a path, not a hash).
+
+**If the whiteboard pi extension is installed** (it auto-discovers from `~/.pi/agent/extensions/whiteboard/`), it already keeps the viewer running and watches for new comments/chat — do not launch the server yourself. It wakes you with a `[whiteboard] New …` message when a human comment or chat lands; follow the reply steps below.
+
+### Reply to comments and chat
+
+Comments and chat come from the viewer, not the host conversation. The pi extension (or `wait-for-comment.mjs` if no extension) wakes you with `[whiteboard] New comment on block "<block>" … (id <id>)` or `[whiteboard] New chat …`. Reply through `wb`, not by writing files by hand:
+
+**Comment** (`[whiteboard] New comment on block "goal" … (id c-xxxxx)`):
+```bash
+wb change "reply to c-xxxxx" --session <project>/<slug>
+wb change reply c-xxxxx "your answer"
+wb change resolve c-xxxxx        # if fully settled
+wb change send
+```
+If the answer changes the document, stage those `edit`/`add` ops in the same transaction before `wb change send`.
+
+**Chat** (`[whiteboard] New chat …`): chat is a free-form conversation. There is no `wb chat` command — write an agent reply file directly into the session's `chat/` dir so it renders in the viewer's Chat tab:
+```bash
+sess=~/whiteboard/<project>/<slug>
+ts=$(node -e 'console.log(Date.now())'); id=$(node -e 'console.log(Math.random().toString(16).slice(2,8))')
+cat > "$sess/chat/$ts-$id.json" <<EOF
+{ "id": "urn:uuid:agent-$id", "role": "agent", "text": "your reply", "created": "$(node -e 'console.log(new Date().toISOString())')" }
+EOF
+```
+Update the block document via `wb change` if the message changes the model.
+
+Do not answer a comment or chat only in the host conversation — the human is reviewing in the viewer, so the reply must land in the change log (comments) or `chat/` (chat) to appear there. Use the host conversation to surface that you replied and to discuss anything that changes the direction.
+
+## Marking something for the human's attention
+
+When a block needs the human to look at it (an open question, a risk they must sign off on, a choice that is theirs), mark it with a needs-attention label via `wb` — the viewer renders it as an amber card + flag:
+
+```bash
+wb change "flag <block> for attention" --session <project>/<slug>
+wb change attention <block> "Why this needs your attention (one or two sentences)."
+wb change send
+```
+
+Use it only for things that genuinely need the human — do not litter the document. Dismiss it with `wb change resolve <thread-id>` once reviewed.
 
 ## Convergence and Promotion
 
-Move status from `exploring` to `converging` when one direction is becoming stronger but important assumptions or risks remain open. Do not mark a session `converging` only because the agent has a preferred answer.
+Move status from `exploring` to `converging` when one direction is becoming stronger but important assumptions or risks remain open. Move to `decided` only on a clear decision signal (the user explicitly choosing, asking to write it up, asking to implement, or repeatedly treating one direction as agreed after alternatives were considered).
 
-Move status to `decided` only when there is a clear decision signal, such as the user explicitly choosing a direction, asking to write it up, asking to implement, or repeatedly treating one direction as the agreed model after alternatives have been considered.
-
-Promote the session to a durable project artifact only after the session is `decided`. The deliverable already is a draft of that artifact: shape the final ADR, issue, planning note, spec, or roadmap entry from `deliverable.md`, carrying over the requirements/constraints section verbatim. Prefer updating an existing artifact over creating a new one. Keep `notes.md` as the trail that produced it.
-
-Do not open GitHub issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. Move to implementation only when the user directly asks for it or the agreed direction is clear and the next requested action requires implementation.
-
-After promotion, update `manifest.json` status to `decided` (then `archived` when it no longer needs active updates) and record the follow-up artifact path or URL in both `deliverable.md` and `notes.md`.
+Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document (`wb read --md` to export), carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep `notes.md` as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, update `manifest.json` status to `decided` (then `archived`) and record the follow-up artifact path in the document and `notes.md`.
 
 ## Reference
 
-Read [references/note-schema-and-examples.md](references/note-schema-and-examples.md) when creating the first `notes.md`, and [references/annotations.md](references/annotations.md) when writing or replying to comments. Read either when checking trigger edge cases or promoting a decided exploration into a durable artifact.
+Read [references/note-schema-and-examples.md](references/note-schema-and-examples.md) when creating the first `notes.md`. The legacy per-file W3C annotation path (`references/annotations.md`) is superseded by the `wb` attachment model; read it only if you are migrating an old `deliverable.md` session.
