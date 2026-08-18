@@ -629,3 +629,9 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
 }
 /* composer when rendered inside the margin rail (not a floating popover) */
 .margin-rail .composer { width: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.16); }
+.margin-rail .thread .excerpt-quote.stale {
+  color: #b45309;
+  border-left: 2px solid #d97706;
+  padding-left: 6px;
+}
+:root[data-theme="dark"] .margin-rail .thread .excerpt-quote.stale { color: #fbbf24; border-left-color: #d97706; }

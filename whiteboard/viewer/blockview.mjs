@@ -124,7 +124,7 @@ export function initBlockViewer(rootEl, project, slug) {
   const diffMarkReadEl = document.getElementById("diff-markread");
   const docWrapEl = document.getElementById("doc-wrap");
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {},
+  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
     diffMode: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, diffBeforeDoc: null, diffAfterDoc: null };
 
   const composer = initBlockComposer({
@@ -142,6 +142,7 @@ export function initBlockViewer(rootEl, project, slug) {
 
   function renderBlocks() {
     docEl.innerHTML = "";
+    state.anchored = {};
     for (const b of state.doc?.blocks || []) {
       const sec = document.createElement("section");
       sec.className = "block";
@@ -153,8 +154,14 @@ export function initBlockViewer(rootEl, project, slug) {
       }
       sec.innerHTML = `<div class="block-head"><span class="block-name">${esc(b.name)}</span>${flags}</div><div class="block-md">${renderMarkdown(b.md)}</div>`;
       docEl.appendChild(sec);
-      // Only highlight spans for OPEN comments; resolved comments clear their mark.
-      for (const c of commentsOn(b.name)) if (!state.resolved.has(c.id)) highlightIn(sec.querySelector(".block-md"), c.selector);
+      // Highlight spans for OPEN comments and record which anchors still match the
+      // current text. state.anchored[id] === true  -> highlighted in the doc (card
+      // omits the quote); false -> anchor no longer matches (stale, shown in the
+      // card); undefined -> resolved comment (not highlighted this pass, shown).
+      for (const c of commentsOn(b.name)) {
+        if (state.resolved.has(c.id)) continue;
+        state.anchored[c.id] = highlightIn(sec.querySelector(".block-md"), c.selector);
+      }
     }
   }
 
@@ -167,7 +174,16 @@ export function initBlockViewer(rootEl, project, slug) {
     const card = document.createElement("div");
     card.className = "thread" + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "") + (state.collapsed[c.id] ? " collapsed" : "");
     card.dataset.annoId = c.id;
-    const quote = (c.selector && c.selector.exact) ? `<span class="excerpt-quote">“${esc(c.selector.exact)}”</span>` : "";
+    // Show the anchored text inside the card ONLY when it is NOT highlighted in the
+    // document. When the anchor still matches, the highlight in the main text is the
+    // indicator and the card omits the quote. A stale anchor (highlight attempted
+    // but failed) gets a .stale marker + title; resolved comments show the quote
+    // without the stale marker.
+    const hasSel = !!(c.selector && c.selector.exact);
+    const showQuote = hasSel && !state.anchored[c.id];
+    const stale = hasSel && state.anchored[c.id] === false;
+    const staleTitle = stale ? ` title="Anchor no longer matches the current block (it may have been edited)"` : "";
+    const quote = showQuote ? `<span class="excerpt-quote${stale ? " stale" : ""}"${staleTitle}>“${esc(c.selector.exact)}”</span>` : "";
     let replies = "";
     for (const r of c.replies || []) {
       replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when" data-at="${esc(r.at)}">${ago(r.at)}</span><div class="body">${renderBody(r.body)}</div></div>`;
