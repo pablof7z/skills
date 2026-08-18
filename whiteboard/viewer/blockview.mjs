@@ -6,6 +6,7 @@
 // separate viewer.mjs path; this module only runs for model === "blocks".
 
 import { initCodeBlocks } from "./codeblocks.mjs";
+import { initBlockComposer } from "./blockcomposer.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -29,19 +30,18 @@ function renderMarkdown(md) {
 function renderBody(text) { return renderMarkdown(text); }
 
 // Wrap the first occurrence of selector.exact (verified by prefix/suffix) in a
-// <mark> within a section's rendered DOM. Returns true if highlighted.
-function highlightIn(sectionEl, selector) {
+// <mark> within a block's rendered DOM. Returns true if highlighted.
+function highlightIn(blockMd, selector) {
   if (!selector || !selector.exact) return false;
-  const text = sectionEl.textContent;
+  const text = blockMd.textContent;
   let start = text.indexOf(selector.exact);
   if (start === -1) return false;
   if (selector.prefix && text.slice(Math.max(0, start - selector.prefix.length), start) !== selector.prefix) {
-    // prefix mismatch — try a prefix-guided search
     const pi = text.indexOf(selector.prefix);
     if (pi !== -1) start = pi + selector.prefix.length;
   }
   const end = start + selector.exact.length;
-  return wrapRange(sectionEl, start, end);
+  return wrapRange(blockMd, start, end);
 }
 
 // Walk text nodes, split, and wrap [start,end) in a <mark class=wb-anno>.
@@ -64,14 +64,6 @@ function wrapRange(root, start, end) {
   if (!ee) return false;
   const relE = end - ee.start;
   if (relE > 0 && relE < ee.node.nodeValue.length) ee.node.splitText(relE);
-  const wrapped = [];
-  let cur = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null).nextNode(), collecting = false;
-  while (cur) {
-    if (cur === startTail) collecting = true;
-    if (collecting) { wrapped.push(cur); if (cur === ee.node) break; }
-    cur = cur.nextSibling; // simplistic; tree walker re-entry below instead
-  }
-  // Re-walk to be safe (the above cur loop is unreliable across splits).
   const wrapped2 = [];
   const w3 = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
   let tn, on = false;
@@ -102,7 +94,7 @@ export function initBlockViewer(rootEl, project, slug) {
           <span class="conn" id="conn">live</span>
         </div>
         <div class="doc-scroll" id="doc-scroll">
-          <div class="doc-wrap doc-wrap-block" id="doc-wrap">
+          <div class="doc-wrap doc-wrap-block comments-on" id="doc-wrap">
             <article id="doc"></article>
             <div class="margin-rail" id="margin-rail" aria-label="Comments"></div>
           </div>
@@ -123,7 +115,15 @@ export function initBlockViewer(rootEl, project, slug) {
   const drawerEl = document.getElementById("notes-drawer");
   const gripEl = document.getElementById("notes-grip");
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, notes: "", resolved: new Set(), activeId: null };
+  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {} };
+
+  const composer = initBlockComposer({
+    docEl,
+    postComment: async (p) => {
+      await fetch(`${API}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p) });
+      await runRefresh();
+    },
+  });
 
   const whoClass = (n) => (String(n || "").toLowerCase() === "agent" ? "agent" : "user");
 
@@ -142,8 +142,45 @@ export function initBlockViewer(rootEl, project, slug) {
       }
       sec.innerHTML = `<div class="block-head"><span class="block-name">${esc(b.name)}</span>${flags}</div><div class="block-md">${renderMarkdown(b.md)}</div>`;
       docEl.appendChild(sec);
-      for (const c of commentsOn(b.name)) highlightIn(sec, c.selector);
+      // Only highlight spans for OPEN comments; resolved comments clear their mark.
+      for (const c of commentsOn(b.name)) if (!state.resolved.has(c.id)) highlightIn(sec.querySelector(".block-md"), c.selector);
     }
+  }
+
+  // Render one comment as a margin card. The resolve button lives in the excerpt
+  // row (always visible/clickable), NOT in the reply box. isResolved controls the
+  // toggle label; resolved cards are NOT faded (they only differ by label).
+  function renderCard(b, c, anchorY, lastBottom, isResolved) {
+    const card = document.createElement("div");
+    card.className = "thread" + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "");
+    card.dataset.annoId = c.id;
+    const when = (c.at || "").replace("T", " ").slice(0, 16);
+    let replies = "";
+    for (const r of c.replies || []) {
+      const rw = (r.at || "").replace("T", " ").slice(0, 16);
+      replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when">${esc(rw)}</span><div class="body">${renderBody(r.body)}</div></div>`;
+    }
+    card.innerHTML = `<div class="excerpt">on <code>${esc(b.name)}</code><span class="where">@ ${esc(when)}</span><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Resolve"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
+    const ta = card.querySelector("textarea");
+    const send = card.querySelector(".send");
+    ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
+    send.addEventListener("click", async () => {
+      const text = ta.value.trim(); if (!text) return;
+      send.disabled = true;
+      await fetch(`${API}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ block: b.name, text, creator: "user", replyTo: c.id }) });
+      await runRefresh();
+    });
+    card.querySelector(".cancel").addEventListener("click", () => { ta.value = ""; send.disabled = true; });
+    card.querySelector(".resolve-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await fetch(`${API}/resolved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, resolved: !isResolved, by: "user" }) });
+      await runRefresh();
+    });
+    card.addEventListener("click", (e) => { if (e.target.closest(".reply-box")) return; state.activeId = c.id; railEl.querySelectorAll(".thread").forEach((t) => t.classList.toggle("active", t === card)); });
+    railEl.appendChild(card);
+    const top = Math.max(anchorY, lastBottom + 8);
+    card.style.top = `${top}px`;
+    return top + card.offsetHeight;
   }
 
   function renderComments() {
@@ -153,38 +190,22 @@ export function initBlockViewer(rootEl, project, slug) {
       const sec = docEl.querySelector(`section[data-block-id="${cssEscape(b.name)}"]`);
       if (!sec) continue;
       const anchorY = sec.offsetTop;
-      for (const c of commentsOn(b.name)) {
-        const isResolved = state.resolved.has(c.id);
-        const card = document.createElement("div");
-        card.className = "thread" + (isResolved ? " resolved" : "") + (state.activeId === c.id ? " active" : "");
-        card.dataset.annoId = c.id;
-        const when = (c.at || "").replace("T", " ").slice(0, 16);
-        let replies = "";
-        for (const r of c.replies || []) {
-          const rw = (r.at || "").replace("T", " ").slice(0, 16);
-          replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when">${esc(rw)}</span><div class="body">${renderBody(r.body)}</div></div>`;
-        }
-        card.innerHTML = `<div class="excerpt">on <code>${esc(b.name)}</code><span class="where">@ ${esc(when)}</span></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button><button class="resolve-btn" type="button">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div></div>`;
-        const ta = card.querySelector("textarea");
-        const send = card.querySelector(".send");
-        ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
-        send.addEventListener("click", async () => {
-          const text = ta.value.trim(); if (!text) return;
-          send.disabled = true;
-          await fetch(`${API}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ block: b.name, text, creator: "user", replyTo: c.id }) });
-          await runRefresh();
-        });
-        card.querySelector(".cancel").addEventListener("click", () => { ta.value = ""; send.disabled = true; });
-        card.querySelector(".resolve-btn").addEventListener("click", async (e) => {
-          e.stopPropagation();
-          await fetch(`${API}/resolved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, resolved: !isResolved, by: "user" }) });
-          await runRefresh();
-        });
-        card.addEventListener("click", (e) => { if (e.target.closest(".reply-box")) return; state.activeId = c.id; railEl.querySelectorAll(".thread").forEach((t) => t.classList.toggle("active", t === card)); });
-        railEl.appendChild(card);
+      const all = commentsOn(b.name);
+      const open = all.filter((c) => !state.resolved.has(c.id));
+      const resolved = all.filter((c) => state.resolved.has(c.id));
+      for (const c of open) lastBottom = renderCard(b, c, anchorY, lastBottom, false);
+      if (resolved.length > 0) {
+        const expanded = !!state.showResolved[b.name];
+        const pill = document.createElement("div");
+        pill.className = "resolved-pill" + (expanded ? " expanded" : "");
+        pill.textContent = `${resolved.length} resolved ${expanded ? "▾" : "▸"}`;
+        pill.title = expanded ? "Hide resolved" : "Show resolved";
+        pill.addEventListener("click", () => { state.showResolved[b.name] = !expanded; renderComments(); });
+        railEl.appendChild(pill);
         const top = Math.max(anchorY, lastBottom + 8);
-        card.style.top = `${top}px`;
-        lastBottom = top + card.offsetHeight;
+        pill.style.top = `${top}px`;
+        lastBottom = top + pill.offsetHeight;
+        if (expanded) for (const c of resolved) lastBottom = renderCard(b, c, anchorY, lastBottom, true);
       }
     }
   }

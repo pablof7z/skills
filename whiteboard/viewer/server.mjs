@@ -48,6 +48,7 @@ function sessionDir(root, project, slug) {
 
 // ---- SSE clients ----
 const explorerClients = new Set();
+const reloadClients = new Set();
 const sessionClients = new Map(); // key "project/slug" -> Set<res>
 const sessionClientsFor = (key) => {
   if (!sessionClients.has(key)) sessionClients.set(key, new Set());
@@ -63,7 +64,7 @@ function sseStart(res) {
   });
   res.write(": hello\n\n");
   const keep = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 15000);
-  res.on("close", () => { clearInterval(keep); explorerClients.delete(res); for (const set of sessionClients.values()) set.delete(res); });
+  res.on("close", () => { clearInterval(keep); explorerClients.delete(res); reloadClients.delete(res); for (const set of sessionClients.values()) set.delete(res); });
   return res;
 }
 
@@ -135,6 +136,10 @@ async function handleSession(req, res, root, project, slug, rest) {
     const data = await readBody(req).catch(() => null);
     if (!data) return sendJson(res, 400, { error: "bad json" });
     if (blockDoc) {
+      if (data.replyTo) {
+        const r = B.postReply(dir, data.replyTo, data.text, data.creator || "user");
+        return sendJson(res, 201, r);
+      }
       if (!data.block) return sendJson(res, 400, { error: "block required" });
       const c = B.postComment(dir, { block: data.block, text: data.text, selector: data.selector, creator: data.creator || "user" });
       return sendJson(res, 201, c);
@@ -245,6 +250,19 @@ function main() {
     });
   } catch (e) { console.error("watch root failed:", e.message); }
 
+  // Hot reload: when a viewer asset (module/css/html) changes on disk, push a
+  // "reload" event to every connected page so the browser refreshes itself.
+  let reloadTimer = null;
+  try {
+    fs.watch(VIEWER_DIR, { recursive: true }, (_evt, filename) => {
+      if (!filename) return;
+      if (/\.(mjs|js|css|html)$/.test(filename)) {
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => broadcast(reloadClients, "reload", {}), 150);
+      }
+    });
+  } catch (e) { console.error("watch viewer failed:", e.message); }
+
   const server = http.createServer(async (req, res) => {
     try {
       const u = new URL(req.url, `http://localhost:${port}`);
@@ -266,6 +284,7 @@ function main() {
       // API
       if (p === "/api/sessions" && req.method === "GET") return sendJson(res, 200, { sessions: S.listSessions(root) });
       if (p === "/api/events" && req.method === "GET") { sseStart(res); explorerClients.add(res); return; }
+      if (p === "/api/reload" && req.method === "GET") { sseStart(res); reloadClients.add(res); return; }
 
       const sess = p.match(/^\/api\/session\/([^/]+)\/([^/]+)\/(.+)$/);
       if (sess) return await handleSession(req, res, root, sess[1], sess[2], sess[3]);

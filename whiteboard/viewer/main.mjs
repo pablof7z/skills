@@ -12,6 +12,12 @@ if (window.marked && window.markedFootnote) {
   try { window.marked.use(window.markedFootnote()); } catch (e) { console.warn("footnote extension failed:", e); }
 }
 
+// Hot reload: the server pushes a "reload" event when a viewer asset changes.
+if (typeof EventSource !== "undefined") {
+  const _rs = new EventSource("/api/reload");
+  _rs.addEventListener("reload", () => location.reload());
+}
+
 async function route() {
   const root = document.getElementById("root");
   root.innerHTML = "";

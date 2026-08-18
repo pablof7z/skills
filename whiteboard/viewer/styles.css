@@ -585,3 +585,16 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
 :root[data-theme="dark"] .flag-attention { background: #4a3502; color: #fde68a; }
 :root[data-theme="dark"] .flag-decided { background: #052e1a; color: #6ee7b7; }
 :root[data-theme="dark"] .flag-superseded { background: #2a2a2a; color: #9ca3af; }
+
+/* ---- block-doc resolved: subtle "N resolved" indicator (not a faded card) ---- */
+.resolved-pill {
+  position: absolute; left: 0; right: 6px;
+  font-size: 11px; color: var(--muted, #6b7280);
+  padding: 2px 8px; border-left: 2px solid var(--line, #e5e7eb);
+  cursor: pointer; user-select: none; opacity: 0.7;
+}
+.resolved-pill:hover { opacity: 1; color: var(--ink, #111); }
+.resolved-pill.expanded { border-left-color: var(--accent, #2f6feb); opacity: 0.9; }
+/* Resolved cards (shown when the pill is expanded) are NOT faded — only the
+   resolve-button label ("↺ resolved") marks their state. */
+.thread.is-resolved .resolve-btn { color: var(--agent, #6b7280); border-color: var(--line, #e5e7eb); }
