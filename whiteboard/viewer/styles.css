@@ -97,7 +97,8 @@ html, body {
   margin: 0 auto;
   padding: 36px 48px 120px 208px; /* left room for the floating TOC */
 }
-.doc-wrap.comments-on { padding-right: 300px; } /* right room for margin notes */
+.doc-wrap.comments-on { max-width: none; margin: 0; padding-right: 300px; } /* span full width so the margin rail docks to the viewport's right edge */
+.doc-wrap.comments-on > #doc { max-width: 760px; margin-left: auto; margin-right: auto; }
 /* When Comments tab is active, the margin rail IS the comment area; drop the
    420px sidebar so the document isn't squeezed by both. */
 .app.comments-on { grid-template-columns: 1fr; }
@@ -106,7 +107,7 @@ html, body {
 /* margin-note rail: shares the document scroll, cards positioned by anchor Y */
 .margin-rail {
   position: absolute;
-  top: 0; right: 20px; bottom: 0;
+  top: 0; right: 12px; bottom: 0;
   width: 272px;
   display: none;
 }
