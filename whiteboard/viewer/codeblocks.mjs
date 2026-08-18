@@ -1,5 +1,6 @@
-// Syntax highlighting (vendored highlight.js) + Mermaid rendering (lazy CDN).
-// Extracted from viewer.mjs to keep that file under the LOC limit.
+// Syntax highlighting (vendored highlight.js) + Mermaid rendering (lazy CDN),
+// plus a fullscreen overlay for code blocks and diagrams. Extracted from
+// viewer.mjs to keep that file under the LOC limit.
 
 export function initCodeBlocks() {
   let mermaidLoading = null;
@@ -47,10 +48,51 @@ export function initCodeBlocks() {
     }
   }
 
+  // Shared fullscreen overlay: a dark backdrop with the cloned content large,
+  // a title bar + close button, and Esc/click-outside to dismiss. One overlay
+  // at a time.
+  function openFullscreen(title, contentNode) {
+    const ov = document.createElement("div");
+    ov.className = "fs-overlay";
+    ov.innerHTML = `<div class="fs-bar"><span class="fs-title"></span><button class="fs-close" type="button" aria-label="Close">✕</button></div><div class="fs-content"></div>`;
+    ov.querySelector(".fs-title").textContent = title;
+    ov.querySelector(".fs-content").appendChild(contentNode);
+    document.body.appendChild(ov);
+    const close = () => { ov.remove(); document.removeEventListener("keydown", onKey); document.removeEventListener("fullscreenchange", onFs); };
+    const onKey = (e) => { if (e.key === "Escape") close(); };
+    const onFs = () => { if (!document.fullscreenElement) close(); };
+    ov.querySelector(".fs-close").addEventListener("click", close);
+    ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFs);
+    // Try the real browser fullscreen too (more "bi[g]" as requested); fall
+    // back gracefully if the browser rejects it.
+    if (ov.requestFullscreen) ov.requestFullscreen().catch(() => {});
+  }
+
+  // Add an expand affordance + open the overlay. Code blocks get a corner
+  // button (so text selection still works); diagrams (no text to select) are
+  // clickable as a whole.
+  function wireFullscreen(root) {
+    for (const pre of root.querySelectorAll("pre")) {
+      if (pre.querySelector("code.language-mermaid")) continue;
+      pre.classList.add("fs-target");
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "fs-expand"; btn.setAttribute("aria-label", "Open fullscreen"); btn.textContent = "⤢";
+      btn.addEventListener("click", (e) => { e.stopPropagation(); openFullscreen("Code", pre.cloneNode(true)); });
+      pre.appendChild(btn);
+    }
+    for (const m of root.querySelectorAll(".mermaid")) {
+      m.classList.add("fs-target", "fs-clickable");
+      m.addEventListener("click", () => openFullscreen("Diagram", m.cloneNode(true)));
+    }
+  }
+
   return {
     async enhance(root) {
       highlight(root);
       await renderMermaid(root);
+      wireFullscreen(root);
     },
   };
 }
