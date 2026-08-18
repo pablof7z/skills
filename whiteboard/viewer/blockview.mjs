@@ -7,6 +7,7 @@
 
 import { initCodeBlocks } from "./codeblocks.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
+import { initDiffMode } from "./blockdiff.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -91,8 +92,10 @@ export function initBlockViewer(rootEl, project, slug) {
           <span class="title" id="title">Whiteboard</span>
           <span class="status" id="status">exploring</span>
           <span class="version" id="version">v—</span>
+          <button class="diff-toggle" id="diff-toggle" type="button" title="Show changes">⇄</button>
           <span class="conn" id="conn">live</span>
         </div>
+        <div class="diff-bar" id="diff-bar" hidden><label>before <select id="diff-before"></select></label><span class="diff-arrow">→</span><label>after <select id="diff-after"></select></label><button class="diff-markread" id="diff-markread" type="button">Mark as read</button></div>
         <div class="doc-scroll" id="doc-scroll">
           <div class="doc-wrap doc-wrap-block comments-on" id="doc-wrap">
             <article id="doc"></article>
@@ -114,8 +117,15 @@ export function initBlockViewer(rootEl, project, slug) {
   const notesEl = document.getElementById("notes");
   const drawerEl = document.getElementById("notes-drawer");
   const gripEl = document.getElementById("notes-grip");
+  const diffBarEl = document.getElementById("diff-bar");
+  const diffToggleEl = document.getElementById("diff-toggle");
+  const diffBeforeEl = document.getElementById("diff-before");
+  const diffAfterEl = document.getElementById("diff-after");
+  const diffMarkReadEl = document.getElementById("diff-markread");
+  const docWrapEl = document.getElementById("doc-wrap");
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {} };
+  const state = { doc: null, notes: "", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {},
+    diffMode: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, diffBeforeDoc: null, diffAfterDoc: null };
 
   const composer = initBlockComposer({
     docEl,
@@ -237,6 +247,7 @@ export function initBlockViewer(rootEl, project, slug) {
       fetch(`${API}/notes`).then((r) => r.json()),
     ]);
     state.doc = d; state.notes = n.content || "";
+    state.viewedRev = Number(s.viewedVersion) || 0;
     state.resolved = new Set(Object.keys(s.resolved || {}));
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
@@ -247,7 +258,14 @@ export function initBlockViewer(rootEl, project, slug) {
     await codeblocks.enhance(docEl);
     renderComments();
     renderTOC();
+    if (state.diffMode) await diff.render();
   }
+
+  const diff = initDiffMode({
+    API, state, docEl, codeblocks, renderMarkdown,
+    diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl,
+    onExit: () => { renderBlocks(); renderComments(); renderTOC(); },
+  });
 
   function connectSSE() {
     const es = new EventSource(`${API}/events`);
@@ -258,6 +276,10 @@ export function initBlockViewer(rootEl, project, slug) {
   }
 
   gripEl.addEventListener("click", () => drawerEl.classList.toggle("open"));
+  diffToggleEl.addEventListener("click", () => state.diffMode ? diff.exit() : diff.enter());
+  diffBeforeEl.addEventListener("change", () => { state.beforeRev = diffBeforeEl.value === "current" ? "current" : Number(diffBeforeEl.value); diff.render(); });
+  diffAfterEl.addEventListener("change", () => { state.afterRev = diffAfterEl.value === "current" ? "current" : Number(diffAfterEl.value); diff.render(); });
+  diffMarkReadEl.addEventListener("click", diff.markRead);
   runRefresh().then(connectSSE);
 }
 

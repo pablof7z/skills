@@ -15,3 +15,64 @@
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* diff-mode chrome for the block viewer topbar + diff bar. */
+.diff-toggle {
+  font: inherit;
+  line-height: 1;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.diff-toggle:hover { border-color: var(--ink); }
+
+.diff-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9em;
+}
+.diff-bar[hidden] { display: none; }
+.diff-bar label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); }
+.diff-bar select {
+  font: inherit;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 4px;
+}
+.diff-arrow { color: var(--ink); opacity: 0.6; }
+.diff-markread {
+  margin-left: auto;
+  font: inherit;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.diff-markread:hover { border-color: var(--ink); }
+
+/* hide the comment rail while diff mode is on */
+.doc-wrap.diff-on .margin-rail { display: none; }
+
+/* added/removed block headers in diff mode */
+.block.wb-added .block-head .diff-block-sign { color: var(--agent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-right: 4px; }
+.block.wb-removed .block-head .diff-block-sign { color: var(--danger); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-right: 4px; }
+.block.wb-added .block-head .block-name { color: var(--agent); }
+.block.wb-removed .block-head .block-name { color: var(--danger); }
+
+/* diff-mode error notice */
+.diff-error {
+  padding: 16px;
+  color: var(--danger);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
