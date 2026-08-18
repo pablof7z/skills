@@ -22,10 +22,18 @@ export function getDocument(dir) {
   };
 }
 
-// Revision list (newest-first): { rev, at, title, by } for each change file.
+// Revision list (newest-first): { rev, at, title, by, changes, blocks } per
+// change file. `changes` = total ops; `blocks` = block-mutating ops (add/edit/
+// move/rename/remove) so the viewer auto-enters the diff only when a change
+// actually touched block content.
 export function listRevisions(dir) {
+  const BLOCK = new Set(["add", "edit", "move", "rename", "remove"]);
   return readChanges(dir)
-    .map((c) => ({ rev: c.rev, at: c.at, title: c.title, by: c.by }))
+    .map((c) => ({
+      rev: c.rev, at: c.at, title: c.title, by: c.by,
+      changes: (c.ops || []).length,
+      blocks: (c.ops || []).filter((o) => BLOCK.has(o.op)).length,
+    }))
     .sort((a, b) => b.rev - a.rev);
 }
 

@@ -95,7 +95,7 @@ export function initBlockViewer(rootEl, project, slug) {
           <button class="diff-toggle" id="diff-toggle" type="button" title="Show changes">⇄</button>
           <span class="conn" id="conn">live</span>
         </div>
-        <div class="diff-bar" id="diff-bar" hidden><label>before <select id="diff-before"></select></label><span class="diff-arrow">→</span><label>after <select id="diff-after"></select></label><button class="diff-markread" id="diff-markread" type="button">Mark as read</button></div>
+        <div class="diff-bar" id="diff-bar" hidden><label class="diff-label">before <div id="diff-before" class="rev-picker"></div></label><span class="diff-arrow">→</span><label class="diff-label">after <div id="diff-after" class="rev-picker"></div></label><button class="diff-markread" id="diff-markread" type="button">Done</button></div>
         <div class="doc-scroll" id="doc-scroll">
           <div class="doc-wrap doc-wrap-block comments-on" id="doc-wrap">
             <article id="doc"></article>
@@ -243,14 +243,16 @@ export function initBlockViewer(rootEl, project, slug) {
     }
   }
 
-  async function runRefresh() {
-    const [s, d, n] = await Promise.all([
+  async function runRefresh({ auto = false } = {}) {
+    const [s, d, n, rev] = await Promise.all([
       fetch(`${API}/session`).then((r) => r.json()),
       fetch(`${API}/document`).then((r) => r.json()),
       fetch(`${API}/notes`).then((r) => r.json()),
+      fetch(`${API}/revisions`).then((r) => r.json()).catch(() => ({ revisions: [] })),
     ]);
     state.doc = d; state.notes = n.content || "";
     state.viewedRev = Number(s.viewedVersion) || 0;
+    state.revisions = rev.revisions || [];
     state.resolved = new Set(Object.keys(s.resolved || {}));
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
@@ -261,7 +263,14 @@ export function initBlockViewer(rootEl, project, slug) {
     await codeblocks.enhance(docEl);
     renderComments();
     renderTOC();
-    if (state.diffMode) await diff.render();
+    if (state.diffMode) { await diff.render(); return; }
+    // A block-changing change came in since the user last clicked “Done”: jump
+    // into the diff, comparing last-viewed → current. Only on live (SSE)
+    // refresh, not the initial load, and only if there really are block changes.
+    if (auto && state.viewedRev > 0 && state.viewedRev < (d.rev ?? 0) &&
+        state.revisions.some((r) => r.rev > state.viewedRev && r.rev <= (d.rev ?? 0) && r.blocks > 0)) {
+      await diff.enter();
+    }
   }
 
   const diff = initDiffMode({
@@ -274,7 +283,7 @@ export function initBlockViewer(rootEl, project, slug) {
     const es = new EventSource(`${API}/events`);
     es.addEventListener("open", () => { connEl.textContent = "live"; connEl.classList.remove("bad"); });
     es.addEventListener("error", () => { connEl.textContent = "reconnecting…"; connEl.classList.add("bad"); });
-    es.addEventListener("refresh", () => runRefresh());
+    es.addEventListener("refresh", () => runRefresh({ auto: true }));
     return es;
   }
 

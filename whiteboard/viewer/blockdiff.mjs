@@ -25,25 +25,60 @@ export function ago(iso) {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-// Build the <option> list for a before/after select. value is a rev number or
-// the literal string "current". Semantic shortcuts (current, previous, last
-// viewed) are emitted first, then one row per real revision. Identical values
-// across the shortcuts and the revision list are deduped (first occurrence
-// wins). Pure.
-export function buildSelectOptions(revisions, currentRev, viewedRev) {
-  const out = [];
-  const seen = new Set();
-  const push = (value, label, group) => {
-    const key = String(value);
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ value, label, group });
+// Options for the rev picker: each { value, title, meta, group }. Per-revision
+// options show the change's TITLE (what the agent named it) + "N changes · ago".
+// Shortcuts (Current, Last viewed) are pinned at the top. Dedup by value.
+export function buildPickerOptions(revisions, currentRev, viewedRev) {
+  const out = []; const seen = new Set();
+  const revBy = new Map((revisions || []).map((r) => [r.rev, r]));
+  const cur = revBy.get(currentRev);
+  const push = (value, title, meta, group) => {
+    const key = String(value); if (seen.has(key)) return; seen.add(key);
+    out.push({ value, title, meta, group });
   };
-  push("current", "current", "shortcut");
-  if (Number.isFinite(currentRev)) push(currentRev - 1, "previous (current-1)", "shortcut");
-  if (viewedRev && viewedRev !== currentRev) push(viewedRev, "last viewed", "shortcut");
-  for (const r of revisions || []) push(r.rev, `rev ${r.rev} · ${ago(r.at)}`, "rev");
+  push("current", "Current", cur ? `${cur.changes || 0} changes · ${ago(cur.at)}` : "now", "shortcut");
+  if (viewedRev && viewedRev !== currentRev) {
+    const v = revBy.get(viewedRev);
+    push(viewedRev, "Last viewed (Done)", v ? `${v.changes || 0} changes · ${ago(v.at)}` : "—", "shortcut");
+  }
+  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, `${r.changes || 0} changes · ${ago(r.at)}`, "rev");
   return out;
+}
+
+// A custom dropdown (not a system <select>): a button showing the selected
+// option's title (semibold) + a muted "N changes · ago" line; click opens a
+// panel of all options grouped by shortcut/rev. Sets container.value and
+// dispatches "change" on pick so the existing wiring (reading el.value) works.
+function mountRevPicker(container, options, value) {
+  let panel = null;
+  let cur = options;
+  const find = (v) => cur.find((o) => String(o.value) === String(v)) || cur[0];
+  const renderBtn = () => {
+    const o = find(container.value);
+    container.innerHTML = `<button type="button" class="rev-picker-btn"><span class="rp-title">${esc(o?.title || "—")}</span><span class="rp-meta">${esc(o?.meta || "")}</span><span class="rp-caret">▾</span></button>`;
+    container.querySelector(".rev-picker-btn").addEventListener("click", (e) => { e.stopPropagation(); panel ? close() : open(); });
+  };
+  function open() {
+    panel = document.createElement("div"); panel.className = "rev-picker-panel";
+    let last = null; const rows = [];
+    for (const o of cur) {
+      if (o.group !== last && rows.length) rows.push(`<div class="rp-sep"></div>`);
+      last = o.group;
+      rows.push(`<div class="rp-opt ${String(o.value) === String(container.value) ? "sel" : ""}" data-value="${esc(o.value)}"><span class="rp-title">${esc(o.title)}</span><span class="rp-meta">${esc(o.meta)}</span></div>`);
+    }
+    panel.innerHTML = rows.join("");
+    container.appendChild(panel);
+    panel.addEventListener("click", (e) => {
+      const row = e.target.closest(".rp-opt"); if (!row) return;
+      container.value = row.dataset.value;
+      container.dispatchEvent(new Event("change", { bubbles: true }));
+      close(); renderBtn();
+    });
+    setTimeout(() => document.addEventListener("click", close, { once: true }), 0);
+  }
+  function close() { if (panel) { panel.remove(); panel = null; } }
+  container.value = value; renderBtn();
+  return { setOptions(opts, val) { cur = opts; container.value = val; renderBtn(); } };
 }
 
 // Render a whole document as a diff between beforeDoc and afterDoc. For each
@@ -102,13 +137,13 @@ export function initDiffMode({
   API, state, docEl, codeblocks, renderMarkdown,
   diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit,
 }) {
+  let beforePicker = null, afterPicker = null;
   function populateSelects() {
-    const opts = buildSelectOptions(state.revisions, state.doc?.rev ?? 0, state.viewedRev);
-    for (const sel of [diffBeforeEl, diffAfterEl]) {
-      sel.innerHTML = opts.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
-    }
-    diffBeforeEl.value = String(state.beforeRev);
-    diffAfterEl.value = String(state.afterRev);
+    const opts = buildPickerOptions(state.revisions, state.doc?.rev ?? 0, state.viewedRev);
+    if (!beforePicker) beforePicker = mountRevPicker(diffBeforeEl, opts, String(state.beforeRev));
+    else beforePicker.setOptions(opts, String(state.beforeRev));
+    if (!afterPicker) afterPicker = mountRevPicker(diffAfterEl, opts, String(state.afterRev));
+    else afterPicker.setOptions(opts, String(state.afterRev));
   }
 
   async function render() {
@@ -137,10 +172,9 @@ export function initDiffMode({
     state.diffMode = true;
     diffBarEl.hidden = false;
     docWrapEl.classList.add("diff-on");
-    try {
-      const res = await fetch(`${API}/revisions`);
-      state.revisions = (await res.json()).revisions || [];
-    } catch { state.revisions = []; }
+    if (!state.revisions?.length) {
+      try { const res = await fetch(`${API}/revisions`); state.revisions = (await res.json()).revisions || []; } catch { state.revisions = []; }
+    }
     state.beforeRev = state.viewedRev || ((state.doc?.rev ?? 1) - 1);
     state.afterRev = "current";
     populateSelects();
