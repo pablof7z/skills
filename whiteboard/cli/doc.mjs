@@ -98,8 +98,8 @@ export function fold(changes) {
         case "move": { const i = blocks.findIndex((x) => x.name === e.name); if (i >= 0) { const [b] = blocks.splice(i, 1); blocks.splice(insertIndex(blocks, e.before, e.after), 0, b); } break; }
         case "rename": { const b = blocks.find((x) => x.name === e.from); if (b) b.name = e.to; for (const a of att.values()) if (a.block === e.from) a.block = e.to; break; }
         case "remove": { const names = new Set(e.names || [e.name]); for (let i = blocks.length - 1; i >= 0; i--) if (names.has(blocks[i].name)) blocks.splice(i, 1); break; }
-        case "attach": att.set(e.id, makeAtt(e, at)); break;
-        case "reply": { const a = att.get(e.to ?? e.comment); if (a) a.replies.push({ id: e.id, by: e.by || "agent", body: e.body, at }); break; }
+        case "attach": { const id = e.id || newId(); att.set(id, makeAtt({ ...e, id }, at)); break; }
+        case "reply": { const a = att.get(e.to ?? e.comment); if (a) a.replies.push({ id: e.id || newId(), author: e.by || "agent", body: e.body, at }); break; }
         case "resolve": { const a = att.get(e.id ?? e.comment); if (a) a.state = e.unresolved ? "active" : "resolved"; break; }
         case "detach": { const a = att.get(e.id); if (a) a.state = "removed"; break; }
         case "amend": { const a = att.get(e.id); if (a) { if (e.body !== undefined) a.body = e.body; if (e.selector !== undefined) a.selector = e.selector; } break; }
