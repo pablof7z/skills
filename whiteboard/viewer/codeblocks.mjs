@@ -78,16 +78,25 @@ export function initCodeBlocks() {
     content.appendChild(pre.cloneNode(true));
   }
 
-  // Re-render the diagram from its source into a fresh node so it gets a new
-  // SVG id and can scale to fill the overlay.
-  async function openDiagramFullscreen(src) {
+  // Render the diagram from its source via mermaid.render (explicit SVG
+  // output) into a fresh node; fall back to cloning the original rendered SVG
+  // if render throws (e.g. re-init hiccup) so we never show an empty box.
+  async function openDiagramFullscreen(src, originalNode) {
     const { content } = buildOverlay("Diagram");
     const stage = document.createElement("div");
     stage.className = "mermaid";
-    stage.textContent = src || "";
     content.appendChild(stage);
-    try { if (window.mermaid) await window.mermaid.run({ nodes: [stage] }); }
-    catch { /* leave the source text */ }
+    try {
+      if (window.mermaid && src) {
+        const id = "mermaid-fs-" + Date.now();
+        const res = await window.mermaid.render(id, src);
+        stage.innerHTML = res.svg;
+        if (res.bindFunctions) try { res.bindFunctions(stage); } catch {}
+        return;
+      }
+    } catch (e) { /* fall through to clone */ }
+    if (originalNode) stage.appendChild(originalNode.cloneNode(true));
+    else stage.textContent = src || "";
   }
 
   function wireFullscreen(root) {
@@ -101,7 +110,7 @@ export function initCodeBlocks() {
     }
     for (const m of root.querySelectorAll(".mermaid")) {
       m.classList.add("fs-target", "fs-clickable");
-      m.addEventListener("click", () => openDiagramFullscreen(m.dataset.mermaidSrc || m.textContent));
+      m.addEventListener("click", () => openDiagramFullscreen(m.dataset.mermaidSrc || m.textContent, m));
     }
   }
 
