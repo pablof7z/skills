@@ -152,4 +152,7 @@ export function initExplorer(root) {
   const es = new EventSource("/api/events");
   es.addEventListener("sessions", refresh);
   es.addEventListener("error", () => { /* auto-reconnect */ });
+  // Recompute relative-time labels ("just now" -> "1m ago" …) while the page
+  // stays open, without refetching. allSessions is the cached list render() keeps.
+  setInterval(() => { if (allSessions.length) render(allSessions); }, 30000);
 }
