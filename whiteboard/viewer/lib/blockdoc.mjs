@@ -34,11 +34,16 @@ export function listRevisions(dir) {
   const BLOCK = new Set(["add", "edit", "move", "rename", "remove"]);
   return readChanges(dir)
     .map((c) => ({
-      rev: c.rev, at: c.at, title: c.title, by: c.by,
+      rev: c.rev, at: c.at, title: c.title, by: c.by, via: c.via || null,
       changes: (c.ops || []).length,
       blocks: (c.ops || []).filter((o) => BLOCK.has(o.op)).length,
     }))
     .sort((a, b) => b.rev - a.rev);
+}
+
+// The raw change record for a rev (for provenance/jump), or null.
+export function changeAt(dir, rev) {
+  return readChanges(dir).find((c) => c.rev === Number(rev)) || null;
 }
 
 // Document state at a given rev: fold the change log up to rev N. Same shape

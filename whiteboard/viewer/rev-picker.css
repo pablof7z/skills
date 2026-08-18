@@ -28,4 +28,9 @@
 .rp-opt.sel { background: var(--accent-soft, #eef2ff); }
 .rp-opt .rp-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rp-opt .rp-meta { font-size: 11px; color: var(--muted, #999); }
+.rp-opt .rp-meta-row { display: flex; align-items: center; gap: 6px; }
+.rp-opt .rp-meta { flex: 1 1 auto; }
+.rp-by { font-size: 11px; color: var(--muted, #999); white-space: nowrap; flex: 0 0 auto; }
+.rp-jump { flex: 0 0 auto; border: none; background: transparent; color: var(--muted, #999); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; }
+.rp-jump:hover { color: var(--accent, #3b82f6); background: var(--hover, #f3f4f6); }
 .rp-sep { height: 1px; margin: 4px 2px; background: var(--border, #eee); }

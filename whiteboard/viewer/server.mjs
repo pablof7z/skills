@@ -16,6 +16,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import * as S from "./lib/session.mjs";
 import * as B from "./lib/blockdoc.mjs";
+import { execFileSync } from "node:child_process";
 
 const VIEWER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORT = 4318;
@@ -105,6 +106,36 @@ async function readBody(req) {
   return body ? JSON.parse(body) : {};
 }
 
+// Focus the iTerm2 pane that authored a change. itermSessionId is
+// "<win>:<tab>:<pane>:<guid>" (ITERM_SESSION_ID); we match the session by its
+// GUID via AppleScript. The GUID is validated to a UUID shape before it goes
+// anywhere near osascript — never injected raw.
+function jumpToITerm(itermSessionId) {
+  const guid = String(itermSessionId || "").split(":").pop();
+  if (!/^[0-9A-Fa-f-]{36}$/.test(guid)) return { status: "bad_id" };
+  const script = `tell application "iTerm"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if (id of s) is "${guid}" then
+          select t
+          set index of w to 1
+          activate
+          return "opened"
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return "not_found"
+end tell`;
+  try {
+    const r = execFileSync("osascript", ["-e", script], { encoding: "utf8", timeout: 5000 }).trim();
+    return { status: r === "opened" ? "opened" : "not_found" };
+  } catch (e) {
+    return { status: "failed", error: String(e && e.message || e).slice(0, 200) };
+  }
+}
+
 // ---- per-session request handler ----
 async function handleSession(req, res, root, project, slug, rest) {
   const dir = sessionDir(root, project, slug);
@@ -131,6 +162,16 @@ async function handleSession(req, res, root, project, slug, rest) {
     const doc = B.getDocumentAt(dir, r);
     if (!doc) return sendJson(res, 404, { error: "revision not found" });
     return sendJson(res, 200, doc);
+  }
+  if (rest === "jump" && m === "POST") {
+    const data = await readBody(req).catch(() => ({}));
+    const rev = Number(data && data.rev);
+    if (!rev) return sendJson(res, 400, { error: "rev required" });
+    const ch = B.changeAt(dir, rev);
+    if (!ch) return sendJson(res, 404, { error: "revision not found" });
+    const iterm = ch.via && ch.via.itermSessionId;
+    if (!iterm) return sendJson(res, 200, { status: "no_provenance" });
+    return sendJson(res, 200, jumpToITerm(iterm));
   }
   if (rest === "deliverable" && m === "GET") {
     const d = S.readDeliverable(dir);

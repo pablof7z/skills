@@ -34,16 +34,16 @@ export function buildPickerOptions(revisions, currentRev, viewedRev) {
   const revBy = new Map((revisions || []).map((r) => [r.rev, r]));
   const cur = revBy.get(currentRev);
   const ch = (n) => `${n} change${n === 1 ? "" : "s"}`;
-  const push = (value, title, meta, group) => {
+  const push = (value, title, meta, group, by = null, jump = false) => {
     const key = String(value); if (seen.has(key)) return; seen.add(key);
-    out.push({ value, title, meta, group });
+    out.push({ value, title, meta, group, by, jump });
   };
   push("current", "Current", cur ? `${ch(cur.changes || 0)} · ${ago(cur.at)}` : "now", "shortcut");
   if (viewedRev && viewedRev !== currentRev) {
     const v = revBy.get(viewedRev);
     push(viewedRev, "Last viewed (Done)", v ? `${ch(v.changes || 0)} · ${ago(v.at)}` : "—", "shortcut");
   }
-  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, `${ch(r.changes || 0)} · ${ago(r.at)}`, "rev");
+  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, `${ch(r.changes || 0)} · ${ago(r.at)}`, "rev", r.by || null, !!(r.via && r.via.itermSessionId));
   return out;
 }
 
@@ -51,7 +51,7 @@ export function buildPickerOptions(revisions, currentRev, viewedRev) {
 // option's title (semibold) + a muted "N changes · ago" line; click opens a
 // panel of all options grouped by shortcut/rev. Sets container.value and
 // dispatches "change" on pick so the existing wiring (reading el.value) works.
-function mountRevPicker(container, options, value) {
+function mountRevPicker(container, options, value, onJump) {
   let panel = null;
   let cur = options;
   const find = (v) => cur.find((o) => String(o.value) === String(v)) || cur[0];
@@ -66,11 +66,15 @@ function mountRevPicker(container, options, value) {
     for (const o of cur) {
       if (o.group !== last && rows.length) rows.push(`<div class="rp-sep"></div>`);
       last = o.group;
-      rows.push(`<div class="rp-opt ${String(o.value) === String(container.value) ? "sel" : ""}" data-value="${esc(o.value)}"><span class="rp-title">${esc(o.title)}</span><span class="rp-meta">${esc(o.meta)}</span></div>`);
+      const by = o.by ? `<span class="rp-by" title="authored by ${esc(o.by)}">${esc(o.by)}</span>` : "";
+      const jump = o.jump ? `<button type="button" class="rp-jump" title="Open the terminal that made this change">↗</button>` : "";
+      rows.push(`<div class="rp-opt ${String(o.value) === String(container.value) ? "sel" : ""}" data-value="${esc(o.value)}"><span class="rp-title">${esc(o.title)}</span><span class="rp-meta-row"><span class="rp-meta">${esc(o.meta)}</span>${by}${jump}</span></div>`);
     }
     panel.innerHTML = rows.join("");
     container.appendChild(panel);
     panel.addEventListener("click", (e) => {
+      const jb = e.target.closest(".rp-jump");
+      if (jb) { e.stopPropagation(); const row = jb.closest(".rp-opt"); if (row && onJump) onJump(row.dataset.value); return; }
       const row = e.target.closest(".rp-opt"); if (!row) return;
       container.value = row.dataset.value;
       container.dispatchEvent(new Event("change", { bubbles: true }));
@@ -140,11 +144,14 @@ export function initDiffMode({
   diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit,
 }) {
   let beforePicker = null, afterPicker = null;
+  async function jumpToRev(rev) {
+    try { await fetch(`${API}/jump`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rev: Number(rev) }) }); } catch {}
+  }
   function populateSelects() {
     const opts = buildPickerOptions(state.revisions, state.doc?.rev ?? 0, state.viewedRev);
-    if (!beforePicker) beforePicker = mountRevPicker(diffBeforeEl, opts, String(state.beforeRev));
+    if (!beforePicker) beforePicker = mountRevPicker(diffBeforeEl, opts, String(state.beforeRev), jumpToRev);
     else beforePicker.setOptions(opts, String(state.beforeRev));
-    if (!afterPicker) afterPicker = mountRevPicker(diffAfterEl, opts, String(state.afterRev));
+    if (!afterPicker) afterPicker = mountRevPicker(diffAfterEl, opts, String(state.afterRev), jumpToRev);
     else afterPicker.setOptions(opts, String(state.afterRev));
   }
 
