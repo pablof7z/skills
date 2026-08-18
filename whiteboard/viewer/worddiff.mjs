@@ -63,18 +63,42 @@ function wordLcsOps(a, b) {
   return ops;
 }
 
-// Render one paired (deleted, inserted) line as inline word-diff markdown. The
-// merged source keeps spacing intact; whitespace tokens pass through unwrapped
-// even when the LCS flags them del/ins, so the result never double-wraps spaces.
+// Render one paired (deleted, inserted) line as inline word-diff markdown.
+// Consecutive same-type tokens (and the whitespace between them) are coalesced
+// into a single <del>/<ins> run, so a fully-rewritten line renders as one
+// continuous red/green span instead of one box per word. A one-word edit still
+// renders granularly. Whitespace tokens between two tokens of the same run stay
+// inside the span (continuous background); whitespace at a run boundary is left
+// plain so the highlight doesn't bleed past the change.
 function renderInlinePair(delLine, insLine, renderMd) {
   const ops = wordLcsOps(tokenize(delLine), tokenize(insLine));
   let src = "";
-  for (const op of ops) {
-    if (op.tok.ws) { src += op.tok.text; continue; }
-    if (op.t === "eq") src += op.tok.text;
-    else if (op.t === "del") src += `<del>${op.tok.text}</del>`;
-    else src += `<ins>${op.tok.text}</ins>`;
+  let run = null; // { tag: "del"|"ins", text }
+  const flush = () => { if (run) { src += `<${run.tag}>${run.text}</${run.tag}>`; run = null; } };
+  // nextNonWs: the op after index i that is not whitespace, or null
+  const nextNonWs = (i) => {
+    for (let k = i + 1; k < ops.length; k++) if (!ops[k].tok.ws) return ops[k];
+    return null;
+  };
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const tok = op.tok;
+    if (tok.ws) {
+      if (run) {
+        const nxt = nextNonWs(i);
+        if (nxt && (nxt.t === "del" || nxt.t === "ins") && (nxt.t === "del" ? "del" : "ins") === run.tag) run.text += tok.text;
+        else { flush(); src += tok.text; }
+      } else src += tok.text;
+      continue;
+    }
+    if (op.t === "eq") { flush(); src += tok.text; }
+    else {
+      const tag = op.t === "del" ? "del" : "ins";
+      if (run && run.tag === tag) run.text += tok.text;
+      else { flush(); run = { tag, text: tok.text }; }
+    }
   }
+  flush();
   return renderMd(src);
 }
 
