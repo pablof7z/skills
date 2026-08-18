@@ -24,7 +24,6 @@ import { spawn, execFile } from "node:child_process";
 import {
   listSessions, loadDoc, isActionable, legacyActionable, sessionUnread,
 } from "./scan.mjs";
-import { applyWbSession } from "./resolve.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VIEWER_DIR = path.join(__dirname, "..", "viewer");
@@ -85,6 +84,31 @@ function tokenize(s: string): string[] {
   }
   if (cur) out.push(cur);
   return out;
+}
+
+// Owner-scoped WB_SESSION resolution (inlined — not imported from
+// resolve.mjs — so it survives /reload's transitive-module caching). Only
+// sessions whose manifest.owner === this pi session id are candidates; no global
+// ~/.wb/current and no most-recently-modified fallback (both let concurrent
+// agents silently pin to each other's sessions). Ties break by mtime among this
+// agent's OWN sessions. Returns { project, slug } or null.
+function resolveOwnedSession(project: string, root: string, ownerId: string | null) {
+  if (!ownerId) return null;
+  const base = path.join(root, project);
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(base, { withFileTypes: true }); } catch { return null; }
+  const owned: { slug: string; mtime: number }[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || !/^\d{4}-\d{2}-.+/.test(e.name)) continue;
+    const dir = path.join(base, e.name);
+    try {
+      const man = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+      if (man.owner === ownerId) owned.push({ slug: e.name, mtime: fs.statSync(dir).mtimeMs });
+    } catch {}
+  }
+  if (owned.length === 0) return null;
+  owned.sort((a, b) => b.mtime - a.mtime);
+  return { project, slug: owned[0].slug };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -211,8 +235,9 @@ export default function (pi: ExtensionAPI) {
     // `wb new`/`wb use` stamp the owner when creating/claiming a session.
     try { mySessionId = ctx?.sessionManager?.getSessionId?.() || null; } catch { mySessionId = null; }
     if (mySessionId) process.env.WB_OWNER = mySessionId;
-    // Expose the current whiteboard session for myProject so `wb` resolves it.
-    const cur = applyWbSession(myProject, ROOT);
+    // Expose the current whiteboard session (owner-scoped) so `wb` resolves it.
+    const cur = resolveOwnedSession(myProject, ROOT, mySessionId);
+    if (cur) process.env.WB_SESSION = `${cur.project}/${cur.slug}`;
     if (cur && ctx?.hasUI) ctx.ui.notify(`whiteboard session: ${cur.project}/${cur.slug}`, "info");
     // Baseline existing actionable items so only NEW ones wake the agent.
     baseline();

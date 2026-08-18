@@ -9,7 +9,6 @@ import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 
 export const ROOT = process.env.WHITEBOARD_ROOT || path.join(os.homedir(), "whiteboard");
-const STATE_FILE = path.join(os.homedir(), ".wb", "current.json");
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 export function slugify(s) {
@@ -32,8 +31,11 @@ export function projectFromCwd(cwd = process.cwd()) {
   }
 }
 
-// Resolve a --session arg ("project/slug" or just "slug" using cwd's project),
-// WB_SESSION env, or ~/.wb/current.json keyed by project → { project, slug, dir }.
+// Resolve a --session arg ("project/slug" or just "slug" using cwd's project) or
+// WB_SESSION env → { project, slug, dir }. There is NO global fallback: a shared
+// ~/.wb/current file would let concurrent agents silently clobber each other's
+// "current" session. The per-process WB_SESSION env is the safe per-agent pin
+// (the pi extension sets it from manifest.owner); everyone else passes --session.
 export function resolveSession({ session, cwd = process.cwd() } = {}) {
   const project = projectFromCwd(cwd);
   let p = project, s = null;
@@ -43,26 +45,12 @@ export function resolveSession({ session, cwd = process.cwd() } = {}) {
   } else if (process.env.WB_SESSION) {
     const v = process.env.WB_SESSION;
     if (v.includes("/")) { const [a, b] = v.split("/"); p = a; s = b; } else { s = v; }
-  } else {
-    const cur = readCurrent();
-    if (cur && cur[p]) s = cur[p].split("/").pop();
   }
-  if (!s) throw new Error(`no session: pass --session <project>/<slug>, set WB_SESSION, or run \`wb use <slug>\` (project=${p})`);
+  if (!s) throw new Error(`no session: pass --session <project>/<slug> or set WB_SESSION (project=${p})`);
   return { project: p, slug: s, dir: path.join(ROOT, p, s) };
 }
 
 export function sessionDir(project, slug) { return path.join(ROOT, project, slug); }
-
-function readCurrent() {
-  try { return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch { return null; }
-}
-
-export function setCurrent(project, slug) {
-  const cur = readCurrent() || {};
-  cur[project] = `${project}/${slug}`;
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify(cur, null, 2) + "\n");
-}
 
 export function listSessions(project) {
   const base = path.join(ROOT, project);

@@ -10,7 +10,7 @@ The viewer is a persistent, self-healing daemon. On `session_start` it's spawned
 ### Block document model support
 The whiteboard skill now uses a block-based `document.json` (not `deliverable.md`) as the source of truth, with comments living **inside** `document.json`. This extension supports both models without regressing legacy sessions:
 
-- **`WB_SESSION` resolution.** On `session_start` the extension resolves the current whiteboard session for this pi session's project (`myProject` = cwd basename, or `WHITEBOARD_PROJECT`) and sets `process.env.WB_SESSION = "<project>/<slug>"` so `wb` CLI commands resolve it. Resolution order: `~/.wb/current.json[myProject]` → most-recently-modified session dir under `~/whiteboard/<myProject>/` → leave unset. The agent can override with `wb use <slug>`.
+- **`WB_SESSION` resolution.** On `session_start` the extension resolves the whiteboard session owned by THIS pi session (`manifest.owner === getSessionId()`; `myProject` = cwd basename, or `WHITEBOARD_PROJECT`) and sets `process.env.WB_SESSION = "<project>/<slug>"` so `wb` CLI commands resolve it. Owner-scoped — no global `~/.wb/current` and no most-recently-modified fallback (both would let concurrent agents silently pin to each other's sessions). If this agent owns no session yet, WB_SESSION stays unset and the agent passes `--session`. `wb new`/`wb use` stamp `manifest.owner` via `WB_OWNER` so the extension picks them up on the next `session_start`.
 - **Block-doc wake (scoped to this session's project).** A session is a block-doc session if `document.json` exists in its dir. The extension watches `~/whiteboard` and, on a `document.json` change, loads it and finds comments that are **new since the last-seen comment set** AND actionable (`author === "user"`, `resolved === false`, no reply in `replies[]` with `author === "agent"`). It baselines the existing comment ids per session on `session_start` so existing items don't wake. It wakes the agent via `pi.sendUserMessage(prompt, { deliverAs: "followUp" })` with:
   ```
   [whiteboard] New comment on block "<block>" in <project>/<slug>: "<body excerpt>" (id <comment-id>). Reply via `wb change`: `wb change "Reply to <id>"` → `wb change reply <comment-id> "<text>"` → `wb change resolve <comment-id>` → `wb change send`.
@@ -38,7 +38,7 @@ Then `/reload` or start a new pi session. Verify with `pi -p "ok"` (loads with n
 ## Modules
 - `index.ts` — factory: viewer lifecycle, `session_start`/`session_shutdown`, the recursive watcher + wake dispatch, footer status, `/wb` command.
 - `scan.mjs` — session listing + actionable-item + unread helpers for both the block-doc (`document.json`) and legacy (`comments/` + `chat/`) models.
-- `resolve.mjs` — `WB_SESSION` resolution (`~/.wb/current.json` → most-recent session dir → unset).
+- Owner-scoped `WB_SESSION` resolution is inlined in `index.ts` (`resolveOwnedSession`: `manifest.owner === getSessionId()` → unset if none owned; inlined so it survives `/reload`'s transitive-module caching).
 
 ## Test
 
