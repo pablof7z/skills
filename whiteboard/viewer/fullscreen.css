@@ -79,6 +79,8 @@
   margin: 0 auto;
   font-size: 13.5px;
   overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   background: #f6f6f4;
   border: 1px solid var(--line);
   border-radius: 10px;
