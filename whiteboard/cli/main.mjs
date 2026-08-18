@@ -13,7 +13,7 @@ import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
 import {
   loadDoc, appendChange, validateOps, changeIdFor, selectorFor,
-  commentOp, replyOp, resolveOp, attentionOp, isBlockDocDir,
+  attachOp, replyOp, resolveOp, detachOp, amendOp,
 } from "./doc.mjs";
 
 const HELP = `wb — whiteboard change-log document CLI
@@ -26,11 +26,13 @@ const HELP = `wb — whiteboard change-log document CLI
   wb write move <name> --before X|--after X     reorder a block
   wb write rename <old> <new>                    rename (cascades comments)
   wb write remove <name> [name…]                 delete block(s) + their comments
-  wb flag <name> <flag> [--on|--off]             set/clear needs-attention|decided|superseded
+  wb flag <name> <flag> [--on|--off] [--text ...]   set/clear a label (needs-attention|decided|superseded|…)
   wb comment <name> <text|--file> [--by who] [--exact "..."]   attach a comment
-  wb reply <comment-id> <text> [--by who]        reply in a thread
-  wb attention <name> [reason]                  flag needs-attention + comment
-  wb resolve <comment-id> [--unresolve]          resolve/unresolve a comment
+  wb reply <id> <text> [--by who]        reply in a thread
+  wb attention <name> [reason]                  attach a needs-attention label (+ card)
+  wb resolve <id> [--unresolve]          resolve/unresolve an attachment
+  wb detach <id>                         remove an attachment
+  wb amend <id> [--text T] [--exact "..."]   edit an attachment's body or anchor
   wb note <text|--file>                          append to notes.md
   wb change "<title>" [--summary S] --ops -|--file F   apply a named batch of ops as one change
      ops (JSON array): {op:"add"|"edit"|"move"|"rename"|"remove"|"comment"|"reply"|"resolve"|"attention"|"flag", ...}
@@ -160,9 +162,19 @@ async function main() {
     }
     case "flag": {
       const [name, flag] = rest;
-      const on = flags.off ? false : true;
-      const ch = applyChange(session(), { by: flags.by || "agent", ops: [{ op: "flag", name, flag, on }], title: `${on ? "set" : "clear"} ${flag} on ${name}` });
-      return out(`${on ? "set" : "cleared"} ${flag} on ${name} (rev ${ch.rev})\n`);
+      const by = flags.by || "agent";
+      const s = session();
+      const doc = docFor(s);
+      const existing = doc.attachments.find((a) => a.block === name && a.kind === flag && a.state === "active");
+      if (flags.off) {
+        if (!existing) return out(`${flag} not set on ${name}\n`);
+        const ch = appendChange(s.dir, { title: `clear ${flag} on ${name}`, by, ops: [detachOp(existing.id)] });
+        return out(`cleared ${flag} on ${name} (rev ${ch.rev})\n`);
+      }
+      if (existing) return out(`${flag} already set on ${name}\n`);
+      const op = attachOp(flag, name, { body: flags.text || null, by });
+      const ch = appendChange(s.dir, { title: `set ${flag} on ${name}`, by, ops: [op] });
+      return out(`set ${flag} on ${name} (rev ${ch.rev})\n`);
     }
     case "comment": {
       const [name] = rest;
@@ -177,7 +189,7 @@ async function main() {
         if (!b) throw new Error(`no block "${name}"`);
         selector = selectorFor(b.md, flags.exact);
       }
-      const op = commentOp(name, body, { by, selector });
+      const op = attachOp("comment", name, { body, by, selector });
       validateOps(doc, [op]);
       const ch = appendChange(s.dir, { title: `comment on ${name}`, by, ops: [op] });
       return out(`${op.id} (rev ${ch.rev})\n`);
@@ -194,7 +206,7 @@ async function main() {
       const [name] = rest;
       const reason = flags.text !== undefined ? flags.text : rest.slice(1).join(" ");
       const by = flags.by || "agent";
-      const op = attentionOp(name, reason || "Needs your attention.", { by });
+      const op = attachOp("needs-attention", name, { body: reason || "Needs your attention.", motivation: "highlighting", by });
       const ch = applyChange(session(), { title: `attention on ${name}`, by, ops: [op] });
       return out(`${op.id} (rev ${ch.rev})\n`);
     }
@@ -204,6 +216,24 @@ async function main() {
       const op = resolveOp(id, resolved);
       const ch = applyChange(session(), { title: `${resolved ? "resolve" : "unresolve"} ${id}`, by: flags.by || "agent", ops: [op] });
       return out(`${resolved ? "resolved" : "unresolved"} ${id} (rev ${ch.rev})\n`);
+    }
+    case "detach": {
+      const [id] = rest;
+      const ch = applyChange(session(), { title: `detach ${id}`, by: flags.by || "agent", ops: [detachOp(id)] });
+      return out(`detached ${id} (rev ${ch.rev})\n`);
+    }
+    case "amend": {
+      const [id] = rest;
+      const s = session();
+      const doc = docFor(s);
+      const a = doc.attachments.find((x) => x.id === id);
+      if (!a) throw new Error(`no attachment "${id}"`);
+      let selector, body;
+      if (flags.text !== undefined) body = flags.text;
+      if (flags.exact !== undefined) { const b = doc.blocks.find((x) => x.name === a.block); if (!b) throw new Error(`no block "${a.block}"`); selector = selectorFor(b.md, flags.exact); }
+      if (body === undefined && selector === undefined) throw new Error("usage: wb amend <id> [--text T] [--exact …]");
+      const ch = appendChange(s.dir, { title: `amend ${id}`, by: flags.by || "agent", ops: [amendOp(id, { body, selector })] });
+      return out(`amended ${id} (rev ${ch.rev})\n`);
     }
     case "change": {
       const title = flags.title || rest[0];

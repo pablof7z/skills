@@ -6,7 +6,7 @@
 import path from "node:path";
 import {
   loadDoc, readChanges, fold, appendChange, validateOps, isBlockDocDir,
-  commentOp, replyOp, resolveOp,
+  attachOp, replyOp, resolveOp,
 } from "../../cli/doc.mjs";
 
 export function isBlockDoc(dir) { return isBlockDocDir(dir); }
@@ -55,7 +55,7 @@ function projectedComment(op) {
 export function postComment(dir, { block, text, selector, creator }) {
   const doc = loadDoc(dir);
   if (!doc) throw new Error("no document");
-  const op = commentOp(block, String(text ?? "").slice(0, 8000), { by: creator || "user", selector });
+  const op = attachOp("comment", block, { body: String(text ?? "").slice(0, 8000), by: creator || "user", selector });
   validateOps(doc, [op]);
   appendChange(dir, { title: `comment on ${block}`, by: creator || "user", ops: [op] });
   return projectedComment(op);

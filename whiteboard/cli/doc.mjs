@@ -1,10 +1,18 @@
 // doc.mjs — block document as an append-only change log in changes/<rev>.json.
-// The current document is the fold over all change files (sorted by rev); any
-// past version is fold(changes up to rev N). Each change is one atomic file
-// (link EXCL → no rev collision); past changes are never mutated. Comments are
-// ops inside changes, so they persist across block edits (block-anchored, not
-// change-anchored). Legacy state-based document.json auto-migrates to one
-// baseline change on first load (lossless, one-time).
+//
+// The current document is the fold over all change files (sorted by rev). Each
+// change is one atomic file (link EXCL → no rev collision); past changes are
+// never mutated.
+//
+// Attachments are the one primitive for anything anchored to a spot in the doc:
+// comments (kind:"comment") and labels (kind:"needs-attention"|"decided"|…).
+// They share an anchor (block, or block + selector span), an optional body, an
+// author/at, a state (active|resolved|removed), and optional replies. The only
+// difference between kinds is how the UI renders them. The fold projects
+// attachments back to the legacy {doc.comments, block.flags} shape the viewer
+// already consumes (comments carry a `motivation` field for amber-card kinds),
+// so the viewer doesn't change. New change files use the unified `attach` op;
+// older files' comment/attention/flag/reply/resolve ops are still honored.
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -17,9 +25,6 @@ const nowIso = () => new Date().toISOString();
 const padded = (rev) => String(rev).padStart(PAD, "0");
 
 export function changesDir(dir) { return path.join(dir, CHANGES); }
-
-// A session is a block-doc session when it has a changes/ dir (new model) or a
-// legacy document.json (state model, auto-migrated on load).
 export function isBlockDocDir(dir) {
   return fs.existsSync(changesDir(dir)) || fs.existsSync(path.join(dir, "document.json"));
 }
@@ -34,8 +39,7 @@ export function readChanges(dir) {
     .sort((a, b) => (a.rev || 0) - (b.rev || 0));
 }
 
-// Append a change: allocates the next free rev atomically (link EXCL → no
-// collision even with a concurrent writer). ops is a pre-validated array.
+// Append a change: allocates the next free rev atomically (link EXCL).
 export function appendChange(dir, { id, title, by = "agent", summary = null, ops }) {
   const d = changesDir(dir);
   fs.mkdirSync(d, { recursive: true });
@@ -57,43 +61,87 @@ function insertIndex(blocks, before, after) {
   return blocks.length;
 }
 
-// Project a sorted change list to the current document state.
+function makeAtt(e, at) {
+  return { id: e.id, kind: e.kind, block: e.block, selector: e.selector || null,
+    body: e.body ?? null, motivation: e.motivation || null, by: e.by || "agent",
+    at, state: "active", replies: [] };
+}
+
+// Project a sorted change list to the current document state. Attachments are
+// the source of truth; the projection derives doc.comments + block.flags in the
+// shape the viewer expects. Attachments whose block is gone are hidden (no
+// orphan surfacing — per design). Block rename reanchors attachments.
 export function fold(changes) {
   const blocks = [];
-  const comments = new Map(); // id -> comment (threaded)
+  const att = new Map(); // id -> attachment
   for (const ch of changes) {
     for (const e of ch.ops || []) {
       const at = e.at || ch.at;
       switch (e.op) {
         case "baseline":
-          blocks.splice(0, blocks.length, ...(e.blocks || []).map((b) => ({ ...b })));
-          for (const c of e.comments || []) comments.set(c.id, { ...c, replies: [...(c.replies || [])] });
+          blocks.splice(0, blocks.length, ...(e.blocks || []).map((b) => ({ name: b.name, md: b.md, ...(b.flags ? { flags: [...b.flags] } : {}) })));
+          if (Array.isArray(e.attachments)) for (const a of e.attachments) att.set(a.id, { ...a, replies: [...(a.replies || [])] });
+          else if (Array.isArray(e.comments)) { // legacy baseline: synthesize attachments
+            for (const c of e.comments) att.set(c.id, { id: c.id, kind: c.motivation === "highlighting" ? "needs-attention" : "comment", block: c.block, selector: c.selector || null, body: c.body, motivation: c.motivation || null, by: c.author, at: c.at, state: c.resolved ? "resolved" : "active", replies: [...(c.replies || [])] });
+            // label attachments from block.flags — but skip a kind already represented by
+            // a comment attachment on that block (e.g. needs-attention already comes
+            // from an attention comment; don't double-count it).
+            const seen = new Set([...att.values()].map((a) => `${a.block}:${a.kind}`));
+            for (const b of e.blocks || []) for (const f of (b.flags || [])) {
+              if (seen.has(`${b.name}:${f}`)) continue;
+              const id = `lbl-${f}-${b.name}`; if (!att.has(id)) att.set(id, { id, kind: f, block: b.name, selector: null, body: null, motivation: null, by: "agent", at: ch.at, state: "active", replies: [] });
+            }
+          }
           break;
         case "add": blocks.splice(insertIndex(blocks, e.before, e.after), 0, { name: e.name, md: e.md, ...(e.flags ? { flags: [...e.flags] } : {}) }); break;
         case "edit": { const b = blocks.find((x) => x.name === e.name); if (b) b.md = e.md; break; }
         case "move": { const i = blocks.findIndex((x) => x.name === e.name); if (i >= 0) { const [b] = blocks.splice(i, 1); blocks.splice(insertIndex(blocks, e.before, e.after), 0, b); } break; }
-        case "rename": { const b = blocks.find((x) => x.name === e.from); if (b) b.name = e.to; for (const c of comments.values()) if (c.block === e.from) c.block = e.to; break; }
+        case "rename": { const b = blocks.find((x) => x.name === e.from); if (b) b.name = e.to; for (const a of att.values()) if (a.block === e.from) a.block = e.to; break; }
         case "remove": { const names = new Set(e.names || [e.name]); for (let i = blocks.length - 1; i >= 0; i--) if (names.has(blocks[i].name)) blocks.splice(i, 1); break; }
-        case "flag": { const b = blocks.find((x) => x.name === e.name); if (b) { b.flags = b.flags || []; const on = e.on !== false; const has = b.flags.includes(e.flag); if (on && !has) b.flags.push(e.flag); if (!on && has) b.flags = b.flags.filter((f) => f !== e.flag); if (!b.flags.length) delete b.flags; } break; }
-        case "comment": comments.set(e.id, { id: e.id, block: e.block, author: e.by || "agent", body: e.body, at, resolved: false, replies: [], ...(e.selector ? { selector: e.selector } : {}), ...(e.motivation ? { motivation: e.motivation } : {}) }); break;
-        case "reply": { const c = comments.get(e.comment); if (c) c.replies.push({ id: e.id, author: e.by || "agent", body: e.body, at }); break; }
-        case "resolve": { const c = comments.get(e.comment); if (c) c.resolved = e.unresolved ? false : true; break; }
-        case "attention": comments.set(e.id, { id: e.id, block: e.block, author: e.by || "agent", body: e.body, at, resolved: false, replies: [], motivation: "highlighting" }); break;
+        case "attach": att.set(e.id, makeAtt(e, at)); break;
+        case "reply": { const a = att.get(e.to ?? e.comment); if (a) a.replies.push({ id: e.id, by: e.by || "agent", body: e.body, at }); break; }
+        case "resolve": { const a = att.get(e.id ?? e.comment); if (a) a.state = e.unresolved ? "active" : "resolved"; break; }
+        case "detach": { const a = att.get(e.id); if (a) a.state = "removed"; break; }
+        case "amend": { const a = att.get(e.id); if (a) { if (e.body !== undefined) a.body = e.body; if (e.selector !== undefined) a.selector = e.selector; } break; }
+        // ---- legacy op names (older change files) ----
+        case "comment": att.set(e.id, makeAtt({ ...e, kind: "comment" }, at)); break;
+        case "attention": att.set(e.id, makeAtt({ ...e, kind: "needs-attention", motivation: e.motivation || "highlighting" }, at)); break;
+        case "flag": { // legacy flag op → label attachment
+          const id = `lbl-${e.flag}-${e.name}`;
+          if (e.on === false) { const a = att.get(id); if (a) a.state = "removed"; }
+          else if (!att.has(id)) att.set(id, { id, kind: e.flag, block: e.name, selector: null, body: null, motivation: null, by: "agent", at: ch.at, state: "active", replies: [] });
+          break;
+        }
       }
     }
   }
+  // project attachments → legacy {comments, block.flags}
   const live = new Set(blocks.map((b) => b.name));
-  const commentsArr = [...comments.values()].filter((c) => live.has(c.block))
-    .sort((a, b) => (a.at || "").localeCompare(b.at || ""));
+  const comments = [];
+  const flagsByBlock = {};
+  for (const a of att.values()) {
+    if (!live.has(a.block) || a.state === "removed") continue;
+    if (a.kind !== "comment") {
+      if (a.state === "active") (flagsByBlock[a.block] ||= []).push(a.kind);
+      // attention-style attachments (motivation=highlighting) also render as an
+      // amber card; a plain label (e.g. `wb flag goal decided`) is badge-only.
+      const mot = a.motivation || null;
+      if (mot) comments.push({ id: a.id, block: a.block, author: a.by, body: a.body || "", at: a.at, resolved: a.state === "resolved", replies: a.replies, selector: a.selector, motivation: mot });
+    } else {
+      comments.push({ id: a.id, block: a.block, author: a.by, body: a.body || "", at: a.at, resolved: a.state === "resolved", replies: a.replies, selector: a.selector, motivation: a.motivation || null });
+    }
+  }
+  for (const b of blocks) b.flags = flagsByBlock[b.name] || [];
+  comments.sort((a, b) => (a.at || "").localeCompare(b.at || ""));
   const rev = changes.length ? changes[changes.length - 1].rev : 0;
-  return { blocks, comments: commentsArr, rev, hash: versionHash(blocks), updatedAt: changes.length ? changes[changes.length - 1].at : null };
+  return { blocks, comments, attachments: [...att.values()], rev, hash: versionHash(blocks), updatedAt: changes.length ? changes[changes.length - 1].at : null };
 }
 
 // Referential validation against the current folded doc. Throws on the first
 // bad op so a multi-op change aborts before anything is appended.
 export function validateOps(doc, ops) {
   const blockNames = new Set(doc.blocks.map((b) => b.name));
-  const commentIds = new Set(doc.comments.map((c) => c.id));
+  const attIds = new Set(doc.attachments.map((a) => a.id));
   for (const e of ops) {
     if (!e || typeof e !== "object") throw new Error("each op must be an object");
     switch (e.op) {
@@ -101,16 +149,15 @@ export function validateOps(doc, ops) {
       case "edit": case "move": case "flag": if (!blockNames.has(e.name)) throw new Error(`no block "${e.name}"`); break;
       case "rename": validName(e.to); if (!blockNames.has(e.from)) throw new Error(`no block "${e.from}"`); if (blockNames.has(e.to)) throw new Error(`block "${e.to}" already exists`); break;
       case "remove": for (const n of (e.names || [e.name])) if (!blockNames.has(n)) throw new Error(`no block "${n}"`); break;
-      case "comment": case "attention": if (!blockNames.has(e.block)) throw new Error(`no block "${e.block}"`); break;
-      case "reply": case "resolve": if (!commentIds.has(e.comment)) throw new Error(`no comment "${e.comment}"`); break;
+      case "attach": case "comment": case "attention": if (!blockNames.has(e.block)) throw new Error(`no block "${e.block}"`); break;
+      case "reply": if (!attIds.has(e.to ?? e.comment)) throw new Error(`no attachment "${e.to ?? e.comment}"`); break;
+      case "resolve": case "detach": case "amend": { const k = e.id ?? e.comment; if (!attIds.has(k)) throw new Error(`no attachment "${k}"`); break; }
       case "baseline": break;
       default: throw new Error(`unknown op "${e.op}"`);
     }
   }
 }
 
-// Migrate a legacy state-based document.json to one baseline change. No-op if
-// the change log already has entries or there is no legacy file.
 function migrateLegacy(dir) {
   const f = path.join(dir, "document.json");
   if (!fs.existsSync(f) || (fs.existsSync(changesDir(dir)) && readChanges(dir).length)) return;
@@ -127,23 +174,21 @@ export function loadDoc(dir) {
 }
 
 // ---- op builders (used by the CLI and the viewer) ----
-export function commentOp(block, body, { by = "agent", selector = null, id = newId() } = {}) {
-  return { op: "comment", id, block, by, body: String(body), at: nowIso(), ...(selector ? { selector } : {}) };
+export function attachOp(kind, block, { body = null, selector = null, motivation = null, by = "agent", id = newId() } = {}) {
+  return { op: "attach", id, kind, block, by, body, selector, motivation, at: nowIso() };
 }
-export function replyOp(commentId, body, { by = "agent", id = newId() } = {}) {
-  return { op: "reply", comment: commentId, id, by, body: String(body), at: nowIso() };
+export function replyOp(to, body, { by = "agent", id = newId() } = {}) {
+  return { op: "reply", to, id, by, body: String(body), at: nowIso() };
 }
-export function resolveOp(commentId, resolved = true) {
-  return { op: "resolve", comment: commentId, ...(resolved ? {} : { unresolved: true }) };
+export function resolveOp(id, resolved = true) {
+  return { op: "resolve", id, ...(resolved ? {} : { unresolved: true }) };
 }
-export function attentionOp(block, body, { by = "agent", id = newId() } = {}) {
-  return { op: "attention", id, block, by, body: String(body), at: nowIso() };
+export function detachOp(id) { return { op: "detach", id }; }
+export function amendOp(id, { body, selector } = {}) {
+  const o = { op: "amend", id }; if (body !== undefined) o.body = body; if (selector !== undefined) o.selector = selector; return o;
 }
-
 export function changeIdFor(title) { return slugify(title) || null; }
 
-// Build a {exact, prefix, suffix} repair-hint selector from a block's markdown
-// and an exact quote, the way the viewer highlights (±32 chars of context).
 export function selectorFor(md, exact) {
   const i = String(md).indexOf(exact);
   if (i === -1) throw new Error(`quote not found in block: "${exact.slice(0, 40)}…"`);
