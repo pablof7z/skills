@@ -55,7 +55,10 @@ function parse(argv) {
 }
 
 function readContent(flags, { allowStdin = true } = {}) {
-  if (flags.text !== undefined) return String(flags.text);
+  if (flags.text !== undefined) {
+    if (flags.text === "-" && allowStdin && !process.stdin.isTTY) return fs.readFileSync(0, "utf8");
+    return String(flags.text);
+  }
   if (flags.file) return fs.readFileSync(flags.file, "utf8");
   if (allowStdin && !process.stdin.isTTY) return fs.readFileSync(0, "utf8");
   throw new Error("no content: pass --text, --file, or pipe via stdin");
