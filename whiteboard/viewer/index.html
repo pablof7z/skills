@@ -5,8 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Whiteboard</title>
   <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/vendor/highlight-github.css" media="(prefers-color-scheme: light)" />
-  <link rel="stylesheet" href="/vendor/highlight-github-dark.css" media="(prefers-color-scheme: dark)" />
+  <link rel="stylesheet" href="/vendor/highlight-github.css" />
+  <link rel="stylesheet" href="/vendor/highlight-github-dark.css" />
+  <script>
+    // Set theme before paint to avoid FOUC. Resolves auto/light/dark from
+    // localStorage ("wb-theme") and follows the OS when pref is "auto".
+    (function () {
+      var pref = localStorage.getItem("wb-theme") || "auto";
+      var mq = matchMedia("(prefers-color-scheme: dark)");
+      var eff = pref === "auto" ? (mq.matches ? "dark" : "light") : pref;
+      document.documentElement.dataset.theme = eff;
+      var links = document.querySelectorAll('link[rel="stylesheet"][href*="highlight-github"]');
+      for (var i = 0; i < links.length; i++) {
+        var isDark = /highlight-github-dark/.test(links[i].getAttribute("href"));
+        links[i].disabled = isDark ? eff !== "dark" : eff !== "light";
+      }
+    })();
+  </script>
 </head>
 <body>
   <div id="root"></div>
@@ -14,6 +29,7 @@
   <script src="/vendor/marked-footnote.umd.js"></script>
   <script src="/vendor/purify.min.js"></script>
   <script src="/vendor/highlight.min.js"></script>
+  <script type="module" src="/theme.mjs"></script>
   <script type="module" src="/main.mjs"></script>
 </body>
 </html>
