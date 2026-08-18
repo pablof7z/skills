@@ -5,7 +5,7 @@
 
 import path from "node:path";
 import {
-  loadDoc, appendChange, validateOps, isBlockDocDir,
+  loadDoc, readChanges, fold, appendChange, validateOps, isBlockDocDir,
   commentOp, replyOp, resolveOp,
 } from "../../cli/doc.mjs";
 
@@ -15,6 +15,26 @@ export function isBlockDoc(dir) { return isBlockDocDir(dir); }
 export function getDocument(dir) {
   const doc = loadDoc(dir);
   if (!doc) return null;
+  return {
+    version: 1, docId: "deliverable", rev: doc.rev,
+    blocks: doc.blocks || [], comments: doc.comments || [], hash: doc.hash,
+    updatedAt: doc.updatedAt || null,
+  };
+}
+
+// Revision list (newest-first): { rev, at, title, by } for each change file.
+export function listRevisions(dir) {
+  return readChanges(dir)
+    .map((c) => ({ rev: c.rev, at: c.at, title: c.title, by: c.by }))
+    .sort((a, b) => b.rev - a.rev);
+}
+
+// Document state at a given rev: fold the change log up to rev N. Same shape
+// as getDocument, or null when no change files reach that rev.
+export function getDocumentAt(dir, rev) {
+  const changes = readChanges(dir).filter((c) => c.rev <= rev);
+  if (!changes.length) return null;
+  const doc = fold(changes);
   return {
     version: 1, docId: "deliverable", rev: doc.rev,
     blocks: doc.blocks || [], comments: doc.comments || [], hash: doc.hash,

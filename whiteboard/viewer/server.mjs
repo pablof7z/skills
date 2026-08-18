@@ -124,6 +124,14 @@ async function handleSession(req, res, root, project, slug, rest) {
   if (rest === "document" && m === "GET" && blockDoc) {
     return sendJson(res, 200, B.getDocument(dir));
   }
+  if (rest === "revisions" && m === "GET" && blockDoc)
+    return sendJson(res, 200, { revisions: B.listRevisions(dir) });
+  if (rest.startsWith("revisions/") && m === "GET" && blockDoc) {
+    const r = Number(rest.slice("revisions/".length));
+    const doc = B.getDocumentAt(dir, r);
+    if (!doc) return sendJson(res, 404, { error: "revision not found" });
+    return sendJson(res, 200, doc);
+  }
   if (rest === "deliverable" && m === "GET") {
     const d = S.readDeliverable(dir);
     S.snapshotVersion(dir, d.content);
