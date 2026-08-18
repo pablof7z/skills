@@ -3,12 +3,12 @@
 // (changes/<rev>.json). The ONLY way to mutate it is a staging transaction via
 // `wb change` (see staging.mjs): `wb change "<title>"` opens a staging area,
 // `wb change <op> …` stages ops, `wb change send` commits them as one named
-// change. `wb read` projects the fold. Session scope: --session / WB_SESSION
-// (no global fallback — see store.mjs).
+// change. `wb read` projects the fold. Session scope: --session / WB_SESSION /
+// per-agent owners map (store.mjs).
 
 import fs from "node:fs";
 import path from "node:path";
-import { resolveSession, listSessions, sessionDir, projectFromCwd, slugify, stampOwner } from "./store.mjs";
+import { resolveSession, claimSession, listSessions, sessionDir, projectFromCwd, slugify, stampOwner } from "./store.mjs";
 import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
 import { loadDoc, appendChange } from "./doc.mjs";
@@ -41,9 +41,7 @@ const HELP = `wb — whiteboard change-log document CLI
 
 The document = fold of changes/<rev>.json; every mutation is a staged \`wb change\` then \`wb change send\`.
 Ops are intent: comment/reply/resolve/flag/amend/detach ids + attachment state are derived for you.
-Scope: --session <project>/<slug> > WB_SESSION. No global fallback (a shared
-~/.wb/current would let concurrent agents clobber each other); pass --session or
-set WB_SESSION. The pi extension pins WB_SESSION from manifest.owner.
+Scope: --session <project>/<slug> > WB_SESSION > per-agent owners map (~/.wb/owners.json).
 A staging left open >5m auto-sends when you next start a new \`wb change "<title>"\`.`;
 
 function parse(argv) {
@@ -63,9 +61,11 @@ function parse(argv) {
 
 function out(obj) { process.stdout.write(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2) + "\n"); }
 
-// `wb new`/`wb use` can't update WB_SESSION (a child can't mutate its parent's
-// env), and there is no global current file to fall back on. So after creating
-// or claiming a session, print the exact value to use for the rest of the turn.
+// `wb new`/`wb use` record this agent's session in the per-agent owners map and
+// stamp manifest.owner. They can't set WB_SESSION (a child can't mutate parent
+// env), so they print the explicit --session value too — but later `wb` calls
+// with no --session auto-resolve via the owners map (keyed by PI_SESSION_ID or
+// the stable agent-harness pid, so concurrent agents never clobber each other).
 function printSessionHint(project, slug) {
   const target = `${project}/${slug}`;
   process.stderr.write(`for subsequent commands: --session ${target}  (or: export WB_SESSION=${target})\n`);
@@ -103,6 +103,7 @@ async function main() {
         appendChange(dir, { id: "initial", title: "Initial import", ops });
       }
       stampOwner(dir, process.env.WB_OWNER);
+      claimSession(project, slug);
       printSessionHint(project, slug);
       return out(`created ${project}/${slug} → ${dir}\n`);
     }
@@ -116,6 +117,7 @@ async function main() {
       if (!slug) throw new Error("usage: wb use <slug>");
       const project = projectFromCwd();
       stampOwner(sessionDir(project, slugify(slug)), process.env.WB_OWNER);
+      claimSession(project, slugify(slug));
       printSessionHint(project, slugify(slug));
       return out(`using ${project}/${slugify(slug)}\n`);
     }

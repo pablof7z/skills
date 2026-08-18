@@ -31,11 +31,68 @@ export function projectFromCwd(cwd = process.cwd()) {
   }
 }
 
-// Resolve a --session arg ("project/slug" or just "slug" using cwd's project) or
-// WB_SESSION env → { project, slug, dir }. There is NO global fallback: a shared
-// ~/.wb/current file would let concurrent agents silently clobber each other's
-// "current" session. The per-process WB_SESSION env is the safe per-agent pin
-// (the pi extension sets it from manifest.owner); everyone else passes --session.
+// Per-agent "current session" map: ~/.wb/owners.json, keyed by a STABLE
+// per-agent identity — not the ephemeral wb PID (each wb call is a new node
+// process) and not the project (which concurrent agents share). The key is:
+//   - `pi:<PI_SESSION_ID>` when pi sets PI_SESSION_ID (stable across /reload,
+//     changes only on /new//fork//switch; no pid recycling);
+//   - else `pid:<stable-ancestor-pid>` — the agent harness process above any
+//     intermediate shell (claude/codex/…), with its start time recorded to detect
+//     pid recycling after the agent exits.
+// This replaces the old per-project ~/.wb/current, which let concurrent agents
+// clobber each other. The map is per-agent, so two agents in the same project
+// each resolve to their own session.
+const OWNERS_FILE = path.join(os.homedir(), ".wb", "owners.json");
+const SHELLS = new Set(["bash", "-bash", "sh", "-sh", "zsh", "-zsh", "dash", "fish", "login"]);
+
+// Stable identity of the agent harness that spawned this wb invocation.
+// Returns { pid, start } where start is the ancestor's start time (to detect
+// pid recycling); start is "" if ps unavailable.
+function agentAncestor() {
+  try {
+    let cur = process.ppid, guard = 0;
+    while (guard++ < 16 && cur > 1) {
+      const out = execSync(`ps -o ppid=,comm=,lstart= -p ${cur}`, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+      const m = /^(\d+)\s+(\S+)\s+(.*)$/.exec(out);
+      if (!m) break;
+      const ppid = Number(m[1]), comm = m[2], start = m[3];
+      if (!SHELLS.has(comm)) return { pid: cur, start };
+      cur = ppid;
+    }
+  } catch {}
+  return { pid: process.ppid, start: "" };
+}
+
+// The per-agent key for the owners map (and the current ancestor start, to
+// validate pid entries on lookup). pi agents use PI_SESSION_ID (no ps needed).
+export function ownerKey() {
+  if (process.env.PI_SESSION_ID) return { key: `pi:${process.env.PI_SESSION_ID}`, pid: null, start: null };
+  const a = agentAncestor();
+  return { key: `pid:${a.pid}`, pid: a.pid, start: a.start };
+}
+
+function readOwners() {
+  try { return JSON.parse(fs.readFileSync(OWNERS_FILE, "utf8")); } catch { return {}; }
+}
+
+function writeOwners(o) {
+  fs.mkdirSync(path.dirname(OWNERS_FILE), { recursive: true });
+  fs.writeFileSync(OWNERS_FILE, JSON.stringify(o, null, 2) + "\n");
+}
+
+// Record that THIS agent is working in this session (called by wb new/wb use).
+export function claimSession(project, slug) {
+  const { key, start } = ownerKey();
+  if (!key) return;
+  const o = readOwners();
+  o[key] = { project, slug, at: new Date().toISOString(), start: start || undefined };
+  writeOwners(o);
+}
+
+// Resolve a --session arg ("project/slug" or just "slug" using cwd's project),
+// WB_SESSION env, or THIS agent's entry in the per-agent owners map →
+// { project, slug, dir }. The owners map is keyed per-agent (PI_SESSION_ID or
+// stable ancestor pid), so concurrent agents never clobber each other.
 export function resolveSession({ session, cwd = process.cwd() } = {}) {
   const project = projectFromCwd(cwd);
   let p = project, s = null;
@@ -45,6 +102,19 @@ export function resolveSession({ session, cwd = process.cwd() } = {}) {
   } else if (process.env.WB_SESSION) {
     const v = process.env.WB_SESSION;
     if (v.includes("/")) { const [a, b] = v.split("/"); p = a; s = b; } else { s = v; }
+  } else {
+    // per-agent owners map fallback
+    const { key, pid, start } = ownerKey();
+    if (key) {
+      const e = readOwners()[key];
+      if (e) {
+        const dir = path.join(ROOT, e.project, e.slug);
+        // drop stale entries: session dir gone, or ancestor pid recycled (start changed)
+        const recycled = pid && start && e.start && e.start !== start;
+        if (!recycled && fs.existsSync(dir)) { p = e.project; s = e.slug; }
+        else { const o = readOwners(); delete o[key]; writeOwners(o); }
+      }
+    }
   }
   if (!s) throw new Error(`no session: pass --session <project>/<slug> or set WB_SESSION (project=${p})`);
   return { project: p, slug: s, dir: path.join(ROOT, p, s) };

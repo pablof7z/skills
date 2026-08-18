@@ -113,12 +113,12 @@ wb change status                                 # peek at staged ops
 wb change send                                   # COMMIT staged ops as one change
 wb change discard                                # abort the staging transaction
 # Pass --by <your-name> (or set AGENT_NAME) so wb records you as the change author.
-# Scope: --session <project>/<slug> → WB_SESSION env. No global fallback (a shared
-# ~/.wb/current would let concurrent agents clobber each other); pass --session or
-# set WB_SESSION. `wb new`/`wb use` claim the session for this agent (stamps
-# manifest.owner from WB_OWNER) and print the exact --session value to use for the
-# rest of the turn — they can't set WB_SESSION (a child can't mutate parent env).
-# The pi extension pins WB_SESSION from manifest.owner (owner-scoped, no recency).
+# Scope: --session <project>/<slug> → WB_SESSION env → per-agent owners map
+# (~/.wb/owners.json, keyed by PI_SESSION_ID or the stable agent-harness pid).
+# `wb new`/`wb use` record this agent's session in the map + stamp manifest.owner;
+# later `wb` calls with no --session/WB_SESSION auto-resolve to THIS agent's session
+# (concurrent agents each get their own — no clobber). The pi extension also pins
+# WB_SESSION from manifest.owner (same identity).
 ```
 
 Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block boundaries:
