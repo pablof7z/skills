@@ -92,7 +92,6 @@ export function initBlockViewer(rootEl, project, slug) {
           <a class="back" href="/">← sessions</a>
           <span class="title" id="title">Whiteboard</span>
           <span class="status" id="status">exploring</span>
-          <span class="version" id="version">v—</span>
           <button class="diff-toggle" id="diff-toggle" type="button" title="Show changes">⇄</button>
           <button class="chat-toggle" id="chat-toggle" type="button" title="Chat with the agent">Chat</button>
           <span class="conn" id="conn">live</span>
@@ -115,7 +114,6 @@ export function initBlockViewer(rootEl, project, slug) {
   const tocList = document.getElementById("toc-list");
   const titleEl = document.getElementById("title");
   const statusEl = document.getElementById("status");
-  const versionEl = document.getElementById("version");
   const connEl = document.getElementById("conn");
   const notesEl = document.getElementById("notes");
   const drawerEl = document.getElementById("notes-drawer");
@@ -287,7 +285,6 @@ export function initBlockViewer(rootEl, project, slug) {
     titleEl.textContent = s.name || "Whiteboard";
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;
-    versionEl.textContent = `v${(d.hash || "").slice(0, 8)} · rev ${d.rev}`;
     notesEl.textContent = n.content || "(no notes yet)";
     renderBlocks();
     await codeblocks.enhance(docEl);
