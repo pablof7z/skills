@@ -191,7 +191,10 @@ export function initDiffMode({
   async function markRead() {
     await fetch(`${API}/viewed`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: String(state.doc?.rev ?? 0) }) });
     state.viewedRev = state.doc?.rev ?? 0;
-    populateSelects();
+    // "Done" = I've reviewed the changes. Mark viewed=current, then leave the
+    // diff and return to the normal doc view — so the next block-changing
+    // change (viewedRev < newRev, blocks>0) auto-enters the diff again.
+    await exit();
   }
 
   return { populate: populateSelects, render, enter, exit, markRead };
