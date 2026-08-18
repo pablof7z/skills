@@ -1,5 +1,6 @@
 // Explorer: lists all whiteboard sessions under the root with unread badges,
-// grouped by project. Live-updates via SSE.
+// as a flat list sorted by last activity. Live-updates via SSE. Project filter
+// pills persist their selection in localStorage.
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -12,6 +13,18 @@ function fmtDate(iso) {
   return iso.replace("T", " ").slice(0, 10);
 }
 
+function relativeTime(iso) {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return fmtDate(iso);
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 2592000) return `${Math.floor(s / 86400)}d ago`;
+  return fmtDate(iso);
+}
+
 function statusColor(status) {
   switch (status) {
     case "decided": return "#0a8a5f";
@@ -20,6 +33,8 @@ function statusColor(status) {
     default: return "#2f6feb";
   }
 }
+
+const LS_KEY = "wb-explorer-projects";
 
 export function initExplorer(root) {
   document.title = "Whiteboard — sessions";
@@ -33,48 +48,93 @@ export function initExplorer(root) {
     </div>`;
 
   const listEl = document.getElementById("ex-list");
+  let selectedProjects = new Set(JSON.parse(localStorage.getItem(LS_KEY) || "[]"));
+  let allSessions = [];
+
+  function saveSelected() {
+    localStorage.setItem(LS_KEY, JSON.stringify([...selectedProjects]));
+  }
 
   function sessionHref(p, slug) {
     return `/session/${encodeURIComponent(p)}/${encodeURIComponent(slug)}`;
   }
 
+  function renderPills(projects) {
+    const row = document.createElement("div");
+    row.className = "ex-filters";
+    const allActive = selectedProjects.size === 0;
+    row.appendChild(makePill("All", allActive, () => {
+      selectedProjects.clear();
+      saveSelected();
+      render(allSessions);
+    }));
+    for (const proj of projects) {
+      const active = selectedProjects.has(proj);
+      row.appendChild(makePill(proj, active, () => {
+        if (active) selectedProjects.delete(proj);
+        else selectedProjects.add(proj);
+        saveSelected();
+        render(allSessions);
+      }));
+    }
+    return row;
+  }
+
+  function makePill(label, active, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ex-pill" + (active ? " active" : "");
+    btn.textContent = label;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
   function render(sessions) {
-    document.getElementById("ex-sub").textContent = `${sessions.length} session${sessions.length === 1 ? "" : "s"}`;
+    allSessions = sessions;
+    const distinct = [...new Set(sessions.map((s) => s.project))].sort();
+    const shown = sessions.filter((s) => selectedProjects.size === 0 || selectedProjects.has(s.project));
+
+    document.getElementById("ex-sub").textContent =
+      `${shown.length} of ${sessions.length} session${sessions.length === 1 ? "" : "s"}`;
+
+    listEl.innerHTML = "";
+    listEl.appendChild(renderPills(distinct));
+
     if (sessions.length === 0) {
-      listEl.innerHTML = `<div class="ex-empty">No whiteboard sessions yet. Start one from a chat with the whiteboard skill.</div>`;
+      const empty = document.createElement("div");
+      empty.className = "ex-empty";
+      empty.textContent = "No whiteboard sessions yet. Start one from a chat with the whiteboard skill.";
+      listEl.appendChild(empty);
       return;
     }
-    // group by project
-    const byProject = new Map();
-    for (const s of sessions) {
-      if (!byProject.has(s.project)) byProject.set(s.project, []);
-      byProject.get(s.project).push(s);
+    if (shown.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "ex-empty";
+      empty.textContent = "No sessions match the selected project filter.";
+      listEl.appendChild(empty);
+      return;
     }
-    const projects = [...byProject.keys()].sort();
-    listEl.innerHTML = "";
-    for (const proj of projects) {
-      const sec = document.createElement("section");
-      sec.className = "ex-project";
-      sec.innerHTML = `<h2>${esc(proj)}</h2>`;
-      for (const s of byProject.get(proj)) {
-        const card = document.createElement("a");
-        card.className = "ex-card" + (s.unread > 0 ? " has-unread" : "");
-        card.href = sessionHref(s.project, s.slug);
-        const badge = s.unread > 0 ? `<span class="unread-badge">${s.unread}</span>` : "";
-        const status = `<span class="status-pill" style="color:${statusColor(s.status)};border-color:${statusColor(s.status)}40">${esc(s.status)}</span>`;
-        card.innerHTML = `
-          ${badge}
-          <div class="ex-card-main">
-            <div class="ex-card-name">${esc(s.name)}</div>
-            <div class="ex-card-meta">
-              ${status}
-              <span class="meta">${s.commentCount} comment${s.commentCount === 1 ? "" : "s"}</span>
-              ${s.lastActivity ? `<span class="meta">· ${esc(fmtDate(s.lastActivity))}</span>` : ""}
-            </div>
-          </div>`;
-        sec.appendChild(card);
-      }
-      listEl.appendChild(sec);
+
+    for (const s of shown) {
+      const card = document.createElement("a");
+      card.className = "ex-card" + (s.unread > 0 ? " has-unread" : "");
+      card.href = sessionHref(s.project, s.slug);
+      const badge = s.unread > 0 ? `<span class="unread-badge">${s.unread}</span>` : "";
+      const status = `<span class="status-pill" style="color:${statusColor(s.status)};border-color:${statusColor(s.status)}40">${esc(s.status)}</span>`;
+      const created = s.createdAt ? `<span class="meta">created ${esc(relativeTime(s.createdAt))}</span>` : "";
+      const active = s.lastActivity ? `<span class="meta">· active ${esc(relativeTime(s.lastActivity))}</span>` : "";
+      card.innerHTML = `
+        ${badge}
+        <div class="ex-card-main">
+          <div class="ex-card-name">${esc(s.name)}</div>
+          <div class="ex-card-meta">
+            ${status}
+            <span class="meta">${s.commentCount} comment${s.commentCount === 1 ? "" : "s"}</span>
+            ${created}
+            ${active}
+          </div>
+        </div>`;
+      listEl.appendChild(card);
     }
   }
 

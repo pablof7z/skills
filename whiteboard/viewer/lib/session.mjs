@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { readChanges } from "../../cli/doc.mjs";
 
 export const DELIVERABLE = "deliverable.md";
 export const NOTES = "notes.md";
@@ -214,7 +215,9 @@ export function listSessions(root) {
       const annos = readComments(dir);
       const seen = readSeen(dir);
       const latestAnno = annos.reduce((acc, a) => (a.created && a.created > acc ? a.created : acc), "");
-      const lastActivity = [m.createdAt || "", latestAnno].sort().pop() || "";
+      const changes = readChanges(dir);
+      const latestChangeAt = changes.reduce((acc, c) => ((c.at || "") > acc ? c.at : acc), "");
+      const lastActivity = [m.createdAt || "", latestAnno, latestChangeAt].sort().pop() || "";
       out.push({
         project,
         slug: name,

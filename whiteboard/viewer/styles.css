@@ -605,3 +605,13 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
 /* Resolved cards (shown when the pill is expanded) are NOT faded — only the
    resolve-button label ("↺ resolved") marks their state. */
 .thread.is-resolved .resolve-btn { color: var(--agent, #6b7280); border-color: var(--line, #e5e7eb); }
+
+/* ---- explorer project filter pills ---- */
+.ex-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 18px 0; }
+.ex-pill {
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  font: 600 12px/1 var(--sans); padding: 5px 10px; border-radius: 999px;
+  cursor: pointer; user-select: none; transition: color .12s, border-color .12s, background .12s;
+}
+.ex-pill:hover { color: var(--ink); }
+.ex-pill.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
