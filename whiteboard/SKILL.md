@@ -109,8 +109,8 @@ wb change status                                 # peek at staged ops
 wb change send                                   # COMMIT staged ops as one change
 wb change discard                                # abort the staging transaction
 # Pass --by <your-name> (or set AGENT_NAME) so wb records you as the change author.
-# Scope: --session <project>/<slug> → WB_SESSION env → ~/.wb/current. The pi
-# extension sets WB_SESSION for you; pass --session explicitly if it points elsewhere.
+# Scope: --session <project>/<slug> → WB_SESSION env → ~/.wb/current. Set
+# WB_SESSION to the current session (or pass --session) so wb targets it.
 ```
 
 Block names are unique lowercase slugs (`[a-z0-9-]`). `wb read` default output is the tagged projection so you see block boundaries:
@@ -214,11 +214,11 @@ node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
 
 `<skill-dir>` is the directory containing this `SKILL.md`. It binds to `127.0.0.1:4318` (override with `--port`). Tell the human the root URL (`http://127.0.0.1:4318/`) and the direct link to the current session: `http://127.0.0.1:4318/session/<project-slug>/<session-slug>` (a path, not a hash).
 
-**If the whiteboard pi extension is installed** (it auto-discovers from `~/.pi/agent/extensions/whiteboard/`), it already keeps the viewer running and watches for new comments/chat — do not launch the server yourself. It wakes you with a `[whiteboard] New …` message when a human comment or chat lands; follow the reply steps below.
+**If a viewer is already running on `127.0.0.1:4318`** (another agent or your harness may keep it running), reuse it — don't launch a second one. Some harnesses also wake you automatically when a comment or chat lands; if so, skip the watcher below and follow the reply steps when woken.
 
 ### Reply to comments and chat
 
-Comments and chat come from the viewer, not the host conversation. The pi extension (or `wait-for-comment.mjs` if no extension) wakes you with `[whiteboard] New comment on block "<block>" … (id <id>)` or `[whiteboard] New chat …`. Reply through `wb`, not by writing files by hand:
+Comments and chat come from the viewer, not the host conversation. Watch for them with `wait-for-comment.mjs` (below), or whatever wake mechanism your harness provides; when you receive a `[whiteboard] New comment on block "<block>" … (id <id>)` or `[whiteboard] New chat …` message, reply through `wb`, not by writing files by hand:
 
 **Comment** (`[whiteboard] New comment on block "goal" … (id c-xxxxx)`):
 ```bash
@@ -240,6 +240,16 @@ EOF
 Update the block document via `wb change` if the message changes the model.
 
 Do not answer a comment or chat only in the host conversation — the human is reviewing in the viewer, so the reply must land in the change log (comments) or `chat/` (chat) to appear there. Use the host conversation to surface that you replied and to discuss anything that changes the direction.
+
+### Watch for new items (portable)
+
+If your harness doesn't already wake you on viewer activity, run the inbox watcher as a background monitor for the current session:
+
+```bash
+node "<skill-dir>/whiteboard/viewer/wait-for-comment.mjs" "<session-dir>"
+```
+
+It baselines existing items, then exits (printing `comment:<id>` or `chat:<id>`) as soon as a new actionable item lands — a top-level human comment with no agent reply, or a human chat with no agent chat reply after it. Wire its completion to wake you, handle by kind (above), then relaunch it for the next item.
 
 ## Marking something for the human's attention
 
