@@ -159,7 +159,7 @@ export function initBlockViewer(rootEl, project, slug) {
         const badge = FLAG_BADGE[f];
         if (badge) flags += `<span class="block-flag ${badge.cls}" title="${esc(badge.title)}">${badge.icon}</span>`;
       }
-      sec.innerHTML = `<div class="block-head"><span class="block-name">${esc(b.name)}</span>${flags}</div><div class="block-md">${renderMarkdown(b.md)}</div>`;
+      sec.innerHTML = (flags ? '<div class="block-head">' + flags + '</div>' : '') + '<div class="block-md">' + renderMarkdown(b.md) + '</div>';
       docEl.appendChild(sec);
       // Highlight spans for OPEN comments and record which anchors still match the
       // current text. state.anchored[id] === true  -> highlighted in the doc (card
