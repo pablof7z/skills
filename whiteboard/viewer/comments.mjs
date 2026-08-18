@@ -191,7 +191,13 @@ export function initComments({ docEl, railEl, state, renderMarkdown, postComment
         card.innerHTML = `<div class="att-head"><span class="att-flag">⚑</span><span class="where">${esc(where)}</span></div><div class="att-reason">${renderBody(reason, renderMarkdown)}</div><div class="reply-box"><div class="row"><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Dismiss"}">${isResolved ? "↺ dismissed" : "✓ dismiss"}</button></div></div>`;
       } else {
         const ex = excerptOf(a);
-        card.innerHTML = `<div class="excerpt">${esc(ex.slice(0, 120))}${ex.length > 120 ? "…" : ""}<span class="where">${esc(where)}</span></div><div class="msg-list"></div><div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Mark resolved"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div></div>`;
+        // Only show the excerpt container when the quote could NOT be anchored
+        // inline. When matched, the <mark> in the content is the anchor, so
+        // reprinting the quoted text here would just duplicate it.
+        const excerptHtml = a._anchored === false
+          ? `<div class="excerpt">${esc(ex.slice(0, 120))}${ex.length > 120 ? "…" : ""}<span class="where">${esc(where)}</span></div>`
+          : "";
+        card.innerHTML = `${excerptHtml}<div class="msg-list"></div><div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="cancel">cancel</button><button class="send" disabled>Reply</button><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Mark resolved"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button></div></div>`;
         const list = card.querySelector(".msg-list");
         list.appendChild(renderMsg(a));
         for (const r of repliesOf(a.id)) list.appendChild(renderMsg(r));
