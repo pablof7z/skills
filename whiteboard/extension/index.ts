@@ -22,7 +22,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, execFile } from "node:child_process";
 import {
-  listSessions, loadDoc, isActionable, legacyActionable, chatActionable, sessionUnread,
+  listSessions, loadDoc, isActionable, legacyActionable, sessionUnread,
 } from "./scan.mjs";
 import { applyWbSession } from "./resolve.mjs";
 
@@ -40,6 +40,27 @@ const myProject = process.env.WHITEBOARD_PROJECT || path.basename(process.cwd())
 
 const nowIso = () => new Date().toISOString();
 const excerpt = (t: string, n = 120) => t.slice(0, n).replace(/\s+/g, " ").trim();
+
+// Human chat messages with no agent reply after them — inlined here (not
+// imported from scan.mjs) so a /reload picks it up even when the transitive
+// scan.mjs module is still cached from a prior load and lacks a new export.
+// Block-doc sessions have a chat/ queue (the viewer's chat sidebar writes to
+// it); this wakes the owning agent on unanswered user messages.
+function chatActionable(dir: string): { kind: string; id: string; block: null; text: string }[] {
+  const d = path.join(dir, "chat");
+  let files: string[];
+  try { files = fs.readdirSync(d).filter((f) => f.endsWith(".json")); } catch { return []; }
+  const msgs = files.map((f) => { try { return JSON.parse(fs.readFileSync(path.join(d, f), "utf8")); } catch { return null; } }).filter(Boolean)
+    .sort((a: any, b: any) => (a.created || "").localeCompare(b.created || ""));
+  const out: { kind: string; id: string; block: null; text: string }[] = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m: any = msgs[i];
+    if (m.role !== "user") continue;
+    const hasAgentAfter = msgs.slice(i + 1).some((x: any) => x.role === "agent" && (x.created || "") >= (m.created || ""));
+    if (!hasAgentAfter) out.push({ kind: "chat", id: m.id, block: null, text: m.text || "" });
+  }
+  return out;
+}
 
 async function isViewerUp() {
   try { const r = await fetch(`${VIEWER_URL}/api/sessions`); return r.ok; } catch { return false; }
