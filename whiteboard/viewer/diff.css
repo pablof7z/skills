@@ -1,0 +1,17 @@
+/* word-level inline diff (block viewer) — styling for worddiff.mjs.
+   Whole-line .wb-ins / .wb-del are already defined in styles.css; this file
+   only styles the inline <del>/<ins> word runs inside a paired .wb-mod block. */
+.wb-mod del {
+  color: var(--danger);
+  text-decoration: line-through;
+  background: rgba(248, 81, 73, 0.10);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.wb-mod ins {
+  color: var(--agent);
+  background: rgba(63, 185, 80, 0.14);
+  text-decoration: none;
+  border-radius: 2px;
+  padding: 0 1px;
+}
