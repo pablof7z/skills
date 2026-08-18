@@ -11,13 +11,17 @@ import {
 
 export function isBlockDoc(dir) { return isBlockDocDir(dir); }
 
-// Full document for the client: { version, docId, rev, blocks, comments, hash }.
+// Full document for the client: { version, docId, rev, blocks, comments,
+// attachments, hash }. `attachments` is the raw unified list (kind-discriminated)
+// so the viewer can render kind-specific annotations (e.g. "clarification")
+// directly, beyond the legacy comments/flags projection.
 export function getDocument(dir) {
   const doc = loadDoc(dir);
   if (!doc) return null;
   return {
     version: 1, docId: "deliverable", rev: doc.rev,
-    blocks: doc.blocks || [], comments: doc.comments || [], hash: doc.hash,
+    blocks: doc.blocks || [], comments: doc.comments || [],
+    attachments: doc.attachments || [], hash: doc.hash,
     updatedAt: doc.updatedAt || null,
   };
 }
@@ -45,7 +49,8 @@ export function getDocumentAt(dir, rev) {
   const doc = fold(changes);
   return {
     version: 1, docId: "deliverable", rev: doc.rev,
-    blocks: doc.blocks || [], comments: doc.comments || [], hash: doc.hash,
+    blocks: doc.blocks || [], comments: doc.comments || [],
+    attachments: doc.attachments || [], hash: doc.hash,
     updatedAt: doc.updatedAt || null,
   };
 }
