@@ -88,12 +88,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   function updateStatus(ctx: any) {
-    if (!ctx?.hasUI) return;
-    let unread = 0;
     try {
-      for (const s of listSessions(ROOT)) if (s.project === myProject) unread += sessionUnread(s);
-    } catch {}
-    ctx.ui.setStatus("whiteboard", unread > 0 ? `📓 ${unread} unread` : "📓 whiteboard");
+      if (!ctx?.hasUI) return;
+      let unread = 0;
+      try {
+        for (const s of listSessions(ROOT)) if (s.project === myProject) unread += sessionUnread(s);
+      } catch {}
+      ctx.ui.setStatus("whiteboard", unread > 0 ? `📓 ${unread} unread` : "📓 whiteboard");
+    } catch { /* ctx may be stale after session replacement/reload; skip silently */ }
   }
 
   // Baseline every actionable item so only NEW ones wake the agent. For block-doc
@@ -114,36 +116,43 @@ export default function (pi: ExtensionAPI) {
   }
 
   function poke(ctx: any) {
-    for (const s of listSessions(ROOT)) {
-      if (s.project !== myProject) continue; // only wake for this session's project
-      const where = `${s.project}/${s.slug}`;
-      if (s.blockDoc) {
-        const doc = loadDoc(s.dir);
-        if (!doc) continue;
-        const seen = seenComments.get(where) || new Set<string>();
-        for (const c of (doc.comments || [])) {
-          if (!isActionable(c) || seen.has(c.id)) continue;
-          seen.add(c.id);
-          handled.add(`blockcomment:${c.id}`);
-          const msg = `[whiteboard] New comment on block "${c.block}" in ${where}: "${excerpt(c.body)}". Reply with \`wb reply ${c.id} "<text>"\` then \`wb resolve ${c.id}\`.`;
-          try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
-        }
-        seenComments.set(where, seen);
-      } else {
-        for (const it of legacyActionable(s.dir)) {
-          const key = `${it.kind}:${it.id}`;
-          if (handled.has(key)) continue;
-          handled.add(key);
-          const replyIn = it.kind === "comment" ? "comments/ (write a reply annotation)" : "chat/ (write an agent chat message)";
-          const msg = `[whiteboard] New ${it.kind} in ${where}:\n"${excerpt(it.text, 240)}"\n\nRead it and reply in that session's ${replyIn} dir so it appears in the viewer.`;
-          try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
+    try {
+      for (const s of listSessions(ROOT)) {
+        if (s.project !== myProject) continue; // only wake for this session's project
+        const where = `${s.project}/${s.slug}`;
+        if (s.blockDoc) {
+          const doc = loadDoc(s.dir);
+          if (!doc) continue;
+          const seen = seenComments.get(where) || new Set<string>();
+          for (const c of (doc.comments || [])) {
+            if (!isActionable(c) || seen.has(c.id)) continue;
+            seen.add(c.id);
+            handled.add(`blockcomment:${c.id}`);
+            const msg = `[whiteboard] New comment on block "${c.block}" in ${where}: "${excerpt(c.body)}". Reply with \`wb reply ${c.id} "<text>"\` then \`wb resolve ${c.id}\`.`;
+            try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
+          }
+          seenComments.set(where, seen);
+        } else {
+          for (const it of legacyActionable(s.dir)) {
+            const key = `${it.kind}:${it.id}`;
+            if (handled.has(key)) continue;
+            handled.add(key);
+            const replyIn = it.kind === "comment" ? "comments/ (write a reply annotation)" : "chat/ (write an agent chat message)";
+            const msg = `[whiteboard] New ${it.kind} in ${where}:\n"${excerpt(it.text, 240)}"\n\nRead it and reply in that session's ${replyIn} dir so it appears in the viewer.`;
+            try { pi.sendUserMessage(msg, { deliverAs: "followUp" }); } catch (e) { console.error("whiteboard wake failed:", e); }
+          }
         }
       }
-    }
-    updateStatus(ctx);
+      updateStatus(ctx);
+    } catch (e) { console.error("whiteboard poke failed:", e); }
   }
 
   function startWatcher(ctx: any) {
+    // Close any prior watcher + pending debounce so a re-bind (session_start on
+    // /new, /fork, /reload) never leaks a stale watcher firing poke with an old ctx.
+    try { watcher?.close(); } catch {}
+    watcher = null;
+    if (debounce) { clearTimeout(debounce); debounce = null; }
     try {
       watcher = fs.watch(ROOT, { recursive: true }, () => {
         if (debounce) clearTimeout(debounce);
@@ -171,7 +180,7 @@ export default function (pi: ExtensionAPI) {
     if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
     try { watcher?.close(); } catch {}
     watcher = null;
-    if (ctx?.hasUI) ctx.ui.setStatus("whiteboard", undefined);
+    try { if (ctx?.hasUI) ctx.ui.setStatus("whiteboard", undefined); } catch {}
     // Viewer is a persistent daemon: kept across /new, /resume, /reload, and
     // even after pi quits. Stop it manually with: pkill -f viewer/server.mjs
   });

@@ -97,7 +97,8 @@ html, body {
   margin: 0 auto;
   padding: 36px 48px 120px 208px; /* left room for the floating TOC */
 }
-.doc-wrap.comments-on { padding-right: 300px; } /* right room for margin notes */
+.doc-wrap.comments-on { max-width: none; margin: 0; padding-right: 300px; } /* span full width so the margin rail docks to the viewport's right edge */
+.doc-wrap.comments-on > #doc { max-width: 760px; margin-left: auto; margin-right: auto; }
 /* When Comments tab is active, the margin rail IS the comment area; drop the
    420px sidebar so the document isn't squeezed by both. */
 .app.comments-on { grid-template-columns: 1fr; }
@@ -106,7 +107,7 @@ html, body {
 /* margin-note rail: shares the document scroll, cards positioned by anchor Y */
 .margin-rail {
   position: absolute;
-  top: 0; right: 20px; bottom: 0;
+  top: 0; right: 12px; bottom: 0;
   width: 272px;
   display: none;
 }
@@ -481,24 +482,52 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
 .change-bar.top { top: 52px; }
 .change-bar.bottom { bottom: 14px; }
 
-/* ---- dark mode ---- */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #8b949e;
-    --line: #30363d; --accent: #58a6ff; --accent-soft: rgba(88,166,255,0.16);
-    --mark: #3d3210; --mark-active: #5a4a18; --user: #58a6ff; --agent: #3fb950;
-    --danger: #f85149;
-  }
-  #doc code { background: #1f2428; }
-  #doc pre { background: #0d1117; border: 1px solid var(--line); }
-  .diff-banner { background: #2a230f; border-bottom-color: #43361a; color: #d9b85a; }
-  .diff-banner button { background: #d9b85a; color: #2a230f; }
-  .wb-ins { background: rgba(63,185,80,0.12); border-left-color: #3fb950; }
-  .wb-del { background: rgba(248,81,73,0.12); border-left-color: #f85149; color: #ffa39e; }
-  .mermaid { background: var(--panel); }
-  .comment-fab { box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
-  .margin-rail .thread { box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+/* ---- dark mode (forced via data-theme="dark"; auto follows OS) ---- */
+:root[data-theme="dark"] {
+  --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #8b949e;
+  --line: #30363d; --accent: #58a6ff; --accent-soft: rgba(88,166,255,0.16);
+  --mark: #3d3210; --mark-active: #5a4a18; --user: #58a6ff; --agent: #3fb950;
+  --danger: #f85149;
 }
+:root[data-theme="dark"] #doc code { background: #1f2428; }
+:root[data-theme="dark"] #doc pre { background: #0d1117; border: 1px solid var(--line); }
+:root[data-theme="dark"] .diff-banner { background: #2a230f; border-bottom-color: #43361a; color: #d9b85a; }
+:root[data-theme="dark"] .diff-banner button { background: #d9b85a; color: #2a230f; }
+:root[data-theme="dark"] .wb-ins { background: rgba(63,185,80,0.12); border-left-color: #3fb950; }
+:root[data-theme="dark"] .wb-del { background: rgba(248,81,73,0.12); border-left-color: #f85149; color: #ffa39e; }
+:root[data-theme="dark"] .mermaid { background: var(--panel); }
+:root[data-theme="dark"] .comment-fab { box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+:root[data-theme="dark"] .margin-rail .thread { box-shadow: 0 2px 10px rgba(0,0,0,0.4); }
+
+/* ---- theme menu (top-right button + dropdown) ---- */
+.theme-menu { position: fixed; top: 12px; right: 14px; z-index: 60; }
+.theme-menu-btn {
+  width: 30px; height: 30px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--muted); border-radius: 8px;
+  cursor: pointer; font-size: 15px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.theme-menu-btn:hover { color: var(--ink); }
+.theme-menu-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.theme-menu-panel {
+  position: absolute; top: 36px; right: 0; min-width: 132px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.14); padding: 6px; z-index: 61;
+}
+.theme-menu-panel[hidden] { display: none; }
+.theme-menu-title {
+  font: 600 11px/1 var(--sans); color: var(--muted);
+  padding: 4px 8px 6px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.theme-menu-panel button[role="menuitemradio"] {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: 0; background: transparent; color: var(--ink);
+  font: 13px/1 var(--sans); padding: 7px 8px; border-radius: 7px; cursor: pointer;
+}
+.theme-menu-panel button[role="menuitemradio"]:hover { background: var(--accent-soft); }
+.theme-menu-panel button[role="menuitemradio"][aria-checked="true"] { color: var(--accent); font-weight: 600; }
+.theme-menu-panel button[role="menuitemradio"][aria-checked="true"]::before { content: "✓"; font-size: 12px; color: var(--accent); }
+:root[data-theme="dark"] .theme-menu-btn { box-shadow: 0 1px 6px rgba(0,0,0,0.45); }
+:root[data-theme="dark"] .theme-menu-panel { box-shadow: 0 6px 22px rgba(0,0,0,0.5); }
 
 /* resolved margin notes: greyed, collapsed to just the excerpt */
 .margin-rail .thread.resolved { opacity: 0.62; border-style: dashed; }
@@ -538,11 +567,9 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
 /* TOC: attention dot (amber) overrides change dot when a section has both */
 .toc-item.has-attention .dot { background: #d97706; }
 
-@media (prefers-color-scheme: dark) {
-  mark.wb-attention { background: #4a3502; color: #fde68a; border-bottom-color: #d97706; }
-  .margin-rail .thread.attention { background: #2a2308; }
-  .attention-bar { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
-}
+:root[data-theme="dark"] mark.wb-attention { background: #4a3502; color: #fde68a; border-bottom-color: #d97706; }
+:root[data-theme="dark"] .margin-rail .thread.attention { background: #2a2308; }
+:root[data-theme="dark"] .attention-bar { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
 
 /* ---- block-document viewer (document.json) ---- */
 .app.block-app { grid-template-columns: 1fr; }
@@ -555,8 +582,6 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
 .flag-attention { background: #fde68a; color: #92400e; }
 .flag-decided { background: #d1fae5; color: #065f46; }
 .flag-superseded { background: #e5e7eb; color: #6b7280; text-decoration: line-through; }
-@media (prefers-color-scheme: dark) {
-  .flag-attention { background: #4a3502; color: #fde68a; }
-  .flag-decided { background: #052e1a; color: #6ee7b7; }
-  .flag-superseded { background: #2a2a2a; color: #9ca3af; }
-}
+:root[data-theme="dark"] .flag-attention { background: #4a3502; color: #fde68a; }
+:root[data-theme="dark"] .flag-decided { background: #052e1a; color: #6ee7b7; }
+:root[data-theme="dark"] .flag-superseded { background: #2a2a2a; color: #9ca3af; }
