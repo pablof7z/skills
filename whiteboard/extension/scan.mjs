@@ -9,7 +9,11 @@ import { actionableComments, chatActionable, isActionable, actionableItems } fro
 
 export { isActionable, actionableComments, chatActionable, actionableItems, loadDoc };
 export const isBlockDoc = isBlockDocDir;
-export const isSessionDir = (n) => /^\d{4}-\d{2}-.+/.test(n);
+// A session dir is identified by its manifest.json, not by a slug naming
+// convention. The previous date-prefix regex hid any session whose slug did
+// not start with YYYY-MM- (e.g. ones created via the pi wb_new tool, which
+// does not auto-prefix) from listings.
+export const isSessionDir = (dir) => fs.existsSync(path.join(dir, "manifest.json"));
 
 function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return fallback; }
@@ -22,9 +26,10 @@ export function listSessions(root) {
     const pd = path.join(root, project);
     if (!fs.statSync(pd).isDirectory()) continue;
     for (const name of fs.readdirSync(pd)) {
-      if (!isSessionDir(name)) continue;
       const dir = path.join(pd, name);
-      if (!fs.statSync(dir).isDirectory() || !isBlockDoc(dir)) continue;
+      if (!fs.statSync(dir).isDirectory()) continue;
+      if (!isSessionDir(dir)) continue;
+      if (!isBlockDoc(dir)) continue;
       const manifest = readJson(path.join(dir, "manifest.json"), null);
       out.push({ project, slug: name, dir, owner: manifest?.owner || null });
     }

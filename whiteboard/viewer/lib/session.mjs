@@ -15,8 +15,12 @@ export const MANIFEST = "manifest.json";
 export const CHAT_DIR = "chat";
 export const VIEWED_FILE = ".viewed.json";
 
-export function isSessionDir(name) {
-  return /^\d{4}-\d{2}-.+/.test(name);
+// A session dir is identified by its manifest.json, not by a slug naming
+// convention. The previous date-prefix regex hid any session whose slug did
+// not start with YYYY-MM- (e.g. ones created via the pi wb_new tool, which
+// does not auto-prefix) from the viewer's session list.
+export function isSessionDir(dir) {
+  return fs.existsSync(path.join(dir, MANIFEST));
 }
 
 export function ensureDirs(sessionDir) {
@@ -92,9 +96,9 @@ export function listSessions(root) {
     const projDir = path.join(root, project);
     if (!fs.statSync(projDir).isDirectory()) continue;
     for (const name of fs.readdirSync(projDir)) {
-      if (!isSessionDir(name)) continue;
       const dir = path.join(projDir, name);
       if (!fs.statSync(dir).isDirectory()) continue;
+      if (!isSessionDir(dir)) continue;
       const m = readManifest(dir);
       const changes = readChanges(dir);
       const latestChangeAt = changes.reduce((acc, c) => ((c.at || "") > acc ? c.at : acc), "");
