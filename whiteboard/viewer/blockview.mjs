@@ -224,6 +224,25 @@ export function initBlockViewer(rootEl, project, slug) {
     return top + card.offsetHeight;
   }
 
+  // A needs-attention marker (motivation "highlighting") renders as an amber
+  // callout, not a replyable comment thread: ⚑ + the reason + a dismiss button.
+  function renderAttention(b, c, anchorY, lastBottom) {
+    const card = document.createElement("div");
+    card.className = "thread attention" + (state.activeId === c.id ? " active" : "");
+    card.dataset.annoId = c.id;
+    card.innerHTML = `<div class="att-head"><span class="att-flag">⚑</span><span class="where" data-at="${esc(c.at)}">${ago(c.at)}</span></div><div class="att-reason">${renderBody(c.body || "Needs your attention.")}</div><div class="reply-box"><div class="row"><button class="resolve-btn" type="button">✓ dismiss</button></div></div>`;
+    card.querySelector(".resolve-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await fetch(`${API}/resolved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, resolved: true, by: "user" }) });
+      await runRefresh();
+    });
+    card.addEventListener("click", () => { state.activeId = c.id; railEl.querySelectorAll(".thread").forEach((t) => t.classList.toggle("active", t === card)); });
+    railEl.appendChild(card);
+    const top = Math.max(anchorY, lastBottom + 8);
+    card.style.top = `${top}px`;
+    return top + card.offsetHeight;
+  }
+
   function renderComments() {
     railEl.innerHTML = "";
     let lastBottom = -8;
@@ -232,8 +251,11 @@ export function initBlockViewer(rootEl, project, slug) {
       if (!sec) continue;
       const anchorY = sec.offsetTop;
       const all = commentsOn(b.name);
-      const open = all.filter((c) => !state.resolved.has(c.id));
-      const resolved = all.filter((c) => state.resolved.has(c.id));
+      const att = all.filter((c) => c.motivation === "highlighting" && !state.resolved.has(c.id));
+      const reg = all.filter((c) => c.motivation !== "highlighting");
+      const open = reg.filter((c) => !state.resolved.has(c.id));
+      const resolved = reg.filter((c) => state.resolved.has(c.id));
+      for (const c of att) lastBottom = renderAttention(b, c, anchorY, lastBottom);
       for (const c of open) lastBottom = renderCard(b, c, anchorY, lastBottom, false);
       if (resolved.length > 0) {
         const expanded = !!state.showResolved[b.name];
