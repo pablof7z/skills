@@ -99,6 +99,9 @@ async function execute(_toolCallId, p, _signal, _onUpdate, _ctx) {
   let s;
   try { s = resolveSession({ session: p.session }); }
   catch (e) { return err(`whiteboard: ${e.message}`); }
+  if (!fs.existsSync(path.join(s.dir, "manifest.json"))) {
+    return err(`whiteboard: no session "${s.project}/${s.slug}" — create it first: action "session", sub "new", name "${s.slug}"`);
+  }
   try {
     if (p.action === "note") {
       if (!p.text) return err("whiteboard note: `text` is required");
