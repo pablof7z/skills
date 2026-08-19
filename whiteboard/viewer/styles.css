@@ -472,6 +472,10 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
 .toc-item.has-changes .dot { background: var(--accent); }
 .toc-item.toc-h2 { padding-left: 16px; }
 .toc-item.toc-h3 { padding-left: 28px; }
+.toc-item.toc-h4 { padding-left: 40px; }
+.toc-item.toc-file { font-weight: 600; color: var(--ink); padding: 6px 6px 3px; margin-top: 10px; font-size: 11px; }
+.toc-item.toc-file:first-child { margin-top: 0; }
+.toc-item.toc-file .toc-text { opacity: 0.9; }
 .toc-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- minimap ---- */
@@ -548,50 +552,14 @@ mark.wb-anno.active { background: var(--mark-active); box-shadow: 0 0 0 2px rgba
 .margin-rail .thread .resolve-btn:hover { color: var(--accent); border-color: var(--accent); }
 .margin-rail .thread.resolved .resolve-btn { color: var(--agent); border-color: var(--agent); }
 
-/* ---- agent attention markers ---- */
-mark.wb-attention {
-  background: #fde68a; border-bottom: 2px solid #d97706; color: #4a3502;
-  border-radius: 2px; padding: 0 2px; cursor: pointer; transition: box-shadow 0.12s;
-}
-mark.wb-attention::before { content: "⚑"; color: #d97706; font-size: 0.78em; margin-right: 2px; }
-mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
-.margin-rail .thread.attention { border-color: #d97706; background: #fffbeb; }
-.margin-rail .thread.attention.resolved { opacity: 0.6; border-style: dashed; }
-.margin-rail .thread.attention .att-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.margin-rail .thread.attention .att-flag { color: #d97706; font-size: 14px; }
-.margin-rail .thread.attention .att-reason { font-size: 12.5px; color: var(--ink); }
-.margin-rail .thread.attention.resolved .att-reason { color: var(--muted); }
-
-/* DocuSign-style attention jump pill */
-.attention-bar {
-  position: fixed; left: 224px; top: 52px; z-index: 40;
-  background: #d97706; color: #fff; font-size: 12.5px; font-weight: 600;
-  padding: 5px 12px; border-radius: 999px; cursor: pointer;
-  box-shadow: 0 4px 16px rgba(217,119,6,0.4); user-select: none;
-}
-.attention-bar:hover { filter: brightness(1.07); }
-
-/* TOC: attention dot (amber) overrides change dot when a section has both */
+/* TOC: a block with any annotation gets a dot */
 .toc-item.has-attention .dot { background: #d97706; }
-
-:root[data-theme="dark"] mark.wb-attention { background: #4a3502; color: #fde68a; border-bottom-color: #d97706; }
-:root[data-theme="dark"] .margin-rail .thread.attention { background: #2a2308; }
-:root[data-theme="dark"] .attention-bar { box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
 
 /* ---- block-document viewer (document.json) ---- */
 .app.block-app { grid-template-columns: 1fr; }
 .doc-wrap-block { max-width: 1080px; }
 .block { padding: 2px 0 18px; border-bottom: 1px solid var(--border, #e5e7eb); }
 .block:last-child { border-bottom: none; }
-.block-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
-.block-name { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted, #6b7280); letter-spacing: 0.02em; }
-.block-flag { font-size: 12px; font-weight: 700; padding: 1px 5px; border-radius: 6px; }
-.flag-attention { background: #fde68a; color: #92400e; }
-.flag-decided { background: #d1fae5; color: #065f46; }
-.flag-superseded { background: #e5e7eb; color: #6b7280; text-decoration: line-through; }
-:root[data-theme="dark"] .flag-attention { background: #4a3502; color: #fde68a; }
-:root[data-theme="dark"] .flag-decided { background: #052e1a; color: #6ee7b7; }
-:root[data-theme="dark"] .flag-superseded { background: #2a2a2a; color: #9ca3af; }
 
 /* ---- block-doc resolved: subtle "N resolved" indicator (not a faded card) ---- */
 .resolved-pill {
@@ -635,3 +603,43 @@ mark.wb-attention.active { box-shadow: 0 0 0 2px rgba(217,119,6,0.55); }
   padding-left: 6px;
 }
 :root[data-theme="dark"] .margin-rail .thread .excerpt-quote.stale { color: #fbbf24; border-left-color: #d97706; }
+
+/* ---- annotation kinds (color by kind; replaces the old attention/flag model) ---- */
+.kind-badge { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 5px; font-size: 10px; font-weight: 700; line-height: 1; margin-right: 4px; flex: 0 0 auto; }
+.wb-tag { position: absolute; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 8px; font-size: 11.5px; line-height: 1.4; border: 1px solid var(--line, #e5e7eb); background: var(--panel, #f9fafb); }
+.wb-tag .tag-icon { font-size: 12px; flex: 0 0 auto; }
+.wb-tag .tag-label { font-weight: 600; flex: 0 0 auto; }
+.wb-tag .tag-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; opacity: 0.8; }
+.composer-kind { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); }
+.composer .row { gap: 6px; }
+
+/* per-kind accent colors (light) */
+.k-question       { --k: #3b82f6; --k-bg: #eff6ff; --k-ink: #1e40af; }
+.k-warning        { --k: #f59e0b; --k-bg: #fffbeb; --k-ink: #92400e; }
+.k-objection      { --k: #ef4444; --k-bg: #fef2f2; --k-ink: #991b1b; }
+.k-note           { --k: #9ca3af; --k-bg: #f3f4f6; --k-ink: #4b5563; }
+.k-unverified     { --k: #9ca3af; --k-bg: #f3f4f6; --k-ink: #4b5563; }
+.k-superseded     { --k: #6b7280; --k-bg: #f3f4f6; --k-ink: #374151; }
+.k-needs-attention { --k: #f59e0b; --k-bg: #fffbeb; --k-ink: #92400e; }
+.k-decided        { --k: #10b981; --k-bg: #ecfdf5; --k-ink: #065f46; }
+
+.kind-badge { background: var(--k-bg); color: var(--k-ink); }
+.margin-rail .thread.k-question, .margin-rail .thread.k-warning, .margin-rail .thread.k-objection,
+.margin-rail .thread.k-note { border-left: 3px solid var(--k); }
+.wb-tag { border-color: var(--k); background: var(--k-bg); color: var(--k-ink); }
+.wb-tag .tag-icon { color: var(--k); }
+mark.wb-anno.k-question, mark.wb-anno.k-warning, mark.wb-anno.k-objection,
+mark.wb-anno.k-note, mark.wb-anno.k-unverified, mark.wb-anno.k-superseded,
+mark.wb-anno.k-needs-attention, mark.wb-anno.k-decided {
+  background: var(--k-bg); border-bottom: 2px solid var(--k); color: var(--k-ink);
+}
+.toc-item.has-attention .dot { background: var(--k, #d97706); }
+
+/* dark theme kind colors */
+:root[data-theme="dark"] .k-question       { --k-bg: #0f2748; --k-ink: #93c5fd; }
+:root[data-theme="dark"] .k-warning, :root[data-theme="dark"] .k-needs-attention { --k-bg: #2a2308; --k-ink: #fde68a; }
+:root[data-theme="dark"] .k-objection      { --k-bg: #3b0d0d; --k-ink: #fca5a5; }
+:root[data-theme="dark"] .k-note, :root[data-theme="dark"] .k-unverified { --k-bg: #2a2a2a; --k-ink: #d1d5db; }
+:root[data-theme="dark"] .k-superseded     { --k-bg: #2a2a2a; --k-ink: #9ca3af; }
+:root[data-theme="dark"] .k-decided        { --k-bg: #052e1a; --k-ink: #6ee7b7; }
+:root[data-theme="dark"] .wb-tag { background: var(--k-bg); }

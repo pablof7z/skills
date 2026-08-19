@@ -25,7 +25,7 @@ import { spawn, execFile } from "node:child_process";
 import {
   listSessions, loadDoc, isActionable, chatActionable, sessionUnread,
 } from "./scan.mjs";
-import { registerWhiteboardTool } from "./tool.mjs";
+import { registerWhiteboardTools, setCurrentSession, getCurrentSession } from "./tool.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VIEWER_DIR = path.join(__dirname, "..", "viewer");
@@ -35,8 +35,6 @@ const ROOT = path.join(os.homedir(), "whiteboard");
 const PORT = Number(process.env.WHITEBOARD_PORT || "4318");
 const VIEWER_URL = `http://127.0.0.1:${PORT}`;
 const myProject = process.env.WHITEBOARD_PROJECT || path.basename(process.cwd());
-
-const excerpt = (t: string, n = 120) => t.slice(0, n).replace(/\s+/g, " ").trim();
 
 // pi-tui is only resolvable inside pi's runtime. Resolve lazily so the module
 // loads under bare-node tests; the renderer falls back to WhiteboardLine there.
@@ -139,6 +137,13 @@ export default function (pi: ExtensionAPI) {
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let mySessionId: string | null = null;
+  let toolsRegistered = false;
+  // Resolve typebox (jiti alias under pi; null under bare-node tests) and register
+  // the 9 whiteboard tools. toolsReady is awaited in session_start so the active
+  // set is applied AFTER the tools exist (setActiveTools ignores unknown names).
+  const toolsReady = import("typebox")
+    .then((m: any) => m?.Type).catch(() => null)
+    .then((Type: any) => { if (Type && !toolsRegistered) { registerWhiteboardTools(pi as any, Type); toolsRegistered = true; } });
   const handled = new Set<string>();
   const seenComments = new Map<string, Set<string>>();
 
@@ -154,12 +159,38 @@ export default function (pi: ExtensionAPI) {
     for (let i = 0; i < 25; i++) { if (await isViewerUp()) return; await new Promise((r) => setTimeout(r, 200)); }
   }
 
+  // The active session for THIS pi session: the tool-tracked current session
+  // (set by wb_new/wb_use) wins; else the most-recently-modified session we own
+  // (manifest.owner === mySessionId); else the most-recently-modified session in
+  // this project (last-resort so the footer always shows *something* — the
+  // session being worked on is usually the newest). Tool resolution stays
+  // separate (currentSession only); this is footer/info display.
+  function activeSession(): string | null {
+    const t = getCurrentSession();
+    if (t) return t;
+    const owned = resolveOwnedSession(myProject, ROOT, mySessionId);
+    if (owned) return `${owned.project}/${owned.slug}`;
+    let best: any = null, bestM = 0;
+    try {
+      for (const s of listSessions(ROOT)) {
+        if (s.project !== myProject) continue;
+        const m = fs.statSync(s.dir).mtimeMs;
+        if (m > bestM) { bestM = m; best = s; }
+      }
+    } catch {}
+    return best ? `${best.project}/${best.slug}` : null;
+  }
+
   function updateStatus(ctx: any) {
     try {
-      if (!ctx?.hasUI) return;
+      const sess = activeSession();
       let unread = 0;
       try { for (const s of listSessions(ROOT)) if (s.project === myProject && mine(s)) unread += sessionUnread(s); } catch {}
-      ctx.ui.setStatus("whiteboard", unread > 0 ? `📓 ${unread} unread` : "📓 whiteboard");
+      // Show the active whiteboard session in the footer, with unread count when any.
+      // No hasUI guard: setStatus is a safe no-op in non-UI modes (per docs), and
+      // guarding on ctx.hasUI skipped the set when hasUI was undefined in the TUI.
+      const label = sess ? `📓 ${sess}${unread ? ` · ${unread} unread` : ""}` : "📓 whiteboard (no session)";
+      ctx?.ui?.setStatus?.("whiteboard", label);
     } catch {}
   }
 
@@ -168,8 +199,8 @@ export default function (pi: ExtensionAPI) {
       if (s.project !== myProject || !mine(s)) continue;
       const doc = loadDoc(s.dir);
       const where = `${s.project}/${s.slug}`;
-      seenComments.set(where, new Set((doc?.comments || []).map((c: any) => c.id)));
-      for (const c of doc?.comments || []) if (isActionable(c)) handled.add(`comment:${c.id}`);
+      seenComments.set(where, new Set((doc?.annotations || []).map((c: any) => c.id)));
+      for (const c of doc?.annotations || []) if (isActionable(c)) handled.add(`annotation:${c.id}`);
       for (const it of chatActionable(s.dir)) handled.add(`chat:${it.id}`);
     }
   }
@@ -189,10 +220,11 @@ export default function (pi: ExtensionAPI) {
         const doc = loadDoc(s.dir);
         if (doc) {
           const seen = seenComments.get(where) || new Set<string>();
-          for (const c of doc.comments || []) {
+          for (const c of doc.annotations || []) {
             if (!isActionable(c) || seen.has(c.id)) continue;
-            seen.add(c.id); handled.add(`comment:${c.id}`);
-            wake(`New comment on block "${c.block}" in ${where}: "${excerpt(c.body)}" (id ${c.id}). Reply via the whiteboard tool: change sub "reply" threadId "${c.id}" text "…", then "resolve" threadId "${c.id}", then "send".`);
+            seen.add(c.id); handled.add(`annotation:${c.id}`);
+            const anchorPart = c.selector?.exact ? `> ${c.selector.exact}\n\n` : "";
+            wake(`Annotation (${c.kind}) on block "${c.block}" in ${where} (id ${c.id}):\n${anchorPart}User's message:\n${c.body || ""}`);
           }
           seenComments.set(where, seen);
         }
@@ -200,7 +232,7 @@ export default function (pi: ExtensionAPI) {
           const key = `chat:${it.id}`;
           if (handled.has(key)) continue;
           handled.add(key);
-          wake(`New chat in ${where}:\n${excerpt(it.text, 240)}\n\nReply by writing an agent chat message into that session's chat/ dir so it appears in the viewer.`);
+          wake(`New chat in ${where}:\n${it.text || ""}\n\nReply by writing an agent chat message into that session's chat/ dir so it appears in the viewer.`);
         }
       }
       updateStatus(ctx);
@@ -226,15 +258,25 @@ export default function (pi: ExtensionAPI) {
     return new WhiteboardLine(body, pad);
   });
 
-  registerWhiteboardTool(pi as any);
-
   pi.on("session_start", async (_event, ctx) => {
     await ensureViewer();
     try { mySessionId = ctx?.sessionManager?.getSessionId?.() || null; } catch { mySessionId = null; }
     if (mySessionId) process.env.WB_OWNER = mySessionId;
     const cur = resolveOwnedSession(myProject, ROOT, mySessionId);
+    // Tools must be registered before setActiveTools (unknown names are ignored).
+    await toolsReady;
+    try {
+      if ((pi as any).getActiveTools && (pi as any).setActiveTools) {
+        const DOC = new Set(["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_attach", "wb_tag"]);
+        let active: string[] = (pi as any).getActiveTools().filter((n: string) => !DOC.has(n));
+        active = [...new Set([...active, "wb_new", "wb_list"])];   // fresh agent: only the two loaders
+        if (cur) active = [...new Set([...active, ...DOC])];         // owning agent: unlock everything (smooth wake)
+        (pi as any).setActiveTools(active);
+      }
+    } catch {}
     if (cur) {
       process.env.WB_SESSION = `${cur.project}/${cur.slug}`;
+      setCurrentSession(`${cur.project}/${cur.slug}`);
       if (ctx?.hasUI) ctx.ui.notify(`whiteboard session: ${cur.project}/${cur.slug}`, "info");
     }
     baseline();
@@ -259,7 +301,8 @@ export default function (pi: ExtensionAPI) {
       const argv = (args || "").trim();
       if (!argv) {
         await ensureViewer();
-        ctx.ui.notify(`whiteboard\n  session: ${process.env.WB_SESSION || "(none)"}\n  viewer:   ${VIEWER_URL}/`, "info");
+        const sess = activeSession() || "(none)";
+        ctx.ui.notify(`whiteboard\n  session: ${sess}\n  viewer:   ${VIEWER_URL}/`, "info");
         return;
       }
       const parts = tokenize(argv);

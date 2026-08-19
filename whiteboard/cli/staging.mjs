@@ -12,15 +12,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  loadDoc, readChanges, appendChange, fold, validateOps, changeIdFor, selectorFor,
-  attachOp, replyOp, resolveOp, detachOp, amendOp, flagOp,
+  loadDoc, readChanges, appendChange, fold, validateOps, validateOpsInOrder, changeIdFor,
+  DEFAULT_PATH,
 } from "./doc.mjs";
-import { slugify, agentName } from "./store.mjs";
+import { slugify, agentName, provenance } from "./store.mjs";
 import { applyUnifiedDiff } from "./patch.mjs";
 
 const STAGING = ".staging.json";
 export const STALE_MS = 5 * 60 * 1000; // 5 min
-const SUB = new Set(["send", "discard", "status", "kill", "edit", "add", "move", "rename", "remove", "comment", "reply", "resolve", "unresolve", "flag", "attention", "amend", "detach"]);
+// `wb change` is artifact-only: block edits staged as one atomic revision.
+// Annotations (attach/tag and their lifecycle) are direct one-command writes via
+// `wb attach` / `wb tag` (see annotations.mjs) — not staged here.
+const SUB = new Set(["send", "discard", "status", "kill", "edit", "add", "move", "rename", "remove"]);
 
 export function isChangeSub(word) { return SUB.has(word); }
 
@@ -34,7 +37,7 @@ function saveStaging(session, st) { fs.writeFileSync(stagingPath(session), JSON.
 function clearStaging(session) { try { fs.unlinkSync(stagingPath(session)); } catch {} }
 
 // The doc as it would be AFTER applying the staged ops (for per-op validation).
-function previewDoc(session, stagedOps) {
+export function previewDoc(session, stagedOps) {
   const changes = readChanges(session.dir);
   const max = changes.reduce((m, c) => Math.max(m, c.rev || 0), 0);
   return fold([...changes, { rev: max + 1, at: new Date().toISOString(), ops: stagedOps }]);
@@ -48,18 +51,18 @@ function readContent(flags, { optional = false } = {}) {
   throw new Error("no content: pass --text, --file, or pipe via stdin");
 }
 
-export function startChange(session, { title, summary, by }) {
+export function startChange(session, { title, summary, by, piSessionId }) {
   if (!title) throw new Error('usage: wb change "<title>" [--summary S]');
   const existing = loadStaging(session);
   let note = "";
   if (existing) {
     const age = Date.now() - new Date(existing.startedAt).getTime();
     if (age < STALE_MS) throw new Error(`a change is already in progress: "${existing.title}" (${existing.ops.length} ops, ${Math.floor(age / 60000)}m). Run \`wb change status\` to peek or \`wb change discard\` to abort.`);
-    const ch = sendChange(session, { by: existing.by });
+    const ch = sendChange(session, { by: existing.by, piSessionId: existing.piSessionId });
     note = `auto-sent stale change "${ch.title}" (rev ${ch.rev}). `;
   }
-  saveStaging(session, { title, summary: summary || null, by: by || agentName(), ops: [], startedAt: new Date().toISOString() });
-  return `${note}started "${title}". Stage ops with \`wb change <edit|add|move|rename|remove|comment|reply|resolve|unresolve|flag|attention|amend|detach>\`, then \`wb change send\`.`;
+  saveStaging(session, { title, summary: summary || null, by: by || agentName(), ops: [], startedAt: new Date().toISOString(), piSessionId: piSessionId || null });
+  return `${note}started "${title}". Stage ops with \`wb change <edit|add|move|rename|remove>\`, then \`wb change send\`.`;
 }
 
 function stageOp(session, op) {
@@ -71,14 +74,18 @@ function stageOp(session, op) {
   return st;
 }
 
-export function sendChange(session, { by } = {}) {
+export function sendChange(session, { by, piSessionId } = {}) {
   const st = loadStaging(session);
   if (!st) throw new Error('no change in progress — start with `wb change "<title>"`.');
   if (!st.ops.length) throw new Error("no ops staged — add some with `wb change <edit|add|…>` before `wb change send`.");
   const doc = loadDoc(session.dir);
   if (!doc) throw new Error(`no document in ${session.dir}`);
-  validateOps(doc, st.ops); // re-check against the live doc in case a change landed meanwhile
-  const ch = appendChange(session.dir, { id: changeIdFor(st.title), title: st.title, by: by || st.by || agentName(), summary: st.summary, ops: st.ops });
+  validateOpsInOrder(doc, st.ops); // re-check against the live doc, walking ops in WIP order so an op can reference one added earlier in the same tx
+  // Populate via.piSessionId from the harness (the extension process has no
+  // PI_SESSION_ID env); keep all other provenance fields from this process.
+  const pid = piSessionId ?? st.piSessionId ?? null;
+  const via = pid ? { ...provenance(), piSessionId: pid } : undefined;
+  const ch = appendChange(session.dir, { id: changeIdFor(st.title), title: st.title, by: by || st.by || agentName(), summary: st.summary, ops: st.ops, via });
   clearStaging(session);
   return ch;
 }
@@ -118,82 +125,41 @@ function summarizeOp(o) {
 // Dispatch `wb change <sub> …` — build one intent op and stage it.
 export function stageSubcommand(session, sub, positional, flags) {
   const by = flags.by || agentName();
+  const fpath = flags.path || DEFAULT_PATH; // the file path this op targets (default default.md)
   const want = (n, usage) => { if (positional.length < n) throw new Error(usage); };
   switch (sub) {
     case "edit": {
-      want(1, "usage: wb change edit <block> (--file <f|-> | --text T | --diff <f|->)");
+      want(1, "usage: wb change edit <block> (--file <f|-> | --text T | --diff <f|->) [--path P]");
       const [name] = positional;
       let md;
       if (flags.diff !== undefined) {
         if (flags.text !== undefined || flags.file) throw new Error("pass either --diff or --file/--text, not both");
         const diff = flags.diff === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(flags.diff, "utf8");
-        const block = previewDoc(session, loadStaging(session).ops).blocks.find((b) => b.name === name);
-        if (!block) throw new Error(`no block "${name}"`);
+        const block = previewDoc(session, loadStaging(session).ops).blocks.find((b) => b.name === name && b.path === fpath);
+        if (!block) throw new Error(`no block "${name}" in ${fpath}`);
         md = applyUnifiedDiff(block.md, diff);
       } else md = readContent(flags);
-      return `edit ${name} accepted (${stageOp(session, { op: "edit", name, md }).ops.length} staged). \`wb change send\` when done.`;
+      return `edit ${name} accepted (${stageOp(session, { op: "edit", name, md, path: fpath }).ops.length} staged). \`wb change send\` when done.`;
     }
     case "add": {
       want(1, "usage: wb change add <name> [--before X|--after X] (--file <f|-> | --text T)");
-      return `add ${positional[0]} accepted (${stageOp(session, { op: "add", name: slugify(positional[0]), md: readContent(flags), before: flags.before, after: flags.after }).ops.length} staged).`;
+      return `add ${positional[0]} accepted (${stageOp(session, { op: "add", name: slugify(positional[0]), md: readContent(flags), before: flags.before, after: flags.after, path: fpath }).ops.length} staged).`;
     }
     case "move": {
-      want(1, "usage: wb change move <name> --before X|--after X");
+      want(1, "usage: wb change move <name> --before X|--after X [--path P]");
       if (!flags.before && !flags.after) throw new Error("move needs --before or --after");
-      return `move ${positional[0]} accepted (${stageOp(session, { op: "move", name: positional[0], before: flags.before, after: flags.after }).ops.length} staged).`;
+      return `move ${positional[0]} accepted (${stageOp(session, { op: "move", name: positional[0], before: flags.before, after: flags.after, path: fpath }).ops.length} staged).`;
     }
     case "rename": {
-      want(2, "usage: wb change rename <old> <new>");
+      want(2, "usage: wb change rename <old> <new> [--path P]");
       const [from, to] = positional;
-      return `rename ${from}→${to} accepted (${stageOp(session, { op: "rename", from, to: slugify(to) }).ops.length} staged).`;
+      if (!from || !to) throw new Error("rename needs <old> and <new> block names (both required)");
+      return `rename ${from}→${to} accepted (${stageOp(session, { op: "rename", from, to: slugify(to), path: fpath }).ops.length} staged).`;
     }
     case "remove": {
-      want(1, "usage: wb change remove <name> [name…]");
-      return `remove ${positional.join(", ")} accepted (${stageOp(session, { op: "remove", names: positional }).ops.length} staged).`;
+      want(1, "usage: wb change remove <name> [name…] [--path P]");
+      return `remove ${positional.join(", ")} accepted (${stageOp(session, { op: "remove", names: positional, path: fpath }).ops.length} staged).`;
     }
-    case "comment": {
-      want(1, "usage: wb change comment <block> (--text T|--file F) [--exact quote] [--by who]");
-      const [name] = positional;
-      const body = readContent(flags);
-      const doc = previewDoc(session, loadStaging(session).ops);
-      const block = doc.blocks.find((b) => b.name === name);
-      let selector = null;
-      if (flags.exact) { if (!block) throw new Error(`no block "${name}"`); selector = selectorFor(block.md, flags.exact); }
-      const op = attachOp("comment", name, { body, by, selector });
-      return `comment ${op.id} on ${name} accepted (${stageOp(session, op).ops.length} staged).`;
-    }
-    case "reply": {
-      want(1, "usage: wb change reply <thread-id> (--text T|--file F) [--by who]");
-      const op = replyOp(positional[0], readContent(flags), { by });
-      return `reply ${op.id} on ${positional[0]} accepted (${stageOp(session, op).ops.length} staged).`;
-    }
-    case "resolve": { want(1, "usage: wb change resolve <thread-id>"); return `resolve ${positional[0]} accepted (${stageOp(session, resolveOp(positional[0], true)).ops.length} staged).`; }
-    case "unresolve": { want(1, "usage: wb change unresolve <thread-id>"); return `unresolve ${positional[0]} accepted (${stageOp(session, resolveOp(positional[0], false)).ops.length} staged).`; }
-    case "flag": {
-      want(2, "usage: wb change flag <block> <flag> [--clear] [--text reason] [--by who]");
-      const [name, flag] = positional;
-      const op = flagOp(previewDoc(session, loadStaging(session).ops), name, flag, { value: !flags.clear, body: flags.text || null, by });
-      if (!op) return `${flag} ${flags.clear ? "not set" : "already set"} on ${name} — nothing staged (${loadStaging(session).ops.length} staged).`;
-      return `${flags.clear ? "clear" : "set"} ${flag} on ${name} accepted (${stageOp(session, op).ops.length} staged).`;
-    }
-    case "attention": {
-      want(1, "usage: wb change attention <block> (--text T) [--by who]");
-      const op = attachOp("needs-attention", positional[0], { body: readContent(flags, { optional: true }) || "Needs your attention.", motivation: "highlighting", by });
-      return `attention ${op.id} on ${positional[0]} accepted (${stageOp(session, op).ops.length} staged).`;
-    }
-    case "amend": {
-      want(1, "usage: wb change amend <thread-id> (--text T) [--exact quote] [--by who]");
-      const [id] = positional;
-      const doc = previewDoc(session, loadStaging(session).ops);
-      const a = doc.attachments.find((x) => x.id === id);
-      if (!a) throw new Error(`no attachment "${id}"`);
-      let selector, body;
-      if (flags.text !== undefined) body = flags.text;
-      if (flags.exact !== undefined) { const block = doc.blocks.find((b) => b.name === a.block); if (!block) throw new Error(`no block "${a.block}"`); selector = selectorFor(block.md, flags.exact); }
-      if (body === undefined && selector === undefined) throw new Error("amend needs --text and/or --exact");
-      return `amend ${id} accepted (${stageOp(session, amendOp(id, { body, selector })).ops.length} staged).`;
-    }
-    case "detach": { want(1, "usage: wb change detach <thread-id>"); return `detach ${positional[0]} accepted (${stageOp(session, detachOp(positional[0])).ops.length} staged).`; }
-    default: throw new Error(`unknown change op "${sub}"`);
+    default: throw new Error(`unknown change op "${sub}" — annotation ops live under \`wb attach\`/\`wb tag\`, not \`wb change\``);
   }
 }

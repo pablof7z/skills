@@ -11,47 +11,57 @@ import path from "node:path";
 import { resolveSession, claimSession, listSessions, sessionDir, projectFromCwd, slugify, stampOwner } from "./store.mjs";
 import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
-import { loadDoc, appendChange } from "./doc.mjs";
+import { loadDoc, appendChange, DEFAULT_PATH } from "./doc.mjs";
 import { startChange, sendChange, discardChange, statusChange, stageSubcommand, isChangeSub } from "./staging.mjs";
+import { attachCreate, attachReply, attachResolve, attachReopen, tagSet, tagClear, listAnnotations } from "./annotations.mjs";
 import { actionableItems } from "./scan.mjs";
+
+// Annotation ops that used to live under `wb change` — now direct writes under
+// `wb attach` / `wb tag`. Listed so `wb change <op>` gives a redirect instead of
+// silently starting a staging transaction named after the op.
+const REMOVED_ANNOTATION_OPS = new Set(["comment", "reply", "resolve", "unresolve", "flag", "attention", "amend", "detach"]);
 
 const HELP = `wb — whiteboard change-log document CLI
   wb new <slug> [--from <md-file>]        create a session (optionally seed from markdown)
   wb list [--json]                        list sessions for this project
   wb use <slug>                           claim a session for this agent (stamps manifest.owner)
-  wb read [--md|--json] [slug]            project the doc (default: tagged <name>…</name>)
+  wb read [--md|--json] [--path P] [slug]   project the doc (default: tagged <name>…</name>)
   wb change "<title>" [--summary S]       START a staging transaction (one at a time)
   wb change send                          COMMIT staged ops as one change
   wb change status                        peek at staged ops
   wb change discard  (alias: kill)        abort the staging transaction
   wb note <text|--file>                   append to notes.md
+  wb attach <block> --on "quote" --kind question|warning|objection|note --content T
+                                          anchor a thread to a span (direct write)
+  wb attach reply|resolve|reopen <id> [--content T]   thread lifecycle (direct)
+  wb attach list [--block X] [--open]                list threads
+  wb tag <block> --on "quote" --kind unverified|superseded|needs-attention|decided
+                                          [--content T]   set a status tag (direct)
+  wb tag <block> --on "quote" --kind K --clear       clear a tag (direct)
+  wb tag list [--block X]                            list tags
   wb listen [--timeout 0]                 stream actionable items: emit one JSONL event for a new
                                           unanswered comment/chat, then exit 0 (idle→exit 2).
                                           Run as a background monitor; its completion wakes you.
                                           Baselines existing items so only NEW ones fire.
 
-  Staging ops (run between \`wb change "<title>"\` and \`wb change send\`):
+  Staging ops (run between \`wb change "<title>"\` and \`wb change send\`) — artifact only:
   wb change edit <block> (--file <f|-> | --text T | --diff <f|->)
   wb change add <name> [--before X|--after X] (--file <f|-> | --text T)
   wb change move <name> --before X|--after X
   wb change rename <old> <new>
   wb change remove <name> [name…]
-  wb change comment <block> (--text T|--file F) [--exact quote] [--by who]
-  wb change reply <thread-id> (--text T|--file F) [--by who]
-  wb change resolve <thread-id>   |   wb change unresolve <thread-id>
-  wb change flag <block> <flag> [--clear] [--text reason]   set/clear a label (needs-attention|decided|…)
-  wb change attention <block> (--text T)                   flag needs-attention + amber card
-  wb change amend <thread-id> (--text T) [--exact quote] [--by who]
-  wb change detach <thread-id>
 
-The document = fold of changes/<rev>.json; every mutation is a staged \`wb change\` then \`wb change send\`.
-Ops are intent: comment/reply/resolve/flag/amend/detach ids + attachment state are derived for you.
+  Annotations (questions/warnings/objections/notes + status tags) are NOT staged:
+  use \`wb attach\` / \`wb tag\` directly. Every annotation is anchored (--on required).
+
+The document = fold of changes/<rev>.json; artifact edits are staged \`wb change\` then \`wb change send\`; annotations are direct \`wb attach\`/\`wb tag\` writes.
+Ops are intent: ids + annotation state are derived for you.
 Scope: --session <project>/<slug> > WB_SESSION > per-agent owners map (~/.wb/owners.json).
 A staging left open >5m auto-sends when you next start a new \`wb change "<title>"\`.`;
 
 function parse(argv) {
   const positional = [], flags = {};
-  const BOOL = new Set(["json", "md", "help", "clear"]);
+  const BOOL = new Set(["json", "md", "help", "clear", "open"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--") { positional.push(...argv.slice(i + 1)); break; }
@@ -65,6 +75,16 @@ function parse(argv) {
 }
 
 function out(obj) { process.stdout.write(typeof obj === "string" ? obj : JSON.stringify(obj, null, 2) + "\n"); }
+
+// Resolve annotation content from --content (primary), --text (alias), --file, or stdin.
+function readAttachContent(flags, { optional = false } = {}) {
+  if (flags.content !== undefined) return String(flags.content);
+  if (flags.text !== undefined) return String(flags.text);
+  if (flags.file) return fs.readFileSync(flags.file, "utf8");
+  if (!process.stdin.isTTY) return fs.readFileSync(0, "utf8");
+  if (optional) return null;
+  throw new Error("no content: pass --content, --file, or pipe via stdin");
+}
 
 // `wb new`/`wb use` record this agent's session in the per-agent owners map and
 // stamp manifest.owner. They can't set WB_SESSION (a child can't mutate parent
@@ -104,7 +124,7 @@ async function main() {
       if (flags.from) {
         const md = fs.readFileSync(flags.from, "utf8");
         const blocks = parseMarkdownToBlocks(md);
-        const ops = blocks.map((b) => ({ op: "add", name: b.name, md: b.md }));
+        const ops = blocks.map((b) => ({ op: "add", name: b.name, md: b.md, path: flags.path || DEFAULT_PATH }));
         appendChange(dir, { id: "initial", title: "Initial import", ops });
       }
       stampOwner(dir, process.env.WB_OWNER);
@@ -131,8 +151,8 @@ async function main() {
       const doc = loadDoc(s.dir);
       if (!doc) throw new Error(`no document in ${s.dir}`);
       if (flags.json) return out(readJson(doc));
-      if (flags.md) return out(readMd(doc));
-      return out(readTagged(doc));
+      if (flags.md) return out(readMd(doc, flags.path));
+      return out(readTagged(doc, flags.path));
     }
     case "change": {
       const s = session();
@@ -140,6 +160,7 @@ async function main() {
       if (first === "send") { const ch = sendChange(s); return out(`change "${ch.title}" applied (rev ${ch.rev}, ${ch.ops.length} ops) → changes/${String(ch.rev).padStart(6, "0")}.json\n`); }
       if (first === "discard" || first === "kill") return out(discardChange(s) + "\n");
       if (first === "status") return out(statusChange(s) + "\n");
+      if (REMOVED_ANNOTATION_OPS.has(first)) throw new Error(`\`wb change ${first}\` moved: annotation ops are direct writes under \`wb attach\` / \`wb tag\`, not staged via \`wb change\`.`);
       if (first && isChangeSub(first)) return out(stageSubcommand(s, first, rest.slice(1), flags) + "\n");
       const title = flags.title || first;
       return out(startChange(s, { title, summary: flags.summary, by: flags.by }) + "\n");
@@ -153,6 +174,28 @@ async function main() {
       fs.appendFileSync(f, `\n- (${stamp}) ${body.replace(/\n/g, "\n  ")}\n`);
       return out(`noted\n`);
     }
+    case "attach": {
+      const s = session();
+      const sub = rest[0];
+      const ATTACH_SUB = new Set(["reply", "resolve", "reopen", "list"]);
+      if (sub === "list") return out(listAnnotations(s, { block: flags.block, path: flags.path, tags: false, open: flags.open }) + "\n");
+      if (ATTACH_SUB.has(sub)) {
+        const id = rest[1];
+        if (sub === "reply") return out(attachReply(s, id, { content: readAttachContent(flags), by: flags.by }) + "\n");
+        if (sub === "resolve") return out(attachResolve(s, id, { by: flags.by }) + "\n");
+        if (sub === "reopen") return out(attachReopen(s, id, { by: flags.by }) + "\n");
+      }
+      // create: wb attach <block> --on --kind --content
+      return out(attachCreate(s, { block: sub, on: flags.on, kind: flags.kind, content: readAttachContent(flags), by: flags.by, path: flags.path }) + "\n");
+    }
+    case "tag": {
+      const s = session();
+      const sub = rest[0];
+      if (sub === "list") return out(listAnnotations(s, { block: flags.block, path: flags.path, tags: true }) + "\n");
+      // set or clear: wb tag <block> --on --kind [--content] [--clear]
+      const opts = { block: sub, on: flags.on, kind: flags.kind, content: readAttachContent(flags, { optional: true }), by: flags.by, path: flags.path };
+      return out((flags.clear ? tagClear(s, opts) : tagSet(s, opts)) + "\n");
+    }
     case "listen": {
       const s = session();
       let timeout = 0;
@@ -164,7 +207,9 @@ async function main() {
         for (const it of actionableItems(s.dir)) {
           const key = `${it.kind}:${it.id}`;
           if (baseline.has(key)) continue;
-          process.stdout.write(JSON.stringify({ kind: it.kind, id: it.id, block: it.block || null, session: where, excerpt: (it.text || "").slice(0, 200).replace(/\s+/g, " ").trim() }) + "\n");
+          const evt = { kind: it.kind, id: it.id, block: it.block || null, session: where, text: it.text || "" };
+          if (it.anchor) evt.anchor = it.anchor;
+          process.stdout.write(JSON.stringify(evt) + "\n");
           process.exit(0);
         }
         if (deadline && Date.now() > deadline) { process.stdout.write(JSON.stringify({ kind: "idle", session: where }) + "\n"); process.exit(2); }

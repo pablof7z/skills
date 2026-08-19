@@ -33,6 +33,7 @@ const otherDir = path.join(ROOT, OTHER, slug);
 
 const now = () => new Date().toISOString();
 function baselineChange(dir) {
+  fs.rmSync(path.join(dir, "changes"), { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "changes"), { recursive: true });
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ name: slug, status: "exploring", project: PROJ, createdAt: now() }) + "\n");
   fs.writeFileSync(path.join(dir, "changes", "000001.json"), JSON.stringify({
@@ -43,7 +44,7 @@ function baselineChange(dir) {
 function commentChange(dir, id, by, body) {
   fs.writeFileSync(path.join(dir, "changes", "000002.json"), JSON.stringify({
     rev: 2, id, title: id, at: now(), by,
-    ops: [{ op: "attach", id, kind: "comment", block: "goal", by, body, selector: null, motivation: null, at: now() }],
+    ops: [{ op: "attach", id, kind: "question", block: "goal", by, body, selector: { exact: "Goal", prefix: "", suffix: "" }, at: now() }],
   }) + "\n");
 }
 
@@ -64,9 +65,9 @@ await new Promise((r) => setTimeout(r, 1500));
 console.log("sendMessage wakes:", sent.length);
 for (const s of sent) console.log("  ->", s.split("\n")[0]);
 
-const wokeNew = sent.some((s) => s.includes("New comment on block") && s.includes("c-new1") && s.includes("why blocks"));
-if (!wokeNew) { console.error("FAIL: expected a wake for the new actionable user comment"); process.exit(1); }
-console.log("PASS: woke on new actionable user comment (attributed whiteboard message).");
+const wokeNew = sent.some((s) => s.includes("Annotation (question) on block") && s.includes("c-new1") && s.includes("why blocks"));
+if (!wokeNew) { console.error("FAIL: expected a wake for the new actionable user annotation"); process.exit(1); }
+console.log("PASS: woke on new actionable user annotation (attributed whiteboard message).");
 
 const wokeOther = sent.some((s) => s.includes("c-otherproj") || s.includes("should not wake"));
 if (wokeOther) { console.error("FAIL: should not wake for a different project's session"); process.exit(1); }

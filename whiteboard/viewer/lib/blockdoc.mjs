@@ -7,19 +7,19 @@ import {
   loadDoc, readChanges, fold, appendChange, validateOps, isBlockDocDir,
   attachOp, replyOp, resolveOp,
 } from "../../cli/doc.mjs";
+import { requireAttachKind } from "../../cli/kinds.mjs";
 
 export function isBlockDoc(dir) { return isBlockDocDir(dir); }
 
-// Full document for the client: { version, docId, rev, blocks, comments,
-// attachments, hash }. `attachments` is the raw unified list (kind-discriminated)
-// so the viewer can render kind-specific attachments (e.g. "clarification")
-// directly, beyond the comments/flags projection.
+// Full document for the client: { version, docId, rev, blocks, annotations,
+// attachments, hash }. `annotations` is the unified viewer-facing list (threads
+// + tags, kind-discriminated); `attachments` is the raw list for provenance.
 export function getDocument(dir) {
   const doc = loadDoc(dir);
   if (!doc) return null;
   return {
     version: 1, docId: "block-doc", rev: doc.rev,
-    blocks: doc.blocks || [], comments: doc.comments || [],
+    blocks: doc.blocks || [], annotations: doc.annotations || [],
     attachments: doc.attachments || [], hash: doc.hash,
     updatedAt: doc.updatedAt || null,
   };
@@ -50,49 +50,52 @@ export function changeAt(dir, rev) {
 export function getDocumentAt(dir, rev) {
   const changes = readChanges(dir).filter((c) => c.rev <= rev);
   if (!changes.length) return null;
-  const doc = fold(changes);
+  const doc2 = fold(changes);
   return {
-    version: 1, docId: "block-doc", rev: doc.rev,
-    blocks: doc.blocks || [], comments: doc.comments || [],
-    attachments: doc.attachments || [], hash: doc.hash,
-    updatedAt: doc.updatedAt || null,
+    version: 1, docId: "block-doc", rev: doc2.rev,
+    blocks: doc2.blocks || [], annotations: doc2.annotations || [],
+    attachments: doc2.attachments || [], hash: doc2.hash,
+    updatedAt: doc2.updatedAt || null,
   };
 }
 
-export function getComments(dir) {
+export function getAnnotations(dir) {
   const doc = loadDoc(dir);
-  return { comments: doc ? doc.comments || [] : [] };
+  return { annotations: doc ? doc.annotations || [] : [] };
 }
 
-function projectedComment(op) {
-  return { id: op.id, block: op.block, author: op.by, body: op.body, at: op.at, resolved: false, replies: [], ...(op.selector ? { selector: op.selector } : {}) };
+function projectedAnnotation(op) {
+  return { id: op.id, block: op.block, kind: op.kind, author: op.by, body: op.body, at: op.at, resolved: false, replies: [], ...(op.selector ? { selector: op.selector } : {}) };
 }
 
-// Human adds a comment on a block (optionally with a selector for in-block span).
-export function postComment(dir, { block, text, selector, creator }) {
-  const doc = loadDoc(dir);
-  if (!doc) throw new Error("no document");
-  const op = attachOp("comment", block, { body: String(text ?? "").slice(0, 8000), by: creator || "user", selector });
-  validateOps(doc, [op]);
-  appendChange(dir, { title: `comment on ${block}`, by: creator || "user", ops: [op] });
-  return projectedComment(op);
-}
-
-export function postReply(dir, commentId, text, creator) {
+// Human adds a thread on a block span (always anchored — the composer only fires
+// on a text selection). `kind` is one of the attach kinds (default question).
+export function postAttach(dir, { block, text, selector, creator, path, kind }) {
   const doc = loadDoc(dir);
   if (!doc) throw new Error("no document");
-  const op = replyOp(commentId, String(text ?? "").slice(0, 8000), { by: creator || "user" });
+  if (!selector || !selector.exact) throw new Error("anchor required (--on)");
+  requireAttachKind(kind || "question");
+  const op = attachOp(kind || "question", block, { body: String(text ?? "").slice(0, 8000), by: creator || "user", selector, path });
   validateOps(doc, [op]);
-  appendChange(dir, { title: `reply to ${commentId}`, by: creator || "user", ops: [op] });
+  appendChange(dir, { title: `${kind || "question"} on ${block}`, by: creator || "user", ops: [op] });
+  return projectedAnnotation(op);
+}
+
+export function postReply(dir, annotationId, text, creator) {
+  const doc = loadDoc(dir);
+  if (!doc) throw new Error("no document");
+  const op = replyOp(annotationId, String(text ?? "").slice(0, 8000), { by: creator || "user" });
+  validateOps(doc, [op]);
+  appendChange(dir, { title: `reply to ${annotationId}`, by: creator || "user", ops: [op] });
   return { id: op.id, author: op.by, body: op.body, at: op.at };
 }
 
-// resolved map for the client: { id: { at, by } } for resolved comments.
+// resolved map for the client: { id: { at, by } } for resolved threads.
 export function resolvedMap(dir) {
   const doc = loadDoc(dir);
   if (!doc) return {};
   const out = {};
-  for (const c of doc.comments || []) if (c.resolved) out[c.id] = { at: c.at, by: c.author };
+  for (const a of doc.annotations || []) if (!a.isTag && a.resolved) out[a.id] = { at: a.at, by: a.author };
   return out;
 }
 

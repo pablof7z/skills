@@ -41,9 +41,9 @@ function parseArgs(argv) {
 
 function sessionDir(root, project, slug) {
   const dir = path.join(root, project, slug);
-  if (!S.isSessionDir(slug)) return null;
   if (project.includes("..") || slug.includes("..")) return null;
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return null;
+  if (!S.isSessionDir(dir)) return null;
   return dir;
 }
 
@@ -172,7 +172,7 @@ async function handleSession(req, res, root, project, slug, rest) {
     return sendJson(res, 200, jumpToITerm(iterm));
   }
   if (rest === "notes" && m === "GET") return sendJson(res, 200, { content: S.readNotes(dir) });
-  if (rest === "comments" && m === "GET") return sendJson(res, 200, B.getComments(dir));
+  if (rest === "comments" && m === "GET") return sendJson(res, 200, B.getAnnotations(dir));
   if (rest === "events" && m === "GET") { sseStart(res); sessionClientsFor(key).add(res); return; }
   if (rest === "comments" && m === "POST") {
     const data = await readBody(req).catch(() => null);
@@ -182,7 +182,7 @@ async function handleSession(req, res, root, project, slug, rest) {
       return sendJson(res, 201, r);
     }
     if (!data.block) return sendJson(res, 400, { error: "block required" });
-    const c = B.postComment(dir, { block: data.block, text: data.text, selector: data.selector, creator: data.creator || "user" });
+    const c = B.postAttach(dir, { block: data.block, text: data.text, selector: data.selector, creator: data.creator || "user", path: data.path, kind: data.kind });
     return sendJson(res, 201, c);
   }
   if (rest === "viewed" && m === "GET") {
@@ -237,7 +237,7 @@ function main() {
       broadcast(explorerClients, "sessions", {});
       if (filename) {
         const segs = filename.split(path.sep);
-        if (segs.length >= 2 && S.isSessionDir(segs[1])) {
+        if (segs.length >= 2 && S.isSessionDir(path.join(root, segs[0], segs[1]))) {
           // Ignore viewer-internal writes that are not content changes:
           // Skip viewer-internal writes (the .viewed.json “Done” marker) so they
           // don't feedback-loop into endless refreshes.

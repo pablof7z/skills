@@ -30,33 +30,39 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 
 The skill body is process. Learn the tool from the reference files, then use it — don't carry command syntax here.
 
-- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `wb` CLI: sessions, read, the staging transaction, ops, notes, and `wb listen` for detecting new comments/chat.
-- **Under pi with the pi-whiteboard extension**, also read [references/pi.md](references/pi.md) — the `whiteboard` tool, attributed `[whiteboard]` wake messages, the auto-managed viewer, and `/wb`. Under pi you don't run `wb listen` or launch the viewer yourself.
+- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `wb` CLI: sessions, read, the staging transaction (artifact ops), annotation ops (`wb attach`/`wb tag`), notes, and `wb listen` for detecting new annotations/chat.
+- **Under pi with the pi-whiteboard extension**, also read [references/pi.md](references/pi.md) — the `wb_*` tools (lazy/active: `wb_new`/`wb_list` load, then unlock the rest), attributed `[whiteboard]` wake messages, the auto-managed viewer, and `/wb`. Under pi you don't run `wb listen` or launch the viewer yourself.
 - For the `notes.md` shape and promotion checklist, see [references/note-schema-and-examples.md](references/note-schema-and-examples.md).
 
 ## Start the Session
 
 1. Assign a concise human-readable session name from the main object plus uncertainty, e.g. `NMP relay identity model exploration`.
 2. Create or select a session with `wb new <slug>` (or `wb use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
-3. Seed the document with the initial context, current working model, and highest-value open questions (a `goal` block, a `constraints` block, an `open-questions` block).
+3. Seed the document with the initial context and current working model as the artifact's content (a `goal` block, a `constraints` block, and whatever body blocks the artifact shape calls for). Surface the highest-value open questions as `wb attach` (a `question` on the relevant span) or `wb tag` (`needs-attention`), or in `notes.md` — not as block content.
 4. Keep exploring until clarity emerges. Prefer source inspection, runtime evidence, focused questions, and tradeoff analysis over premature edits.
 
-## Block Document and Notes
+## Block Document, Annotations, and Notes
 
-The workspace holds the block document (the outward, live truth) and `notes.md` (the append-only trail), with different disciplines.
+The workspace holds three layers with different disciplines: the **block document** (the artifact), **annotations** (meta-discussion about the document), and `notes.md` (the internal trail).
 
-**Block document — the outward document.** The artifact the human reads and annotates: a sequence of **named markdown blocks** you mutate retroactively (rewrite and reorganize freely as the working model evolves; it is not append-only). Shape it to fit the session — plan, proposal, spec, design memo, short brief — rather than forcing a fixed template. Whatever the shape, it must always include:
+**Block document — the artifact itself.** A sequence of **named markdown blocks** holding the content of the artifact you are converging toward — the spec, plan, proposal, design memo, or brief. Write it as if it were the finished artifact, kept at the best version you can produce right now. Mutate it retroactively: rewrite, reorganize, and replace freely as the working model evolves. It is not append-only, and it is not a record of how you got there.
+
+Block content is the artifact's content, **not commentary about producing it.** No narration ("we explored…", "the question is whether…"), no changelog ("we decided X", "previously we assumed Y"), no "options considered" lists, no open questions. If a line would not appear in the finished artifact, it does not belong in a block. Rewrite the block to state the current best answer directly — a block that says "we are considering A vs B" should instead state A (or B) as the working model, with the unresolved choice pushed to an annotation or a note. What belongs on the blocks:
 
 - **Requirements and constraints the user has stated**, in a dedicated current block (e.g. `constraints`). Add to it as new ones appear; never drop one without noting the user lifted it.
-- The core question and current working model.
-- The viable options and the emerging direction, with the decision frontier visible.
-- Open questions and material risks.
+- The artifact's goal, current working model, and settled direction, stated as the artifact would state them.
+- Material risks the artifact itself must carry (a spec names its risks; that is content, not process).
 
 Keep it skimmable — for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in `notes.md`. Start each block with an `# H1` title (the viewer's TOC lists headings, not block names). The viewer renders markdown with syntax highlighting, Mermaid, and footnotes.
 
-When a block needs the human's attention (an open question, a risk to sign off on, a choice that's theirs), mark it needs-attention — the viewer pins a small amber marker in the margin next to the block and surfaces any that scroll out of view as clickable edge indicators, so they can't be missed. Use it only for what genuinely needs the human; dismiss it once reviewed.
+**Annotations — meta-discussion about the document.** Two verbs, both direct writes (not staged), both anchored to a span of a block (`--on` required — there are no block-level annotations; if you mean a whole block, anchor to its heading):
 
-**notes.md — the append-only log.** Append, do not rewrite (`wb note "entry"`). Capture the trail: things the user made explicit, compact subagent findings with source, corrections (`Correction (HH:MM): …`), and adjacent-check results in `Finding / Implication / Confidence` form. Use the template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) for the first `notes.md`.
+- **`wb attach`** — replyable threads. Kinds: `question`, `warning`, `objection`, `note`. Use these for things *about* the document that are not part of the artifact: open questions, objections, choices that need the human, things to verify or sign off on. A `note` is a non-action side comment (it does not wake the agent); `question`/`warning`/`objection` from a human with no agent reply are actionable.
+- **`wb tag`** — short status tags. Kinds: `unverified`, `superseded`, `needs-attention`, `decided`. Idempotent set/clear; not replyable. Mark a span as needing the human with `needs-attention`, or as settled with `decided`.
+
+Color is the only signal — the viewer renders each kind in its own color (a loud kind like amber `warning` or red `objection` is the “look at this” affordance; there is no separate attention/amber-card concept). Resolve threads (`wb attach resolve`) as the document absorbs their answer; clear tags when the status no longer holds. Don't leave resolved discussion dangling.
+
+**notes.md — the internal trail.** Append, do not rewrite (`wb note "entry"`). Capture the trail: things the user made explicit, compact subagent findings with source, corrections (`Correction (HH:MM): …`), and adjacent-check results in `Finding / Implication / Confidence` form. Use the template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) for the first `notes.md`.
 
 ## Exploration Loop
 
@@ -100,7 +106,7 @@ Obey direct user override commands immediately:
 - `stop tracking this`: stop updating the session; log it via `wb note`.
 - `forget that`: remove or revise the affected block; log the removal via `wb note`.
 - `that was not a decision`: move the item out of decisions into hypothesis/preference/rejected/open-question; log it.
-- `mark this as decided`: record the decision in the block document (a `decisions` block) and `notes.md`; treat further options as closed.
+- `mark this as decided`: record the decision in the block document (a `decisions` block) and `notes.md`; treat further options as closed. Optionally tag the settled span `wb tag --kind decided`.
 - `save this now`: commit any open staging (`wb change send`).
 - `do not run background agents here`: stop proactive adjacent exploration unless the user re-enables it.
 

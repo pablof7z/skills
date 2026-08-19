@@ -12,6 +12,7 @@ const slug = "2026-08-ownership-wake-test";
 const sessDir = path.join(ROOT, "skills", slug);
 const now = () => new Date().toISOString();
 
+fs.rmSync(sessDir, { recursive: true, force: true });
 fs.mkdirSync(path.join(sessDir, "changes"), { recursive: true });
 fs.writeFileSync(path.join(sessDir, "manifest.json"), JSON.stringify({ name: slug, status: "exploring", project: "skills", createdAt: now(), owner: "agent-A" }));
 fs.writeFileSync(path.join(sessDir, "changes", "000001.json"), JSON.stringify({
@@ -38,7 +39,7 @@ await B.handlers["session_start"]({}, B.ctx); // B does not
 // add an actionable user comment, triggering both watchers
 fs.writeFileSync(path.join(sessDir, "changes", "000002.json"), JSON.stringify({
   rev: 2, id: "c-own1", title: "c-own1", at: now(), by: "user",
-  ops: [{ op: "attach", id: "c-own1", kind: "comment", block: "goal", by: "user", body: "only A should see this", selector: null, motivation: null, at: now() }],
+  ops: [{ op: "attach", id: "c-own1", kind: "question", block: "goal", by: "user", body: "only A should see this", selector: { exact: "Goal", prefix: "", suffix: "" }, at: now() }],
 }));
 await new Promise((r) => setTimeout(r, 1200));
 console.log("agent-A wakes:", A.sent.length, A.sent.length ? `-> ${A.sent[0].slice(0, 40)}...` : "");

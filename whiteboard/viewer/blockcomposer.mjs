@@ -4,6 +4,8 @@
 // the block (name from the section) with a {exact, prefix, suffix} selector
 // computed against that block's text, then posted via the passed postComment.
 
+import { COMPOSER_KINDS } from "./annotations.mjs";
+
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
@@ -32,6 +34,10 @@ function blockMdOf(node) {
 function blockNameOf(blockMd) {
   const sec = blockMd ? blockMd.parentElement : null;
   return sec && sec.dataset ? sec.dataset.blockId : null;
+}
+function blockPathOf(blockMd) {
+  const sec = blockMd ? blockMd.parentElement : null;
+  return sec && sec.dataset ? (sec.dataset.blockPath || "default.md") : null;
 }
 
 function selectorsFor(blockMd, range, sel) {
@@ -78,6 +84,7 @@ export function initBlockComposer({ docEl, postComment, railEl }) {
   function openComposer(range, sel, blockMd) {
     closeComposer();
     const block = blockNameOf(blockMd);
+    const path = blockPathOf(blockMd);
     const selector = selectorsFor(blockMd, range, sel);
     const sec = blockMd.parentElement;
     const anchorY = sec ? sec.offsetTop : 0;
@@ -88,11 +95,13 @@ export function initBlockComposer({ docEl, postComment, railEl }) {
     composer.style.left = "0";
     composer.style.right = "6px";
     composer.style.width = "auto";
-    composer.innerHTML = `<div class="composer-quote">“${esc(selector.exact || "")}"</div><textarea placeholder="Comment… (⌘↵ to send)"></textarea><div class="row"><button class="cancel">Cancel</button><button class="send" disabled>Comment</button></div>`;
+    const kindOpts = COMPOSER_KINDS.map((k) => `<option value="${k}">${k}</option>`).join("");
+    composer.innerHTML = `<div class="composer-quote">“${esc(selector.exact || "")}”</div><textarea placeholder="Add a thread… (⌘↵ to send)"></textarea><div class="row"><select class="composer-kind" title="Kind">${kindOpts}</select><button class="cancel">Cancel</button><button class="send" disabled>Send</button></div>`;
     railEl.appendChild(composer);
     const ta = composer.querySelector("textarea");
     const send = composer.querySelector(".send");
     const cancel = composer.querySelector(".cancel");
+    const kindSel = composer.querySelector(".composer-kind");
     ta.focus();
     ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
     ta.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send.click(); } });
@@ -101,7 +110,7 @@ export function initBlockComposer({ docEl, postComment, railEl }) {
       const text = ta.value.trim();
       if (!text) return;
       send.disabled = true;
-      await postComment({ block, text, selector, creator: "user" });
+      await postComment({ block, text, selector, creator: "user", path, kind: kindSel.value });
       closeComposer();
     });
   }
