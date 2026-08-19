@@ -27,10 +27,6 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 - Verify once, not incrementally. If a claim you stated is challenged or you realize you never verified it, stop, recheck the source fully, and replace it. One clean correction beats a walk-back chain.
 - "I don't know yet" is acceptable and expected.
 
-## The One Rule
-
-Never hand-write the session document — mutate it only through `wb` (or, under pi, the `whiteboard` tool). It appends one atomic change file; that's what gives you stable comment anchors, semantic change tracking, and a live viewer.
-
 ## How To Use Whiteboard
 
 The skill body is process. Learn the tool from the reference files, then use it:
@@ -45,8 +41,6 @@ The skill body is process. Learn the tool from the reference files, then use it:
 2. Create or select a session with `wb new <slug>` (or `wb use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
 3. Seed the document with the initial context, current working model, and highest-value open questions (a `goal` block, a `constraints` block, an `open-questions` block).
 4. Keep exploring until clarity emerges. Prefer source inspection, runtime evidence, focused questions, and tradeoff analysis over premature edits.
-
-If the environment cannot write to `~/whiteboard/`, do not apply this skill.
 
 ## Block Document and Notes
 
