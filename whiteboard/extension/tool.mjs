@@ -3,13 +3,16 @@
 // LLM mutates the doc via a tool call instead of shelling out. The CLI stays
 // the human escape hatch (`/wb`); this is the agent path.
 //
-// typebox is only resolvable inside pi's runtime, so registration is deferred
-// to registerWhiteboardTool(pi), which requires typebox lazily and no-ops under
-// bare-node tests.
+// typebox is resolved by jiti's alias to pi's bundled copy when the extension
+// is loaded under pi. index.ts does the static `import { Type } from "typebox"`
+// (the canonical pattern from pi's docs/examples) and passes Type in here, so
+// this module stays harness-agnostic and never does its own typebox resolution.
 
-import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { resolveSession } from "../cli/store.mjs";
 import { loadDoc } from "../cli/doc.mjs";
 import { readTagged, readMd, readJson } from "../cli/blocks.mjs";
@@ -17,13 +20,26 @@ import {
   startChange, sendChange, discardChange, statusChange, stageSubcommand, isChangeSub,
 } from "../cli/staging.mjs";
 
-const require_ = createRequire(import.meta.url);
-
 const SUBS = [
   "start", "send", "discard", "status",
   "edit", "add", "move", "rename", "remove",
   "comment", "reply", "resolve", "unresolve", "flag", "attention", "amend", "detach",
 ];
+
+const SESSION_SUBS = ["new", "list", "use"];
+
+// Path to the wb CLI — source of truth for session lifecycle (new/list/use).
+// The tool shells out to it rather than duplicating manifest/owner/claim logic.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLI = path.join(__dirname, "..", "cli", "main.mjs");
+const execFileP = promisify(execFile);
+
+async function runCli(args) {
+  const { stdout } = await execFileP(process.execPath, [CLI, ...args], {
+    cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024, env: process.env,
+  });
+  return stdout.trim();
+}
 
 // Build the (positional, flags) shape stageSubcommand expects from structured
 // tool params. One place to map, so the CLI's validation is reused verbatim.
@@ -54,10 +70,38 @@ function toStageArgs(sub, p) {
 function txt(t) { return { content: [{ type: "text", text: String(t) }], details: {} }; }
 function err(m) { return { content: [{ type: "text", text: String(m) }], isError: true, details: {} }; }
 
-function execute(_toolCallId, p, _signal, _onUpdate, _ctx) {
+// Session lifecycle (new/list/use) — wrap the wb CLI, which owns manifest
+// creation, owner stamping, claiming, and markdown-seed import.
+async function runSessionOp(p) {
+  const sub = p.sub;
+  if (sub === "new") {
+    if (!p.name) return err("whiteboard session new: `name` (slug) is required");
+    const args = ["new", p.name];
+    if (p.from) args.push("--from", p.from);
+    return txt(await runCli(args));
+  }
+  if (sub === "list") {
+    const args = ["list"];
+    if (p.json) args.push("--json");
+    return txt(await runCli(args));
+  }
+  if (sub === "use") {
+    if (!p.name) return err("whiteboard session use: `name` (slug) is required");
+    return txt(await runCli(["use", p.name]));
+  }
+  return err(`whiteboard session: unknown sub "${sub}"`);
+}
+
+async function execute(_toolCallId, p, _signal, _onUpdate, _ctx) {
+  try {
+    if (p.action === "session") return await runSessionOp(p);
+  } catch (e) { return err(`whiteboard: ${e.message}`); }
   let s;
   try { s = resolveSession({ session: p.session }); }
   catch (e) { return err(`whiteboard: ${e.message}`); }
+  if (!fs.existsSync(path.join(s.dir, "manifest.json"))) {
+    return err(`whiteboard: no session "${s.project}/${s.slug}" — create it first: action "session", sub "new", name "${s.slug}"`);
+  }
   try {
     if (p.action === "note") {
       if (!p.text) return err("whiteboard note: `text` is required");
@@ -90,22 +134,22 @@ function execute(_toolCallId, p, _signal, _onUpdate, _ctx) {
   } catch (e) { return err(`whiteboard: ${e.message}`); }
 }
 
-export function registerWhiteboardTool(pi) {
-  let Type;
-  try { Type = require_("typebox"); } catch { return; } // not in pi runtime
+export function registerWhiteboardTool(pi, Type) {
   pi.registerTool({
     name: "whiteboard",
     label: "Whiteboard",
     description:
-      "Mutate or read the current whiteboard block document. One tool, three actions: " +
-      "`read` (project the doc), `change` (open/send/discard a staging transaction or stage one op), " +
-      "`note` (append to notes.md). Session resolves from `session` arg, else WB_SESSION, else the " +
-      "per-agent owners map. All mutations are staged then committed with `change` `sub: send`.",
+      "Drive a whiteboard session: read/mutate the block document, append notes, and manage " +
+      "session lifecycle. Actions: `read` (project the doc), `change` (open/send/discard a staging " +
+      "transaction or stage one op), `note` (append to notes.md), `session` (sub `new`/`list`/`use` — " +
+      "create, list, or claim a session). For read/change/note the session resolves from `session` arg, " +
+      "else WB_SESSION, else the per-agent owners map; `session` ops run via the wb CLI (project from " +
+      "WB_SESSION or cwd). Mutations are staged then committed with `change` `sub: send`.",
     parameters: Type.Object({
       session: Type.Optional(Type.String({ description: '"project/slug" override; else WB_SESSION / owners map' })),
-      action: Type.Union([Type.Literal("read"), Type.Literal("change"), Type.Literal("note")]),
+      action: Type.Union([Type.Literal("read"), Type.Literal("change"), Type.Literal("note"), Type.Literal("session")]),
       format: Type.Optional(Type.Union([Type.Literal("tagged"), Type.Literal("md"), Type.Literal("json")])),
-      sub: Type.Optional(Type.Union(SUBS.map((s) => Type.Literal(s)))),
+      sub: Type.Optional(Type.Union([...SUBS, ...SESSION_SUBS].map((s) => Type.Literal(s)))),
       title: Type.Optional(Type.String()),
       summary: Type.Optional(Type.String()),
       block: Type.Optional(Type.String()),
@@ -120,6 +164,8 @@ export function registerWhiteboardTool(pi) {
       flag: Type.Optional(Type.String()),
       clear: Type.Optional(Type.Boolean()),
       by: Type.Optional(Type.String()),
+      from: Type.Optional(Type.String({ description: "session new: seed the document from a markdown file" })),
+      json: Type.Optional(Type.Boolean({ description: "session list: return JSON instead of plain lines" })),
     }),
     execute,
   });

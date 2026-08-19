@@ -16,6 +16,7 @@
 //  - pi.registerTool / pi.registerCommand.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
@@ -226,7 +227,7 @@ export default function (pi: ExtensionAPI) {
     return new WhiteboardLine(body, pad);
   });
 
-  registerWhiteboardTool(pi as any);
+  registerWhiteboardTool(pi as any, Type);
 
   pi.on("session_start", async (_event, ctx) => {
     await ensureViewer();
