@@ -13,6 +13,7 @@ import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
 import { loadDoc, appendChange } from "./doc.mjs";
 import { startChange, sendChange, discardChange, statusChange, stageSubcommand, isChangeSub } from "./staging.mjs";
+import { actionableItems } from "./scan.mjs";
 
 const HELP = `wb — whiteboard change-log document CLI
   wb new <slug> [--from <md-file>]        create a session (optionally seed from markdown)
@@ -24,6 +25,10 @@ const HELP = `wb — whiteboard change-log document CLI
   wb change status                        peek at staged ops
   wb change discard  (alias: kill)        abort the staging transaction
   wb note <text|--file>                   append to notes.md
+  wb listen [--timeout 0]                 stream actionable items: emit one JSONL event for a new
+                                          unanswered comment/chat, then exit 0 (idle→exit 2).
+                                          Run as a background monitor; its completion wakes you.
+                                          Baselines existing items so only NEW ones fire.
 
   Staging ops (run between \`wb change "<title>"\` and \`wb change send\`):
   wb change edit <block> (--file <f|-> | --text T | --diff <f|->)
@@ -147,6 +152,26 @@ async function main() {
       const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
       fs.appendFileSync(f, `\n- (${stamp}) ${body.replace(/\n/g, "\n  ")}\n`);
       return out(`noted\n`);
+    }
+    case "listen": {
+      const s = session();
+      let timeout = 0;
+      if (flags.timeout !== undefined) timeout = Number(flags.timeout);
+      const where = `${s.project}/${s.slug}`;
+      const baseline = new Set(actionableItems(s.dir).map((it) => `${it.kind}:${it.id}`));
+      const deadline = timeout > 0 ? Date.now() + timeout * 1000 : 0;
+      const tick = () => {
+        for (const it of actionableItems(s.dir)) {
+          const key = `${it.kind}:${it.id}`;
+          if (baseline.has(key)) continue;
+          process.stdout.write(JSON.stringify({ kind: it.kind, id: it.id, block: it.block || null, session: where, excerpt: (it.text || "").slice(0, 200).replace(/\s+/g, " ").trim() }) + "\n");
+          process.exit(0);
+        }
+        if (deadline && Date.now() > deadline) { process.stdout.write(JSON.stringify({ kind: "idle", session: where }) + "\n"); process.exit(2); }
+      };
+      setInterval(tick, 1000);
+      tick();
+      return; // unreachable; tick exits
     }
     default:
       throw new Error(`unknown command "${cmd}"\n\n${HELP}`);

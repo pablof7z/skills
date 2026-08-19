@@ -9,10 +9,9 @@
 // They share an anchor (block, or block + selector span), an optional body, an
 // author/at, a state (active|resolved|removed), and optional replies. The only
 // difference between kinds is how the UI renders them. The fold projects
-// attachments back to the legacy {doc.comments, block.flags} shape the viewer
-// already consumes (comments carry a `motivation` field for amber-card kinds),
-// so the viewer doesn't change. New change files use the unified `attach` op;
-// older files' comment/attention/flag/reply/resolve ops are still honored.
+// attachments to the viewer-facing {doc.comments, block.flags} shape (comment
+// attachments carry a `motivation` field for amber-card kinds). Change files use
+// the unified `attach`/`reply`/`resolve`/`detach`/`amend` ops.
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -26,7 +25,7 @@ const padded = (rev) => String(rev).padStart(PAD, "0");
 
 export function changesDir(dir) { return path.join(dir, CHANGES); }
 export function isBlockDocDir(dir) {
-  return fs.existsSync(changesDir(dir)) || fs.existsSync(path.join(dir, "document.json"));
+  return fs.existsSync(changesDir(dir));
 }
 
 export function readChanges(dir) {
@@ -80,18 +79,7 @@ export function fold(changes) {
       switch (e.op) {
         case "baseline":
           blocks.splice(0, blocks.length, ...(e.blocks || []).map((b) => ({ name: b.name, md: b.md, ...(b.flags ? { flags: [...b.flags] } : {}) })));
-          if (Array.isArray(e.attachments)) for (const a of e.attachments) att.set(a.id, { ...a, replies: [...(a.replies || [])] });
-          else if (Array.isArray(e.comments)) { // legacy baseline: synthesize attachments
-            for (const c of e.comments) att.set(c.id, { id: c.id, kind: c.motivation === "highlighting" ? "needs-attention" : "comment", block: c.block, selector: c.selector || null, body: c.body, motivation: c.motivation || null, by: c.author, at: c.at, state: c.resolved ? "resolved" : "active", replies: [...(c.replies || [])] });
-            // label attachments from block.flags — but skip a kind already represented by
-            // a comment attachment on that block (e.g. needs-attention already comes
-            // from an attention comment; don't double-count it).
-            const seen = new Set([...att.values()].map((a) => `${a.block}:${a.kind}`));
-            for (const b of e.blocks || []) for (const f of (b.flags || [])) {
-              if (seen.has(`${b.name}:${f}`)) continue;
-              const id = `lbl-${f}-${b.name}`; if (!att.has(id)) att.set(id, { id, kind: f, block: b.name, selector: null, body: null, motivation: null, by: "agent", at: ch.at, state: "active", replies: [] });
-            }
-          }
+          for (const a of (e.attachments || [])) att.set(a.id, { ...a, replies: [...(a.replies || [])] });
           break;
         case "add": blocks.splice(insertIndex(blocks, e.before, e.after), 0, { name: e.name, md: e.md, ...(e.flags ? { flags: [...e.flags] } : {}) }); break;
         case "edit": { const b = blocks.find((x) => x.name === e.name); if (b) b.md = e.md; break; }
@@ -103,19 +91,10 @@ export function fold(changes) {
         case "resolve": { const a = att.get(e.id ?? e.comment); if (a) a.state = e.unresolved ? "active" : "resolved"; break; }
         case "detach": { const a = att.get(e.id); if (a) a.state = "removed"; break; }
         case "amend": { const a = att.get(e.id); if (a) { if (e.body !== undefined) a.body = e.body; if (e.selector !== undefined) a.selector = e.selector; } break; }
-        // ---- legacy op names (older change files) ----
-        case "comment": att.set(e.id, makeAtt({ ...e, kind: "comment" }, at)); break;
-        case "attention": att.set(e.id, makeAtt({ ...e, kind: "needs-attention", motivation: e.motivation || "highlighting" }, at)); break;
-        case "flag": { // legacy flag op → label attachment
-          const id = `lbl-${e.flag}-${e.name}`;
-          if (e.on === false) { const a = att.get(id); if (a) a.state = "removed"; }
-          else if (!att.has(id)) att.set(id, { id, kind: e.flag, block: e.name, selector: null, body: null, motivation: null, by: "agent", at: ch.at, state: "active", replies: [] });
-          break;
-        }
       }
     }
   }
-  // project attachments → legacy {comments, block.flags}
+  // project attachments → viewer-facing {comments, block.flags}
   const live = new Set(blocks.map((b) => b.name));
   const comments = [];
   const flagsByBlock = {};
@@ -146,10 +125,10 @@ export function validateOps(doc, ops) {
     if (!e || typeof e !== "object") throw new Error("each op must be an object");
     switch (e.op) {
       case "add": validName(e.name); if (blockNames.has(e.name)) throw new Error(`block "${e.name}" already exists`); break;
-      case "edit": case "move": case "flag": if (!blockNames.has(e.name)) throw new Error(`no block "${e.name}"`); break;
+      case "edit": case "move": if (!blockNames.has(e.name)) throw new Error(`no block "${e.name}"`); break;
       case "rename": validName(e.to); if (!blockNames.has(e.from)) throw new Error(`no block "${e.from}"`); if (blockNames.has(e.to)) throw new Error(`block "${e.to}" already exists`); break;
       case "remove": for (const n of (e.names || [e.name])) if (!blockNames.has(n)) throw new Error(`no block "${n}"`); break;
-      case "attach": case "comment": case "attention": if (!blockNames.has(e.block)) throw new Error(`no block "${e.block}"`); break;
+      case "attach": if (!blockNames.has(e.block)) throw new Error(`no block "${e.block}"`); break;
       case "reply": if (!attIds.has(e.to ?? e.comment)) throw new Error(`no attachment "${e.to ?? e.comment}"`); break;
       case "resolve": case "detach": case "amend": { const k = e.id ?? e.comment; if (!attIds.has(k)) throw new Error(`no attachment "${k}"`); break; }
       case "baseline": break;
@@ -158,18 +137,8 @@ export function validateOps(doc, ops) {
   }
 }
 
-function migrateLegacy(dir) {
-  const f = path.join(dir, "document.json");
-  if (!fs.existsSync(f) || (fs.existsSync(changesDir(dir)) && readChanges(dir).length)) return;
-  let doc;
-  try { doc = JSON.parse(fs.readFileSync(f, "utf8")); } catch { return; }
-  if (!doc || !Array.isArray(doc.blocks)) return;
-  appendChange(dir, { id: "baseline", title: "Import existing document", by: "agent", ops: [{ op: "baseline", blocks: doc.blocks, comments: doc.comments || [] }] });
-}
-
 export function loadDoc(dir) {
   if (!isBlockDocDir(dir)) return null;
-  migrateLegacy(dir);
   return fold(readChanges(dir));
 }
 
@@ -198,10 +167,36 @@ export function flagOp(doc, block, flag, { value = true, body = null, by = "agen
 }
 export function changeIdFor(title) { return slugify(title) || null; }
 
+// Strip inline markdown syntax (code spans, emphasis, links) the way the
+// viewer's markdown renderer collapses it to text — outside fenced code
+// blocks, which render verbatim (only the fence markers themselves drop).
+// Selectors are matched against that rendered textContent, so slicing
+// prefix/suffix straight from the raw block source leaves stray backticks
+// etc. in the selector and it can never re-match in the DOM.
+function stripInlineMd(s) {
+  return s
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/(\*\*|__)([^*_]+?)\1/g, "$2")
+    .replace(/(\*|_)([^*_]+?)\1/g, "$2")
+    .replace(/~~([^~]+?)~~/g, "$1");
+}
+function mdToPlainText(md) {
+  const src = String(md);
+  const fence = /^```[^\n]*\n([\s\S]*?)\n```$/gm;
+  let out = "", last = 0, m;
+  while ((m = fence.exec(src))) {
+    out += stripInlineMd(src.slice(last, m.index)) + m[1];
+    last = m.index + m[0].length;
+  }
+  return out + stripInlineMd(src.slice(last));
+}
+
 export function selectorFor(md, exact) {
-  const i = String(md).indexOf(exact);
+  const plain = mdToPlainText(md);
+  const i = plain.indexOf(exact);
   if (i === -1) throw new Error(`quote not found in block: "${exact.slice(0, 40)}…"`);
-  const prefix = i > 0 ? md.slice(Math.max(0, i - 32), i) : "";
-  const suffix = md.slice(i + exact.length, i + exact.length + 32);
+  const prefix = i > 0 ? plain.slice(Math.max(0, i - 32), i) : "";
+  const suffix = plain.slice(i + exact.length, i + exact.length + 32);
   return { exact, prefix, suffix };
 }

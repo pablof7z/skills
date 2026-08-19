@@ -1,6 +1,6 @@
 // Whiteboard chat panel. A file-queue chat the human uses from the webapp;
-// messages land in <session>/chat/ and (without the pi extension) are drained
-// by wait-for-comment.mjs, which wakes the agent. The agent writes reply files
+// messages land in <session>/chat/ and are drained by `wb listen` (run as a
+// background monitor), which wakes the agent. The agent writes reply files
 // into the same dir; they render here live.
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({

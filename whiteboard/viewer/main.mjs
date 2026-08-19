@@ -1,8 +1,7 @@
-// Whiteboard viewer router. Decides whether to show the explorer or a session
-// view based on the URL path, and re-routes on browser navigation.
+// Whiteboard viewer router. Shows the explorer at "/" and the block-document
+// session view at "/session/<project>/<slug>". Re-routes on browser navigation.
 
 import { initExplorer } from "./explorer.mjs";
-import { initViewer } from "./viewer.mjs";
 import { initBlockViewer } from "./blockview.mjs";
 
 // Register the footnote extension once. The UMD globals (window.marked,
@@ -25,13 +24,7 @@ async function route() {
   if (m) {
     const project = decodeURIComponent(m[1]);
     const slug = decodeURIComponent(m[2]);
-    // Decide render path by session model: block-doc (document.json) vs legacy
-    // deliverable.md. Fetch metadata first so we route before building DOM.
-    try {
-      const s = await fetch(`/api/session/${encodeURIComponent(project)}/${encodeURIComponent(slug)}/session`).then((r) => r.json());
-      if (s.model === "blocks") return initBlockViewer(root, project, slug);
-    } catch {}
-    initViewer(root, project, slug);
+    initBlockViewer(root, project, slug);
   } else {
     initExplorer(root);
   }

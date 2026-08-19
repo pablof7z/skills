@@ -3,9 +3,9 @@
 //
 // Serves an explorer + per-session viewer for all whiteboard sessions under a
 // root directory (default ~/whiteboard). The explorer lists projects/sessions
-// with unread badges; each session view renders deliverable.md and supports
-// W3C Web Annotation comments. The server watches the filesystem and pushes
-// live updates to the browser via SSE.
+// with unread badges; each session view renders the block document and
+// supports comments. The server watches the filesystem and pushes live updates
+// to the browser via SSE.
 //
 // Usage: node server.mjs [<root-dir>] [--port 4318] [--open]
 
@@ -141,23 +141,21 @@ async function handleSession(req, res, root, project, slug, rest) {
   const dir = sessionDir(root, project, slug);
   if (!dir) return sendJson(res, 404, { error: "session not found" });
   S.ensureDirs(dir);
-  const blockDoc = B.isBlockDoc(dir);
   const key = `${project}/${slug}`;
   const m = req.method;
 
   if (rest === "session" && m === "GET") {
     const man = S.readManifest(dir);
-    const d = S.readDeliverable(dir);
     const viewed = S.readViewed(dir);
-    const resolved = blockDoc ? B.resolvedMap(dir) : S.readResolved(dir);
-    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, model: blockDoc ? "blocks" : "markdown", deliverableVersion: blockDoc ? (B.getDocument(dir)?.hash || "") : d.version, viewedVersion: viewed.version, resolved });
+    const resolved = B.resolvedMap(dir);
+    return sendJson(res, 200, { ...man, project, slug, sessionDir: dir, viewedVersion: viewed.version, resolved });
   }
-  if (rest === "document" && m === "GET" && blockDoc) {
+  if (rest === "document" && m === "GET") {
     return sendJson(res, 200, B.getDocument(dir));
   }
-  if (rest === "revisions" && m === "GET" && blockDoc)
+  if (rest === "revisions" && m === "GET")
     return sendJson(res, 200, { revisions: B.listRevisions(dir) });
-  if (rest.startsWith("revisions/") && m === "GET" && blockDoc) {
+  if (rest.startsWith("revisions/") && m === "GET") {
     const r = Number(rest.slice("revisions/".length));
     const doc = B.getDocumentAt(dir, r);
     if (!doc) return sendJson(res, 404, { error: "revision not found" });
@@ -173,71 +171,35 @@ async function handleSession(req, res, root, project, slug, rest) {
     if (!iterm) return sendJson(res, 200, { status: "no_provenance" });
     return sendJson(res, 200, jumpToITerm(iterm));
   }
-  if (rest === "deliverable" && m === "GET") {
-    const d = S.readDeliverable(dir);
-    S.snapshotVersion(dir, d.content);
-    return sendJson(res, 200, d);
-  }
   if (rest === "notes" && m === "GET") return sendJson(res, 200, { content: S.readNotes(dir) });
-  if (rest === "comments" && m === "GET") return sendJson(res, 200, blockDoc ? B.getComments(dir) : { annotations: S.readComments(dir) });
+  if (rest === "comments" && m === "GET") return sendJson(res, 200, B.getComments(dir));
   if (rest === "events" && m === "GET") { sseStart(res); sessionClientsFor(key).add(res); return; }
   if (rest === "comments" && m === "POST") {
     const data = await readBody(req).catch(() => null);
     if (!data) return sendJson(res, 400, { error: "bad json" });
-    if (blockDoc) {
-      if (data.replyTo) {
-        const r = B.postReply(dir, data.replyTo, data.text, data.creator || "user");
-        return sendJson(res, 201, r);
-      }
-      if (!data.block) return sendJson(res, 400, { error: "block required" });
-      const c = B.postComment(dir, { block: data.block, text: data.text, selector: data.selector, creator: data.creator || "user" });
-      return sendJson(res, 201, c);
-    }
-    const creator = data.creator || "user";
-    const anno = {
-      "@context": "http://www.w3.org/ns/anno.jsonld",
-      type: "Annotation",
-      id: `urn:uuid:${S.uuid()}`,
-      motivation: data.motivation || "commenting",
-      created: S.nowIso(),
-      creator: { type: "Person", name: creator },
-      body: { type: "TextualBody", value: String(data.text ?? "").slice(0, 8000), format: "text/markdown", language: "en" },
-    };
     if (data.replyTo) {
-      anno.motivation = "replying";
-      anno.target = { id: data.replyTo, type: "Annotation" };
-      anno.body.inReplyTo = data.replyTo;
-    } else {
-      anno.target = { source: S.DELIVERABLE, version: data.version || S.readDeliverable(dir).version, selector: Array.isArray(data.selector) ? data.selector : [] };
+      const r = B.postReply(dir, data.replyTo, data.text, data.creator || "user");
+      return sendJson(res, 201, r);
     }
-    S.writeComment(dir, anno);
-    return sendJson(res, 201, anno);
-  }
-  if (rest === "seen" && m === "POST") {
-    S.writeSeen(dir, S.nowIso());
-    broadcast(explorerClients, "sessions", {});
-    return sendJson(res, 200, { lastSeenAt: S.readSeen(dir).lastSeenAt });
+    if (!data.block) return sendJson(res, 400, { error: "block required" });
+    const c = B.postComment(dir, { block: data.block, text: data.text, selector: data.selector, creator: data.creator || "user" });
+    return sendJson(res, 201, c);
   }
   if (rest === "viewed" && m === "GET") {
     return sendJson(res, 200, S.readViewed(dir));
   }
   if (rest === "viewed" && m === "POST") {
     const data = await readBody(req).catch(() => ({}));
-    const d = S.readDeliverable(dir);
-    const version = (data && data.version) || d.version;
+    const version = (data && data.version) || null;
     S.writeViewed(dir, version);
     return sendJson(res, 200, { version, at: S.nowIso() });
   }
-  if (rest === "resolved" && m === "GET") return sendJson(res, 200, blockDoc ? B.resolvedMap(dir) : S.readResolved(dir));
+  if (rest === "resolved" && m === "GET") return sendJson(res, 200, B.resolvedMap(dir));
   if (rest === "resolved" && m === "POST") {
     const data = await readBody(req).catch(() => ({}));
     const id = data && data.id;
     if (!id) return sendJson(res, 400, { error: "id required" });
-    if (blockDoc) {
-      const map = B.resolve(dir, id, data.resolved, data.by || "user");
-      return sendJson(res, 200, map);
-    }
-    const map = S.setResolved(dir, id, data.resolved ? (data.by || "user") : null);
+    const map = B.resolve(dir, id, data.resolved, data.by || "user");
     return sendJson(res, 200, map);
   }
   if (rest === "manifest" && m === "PATCH") {
@@ -262,14 +224,6 @@ async function handleSession(req, res, root, project, slug, rest) {
     S.writeChatMessage(dir, msg);
     return sendJson(res, 201, msg);
   }
-  // Versions (history + per-version content for diffing)
-  if (rest === "versions" && m === "GET") return sendJson(res, 200, { versions: S.readVersions(dir) });
-  if (rest.startsWith("versions/") && m === "GET") {
-    const v = rest.slice("versions/".length);
-    const content = S.readVersionContent(dir, v);
-    if (content === null) return sendJson(res, 404, { error: "version not found" });
-    return sendJson(res, 200, { version: v, content });
-  }
   return sendJson(res, 404, { error: "not found" });
 }
 
@@ -285,11 +239,10 @@ function main() {
         const segs = filename.split(path.sep);
         if (segs.length >= 2 && S.isSessionDir(segs[1])) {
           // Ignore viewer-internal writes that are not content changes:
-          // .seen.json (written on every view) and versions/ (derived snapshots).
-          // Otherwise marking-seen would feedback-loop into endless refreshes.
+          // Skip viewer-internal writes (the .viewed.json “Done” marker) so they
+          // don't feedback-loop into endless refreshes.
           const leaf = segs[segs.length - 1];
-          const sub = segs[2];
-          if (leaf === S.SEEN_FILE || leaf === S.VIEWED_FILE || leaf === S.RESOLVED_FILE || sub === S.VERSIONS_DIR) return;
+          if (leaf === S.VIEWED_FILE) return;
           const key = `${segs[0]}/${segs[1]}`;
           broadcast(sessionClientsFor(key), "refresh", {});
           return;

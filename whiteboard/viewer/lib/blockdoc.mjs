@@ -1,7 +1,6 @@
 // lib/blockdoc.mjs — server-side block-document API for the viewer.
 // Backs the changes/<rev>.json log (cli/doc.mjs): reads project the fold; writes
-// append a change. A session is block-doc when it has a changes/ dir (or a
-// legacy document.json that auto-migrates on first load).
+// append a change. A session is block-doc when it has a changes/ dir.
 
 import path from "node:path";
 import {
@@ -13,13 +12,13 @@ export function isBlockDoc(dir) { return isBlockDocDir(dir); }
 
 // Full document for the client: { version, docId, rev, blocks, comments,
 // attachments, hash }. `attachments` is the raw unified list (kind-discriminated)
-// so the viewer can render kind-specific annotations (e.g. "clarification")
-// directly, beyond the legacy comments/flags projection.
+// so the viewer can render kind-specific attachments (e.g. "clarification")
+// directly, beyond the comments/flags projection.
 export function getDocument(dir) {
   const doc = loadDoc(dir);
   if (!doc) return null;
   return {
-    version: 1, docId: "deliverable", rev: doc.rev,
+    version: 1, docId: "block-doc", rev: doc.rev,
     blocks: doc.blocks || [], comments: doc.comments || [],
     attachments: doc.attachments || [], hash: doc.hash,
     updatedAt: doc.updatedAt || null,
@@ -53,7 +52,7 @@ export function getDocumentAt(dir, rev) {
   if (!changes.length) return null;
   const doc = fold(changes);
   return {
-    version: 1, docId: "deliverable", rev: doc.rev,
+    version: 1, docId: "block-doc", rev: doc.rev,
     blocks: doc.blocks || [], comments: doc.comments || [],
     attachments: doc.attachments || [], hash: doc.hash,
     updatedAt: doc.updatedAt || null,

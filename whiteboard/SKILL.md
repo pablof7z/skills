@@ -25,7 +25,7 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 
 ## The One Rule: Mutate The Document Only Through `wb`
 
-The session document is an **append-only change log** of named markdown blocks. You **never hand-write the document** — no `deliverable.md`, no hand-edited `document.json`, no hand-written comment/annotation JSON files. Every mutation goes through the `wb` CLI, which appends one atomic change file. This is what gives you stable comment anchors, semantic change tracking, and a live viewer. If you find yourself writing session files by hand, stop and use `wb`.
+The session document is an **append-only change log** of named markdown blocks. You **never hand-write the document** — no hand-edited `document.json`, no hand-written comment files. Every mutation goes through the `wb` CLI (or, under pi, the `whiteboard` tool), which appends one atomic change file. This is what gives you stable comment anchors, semantic change tracking, and a live viewer. If you find yourself writing session files by hand, stop and use `wb`.
 
 `wb` is installed on PATH (`~/.local/bin/wb`). If it is not on PATH in your environment, invoke the shim directly: `<skill-dir>/whiteboard/bin/wb` or `node <skill-dir>/whiteboard/cli/main.mjs …`.
 
@@ -41,7 +41,7 @@ Treat tentative language like "I think X might work" as a hypothesis, not approv
 
 ## Session Workspace
 
-Every whiteboard session lives in a shared, uncommitted directory outside any repo so the work-in-progress is visible to the human and can become a real deliverable:
+Every whiteboard session lives in a shared, uncommitted directory outside any repo so the work-in-progress is visible to the human and can become a real artifact:
 
 ```text
 ~/whiteboard/<project-slug>/YYYY-MM-<session-slug>/
@@ -51,7 +51,7 @@ Every whiteboard session lives in a shared, uncommitted directory outside any re
 └── chat/             # chat messages between human and agent (one JSON per message)
 ```
 
-There is **no `deliverable.md`** and **no `comments/` directory** in a block-doc session. The document is the fold over `changes/`; comments/labels are attachments inside those change files (one unified `attach` op, discriminated by `kind`). The viewer reads the fold; the agent mutates it only via `wb`.
+Comments/labels are attachments inside those change files (one unified `attach` op, discriminated by `kind`). The viewer reads the fold; the agent mutates it only via `wb` (or, under pi, the `whiteboard` tool).
 
 Resolve `<project-slug>` as the git repository name when inside a git work tree (`basename "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"`), otherwise `basename "$PWD"` — never a full path. Resolve `<session-slug>` as lowercase hyphen-case of the session name with a `YYYY-MM` date prefix (month, not day, so a session spanning days stays in one folder).
 
@@ -226,7 +226,7 @@ node "<skill-dir>/whiteboard/viewer/server.mjs" ~/whiteboard --open
 
 ### Reply to comments and chat
 
-Comments and chat come from the viewer, not the host conversation. Watch for them with `wait-for-comment.mjs` (below), or whatever wake mechanism your harness provides; when you receive a `[whiteboard] New comment on block "<block>" … (id <id>)` or `[whiteboard] New chat …` message, reply through `wb`, not by writing files by hand:
+Comments and chat come from the viewer, not the host conversation. Watch for them with `wb listen` (below) run as a background monitor, or whatever wake mechanism your harness provides; under pi the extension delivers them as attributed `[whiteboard]` messages that trigger a turn. When you receive a `[whiteboard] New comment on block "<block>" … (id <id>)` or `[whiteboard] New chat …` message, reply through `wb` (or the `whiteboard` tool), not by writing files by hand:
 
 **Comment** (`[whiteboard] New comment on block "goal" … (id c-xxxxx)`):
 ```bash
@@ -251,13 +251,15 @@ Do not answer a comment or chat only in the host conversation — the human is r
 
 ### Watch for new items (portable)
 
-If your harness doesn't already wake you on viewer activity, run the inbox watcher as a background monitor for the current session:
+If your harness doesn't already wake you on viewer activity, run `wb listen` as a background monitor for the current session. It baselines existing actionable items, then emits one JSONL event and exits as soon as a NEW actionable item lands — an unresolved human comment with no agent reply, or a human chat with no agent chat reply after it. Wire its completion to wake you, handle by kind (above), then relaunch it for the next item.
 
 ```bash
-node "<skill-dir>/whiteboard/viewer/wait-for-comment.mjs" "<session-dir>"
+wb listen [--session <project>/<slug>] [--timeout 0]
+# prints: {"kind":"comment","id":"c-…","block":"goal","session":"…","excerpt":"…"}  (exit 0)
+#        : {"kind":"idle","session":"…"}                            (exit 2 after --timeout)
 ```
 
-It baselines existing items, then exits (printing `comment:<id>` or `chat:<id>`) as soon as a new actionable item lands — a top-level human comment with no agent reply, or a human chat with no agent chat reply after it. Wire its completion to wake you, handle by kind (above), then relaunch it for the next item.
+Under pi you don't run `wb listen` — the extension watches `~/whiteboard` and wakes you with an attributed `[whiteboard]` message that triggers a turn.
 
 ## Marking something for the human's attention
 
@@ -279,4 +281,4 @@ Promote to a durable project artifact only after `decided`: shape the final ADR,
 
 ## Reference
 
-Read [references/note-schema-and-examples.md](references/note-schema-and-examples.md) when creating the first `notes.md`. The legacy per-file W3C annotation path (`references/annotations.md`) is superseded by the `wb` attachment model; read it only if you are migrating an old `deliverable.md` session.
+Read [references/note-schema-and-examples.md](references/note-schema-and-examples.md) when creating the first `notes.md`.

@@ -1,11 +1,11 @@
 # Notes Log Schema And Examples
 
-Read this file when creating or refreshing a session's `notes.md`, checking trigger boundaries, or promoting a converged exploration into a durable project artifact. For comment/reply files, read [annotations.md](annotations.md) instead.
+Read this file when creating or refreshing a session's `notes.md`, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
 
-The session workspace holds two files with different disciplines (see `SKILL.md` → Session Workspace):
+The session workspace holds the block document and `notes.md` with different disciplines (see `SKILL.md` → Session Workspace):
 
-- **`deliverable.md`** — the outward document. Rewritten retroactively as the live truth. Becomes the durable artifact on promotion.
-- **`notes.md`** — the append-only log. This file. Captures the trail that produced the deliverable.
+- **Block document** — the outward document. A sequence of named markdown blocks mutated only through `wb` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `wb read --md`).
+- **`notes.md`** — the append-only log. This file. Captures the trail that produced the block document.
 
 ## notes.md Structure
 
@@ -99,16 +99,16 @@ Status values:
 
 Do not promote a hypothesis, preference, or repeated suggestion into a decision unless the user explicitly agrees or the conversation clearly converges.
 
-## deliverable.md Shape
+## Block Document Shape
 
-`deliverable.md` has no fixed template — shape it to the session (plan, proposal, spec, design memo). It must always carry:
+The block document has no fixed template — shape it to the session (plan, proposal, spec, design memo). It is a sequence of named markdown blocks (each starting with an `# H1` title; the TOC lists headings, not block names). It must always carry:
 
-- **Requirements and constraints** the user has stated, in a dedicated current section.
+- **Requirements and constraints** the user has stated, in a dedicated current block (e.g. `constraints`).
 - The core question and current working model.
 - The viable options and the emerging direction, with the decision frontier visible.
 - Open questions and material risks.
 
-Keep it skimmable for the human; summarize verified findings, keep the raw trail in `notes.md`.
+Keep it skimmable for the human; summarize verified findings here, keep the raw trail in `notes.md`. Mutate it only through `wb change` (retroactively — rewrite and reorganize freely as the working model evolves).
 
 ## Naming
 
@@ -152,7 +152,7 @@ If a simple question becomes iterative across turns with alternatives, objection
 
 ## Update Discipline
 
-Keep both files compact. Prefer bullets with concrete nouns, paths, issue numbers, command names, logs, and direct user decisions. Do not copy long subagent reports into either file; summarize key facts, conflicts, risks, and implications in `notes.md`, and only the decision-relevant synthesis in `deliverable.md`.
+Keep both artifacts compact. Prefer bullets with concrete nouns, paths, issue numbers, command names, logs, and direct user decisions. Do not copy long subagent reports into either; summarize key facts, conflicts, risks, and implications in `notes.md`, and only the decision-relevant synthesis in the block document.
 
 Keep these categories separate (in the `notes.md` state block):
 
@@ -166,7 +166,7 @@ Keep these categories separate (in the `notes.md` state block):
 - risks: ways the direction could fail or be expensive to reverse
 - open questions: uncertainty that could change the direction
 
-When exploration contradicts the working model, update the state block's `Current Working Model` and `Observations` in place, record the contradiction under `Evidence Gathered`, and append a log entry. Update `deliverable.md` to match. Do not leave stale claims standing in the deliverable while a correction sits only in the log.
+When exploration contradicts the working model, update the state block's `Current Working Model` and `Observations` in place, record the contradiction under `Evidence Gathered`, and append a log entry. Update the block document to match via `wb change`. Do not leave stale claims standing in the block document while a correction sits only in the log.
 
 ## Adjacent Check Examples
 
@@ -185,4 +185,4 @@ Before promoting to a durable artifact, confirm the session has:
 - known unresolved risks or a statement that none are material
 - the target artifact type that matches project convention
 
-Shape the durable artifact from `deliverable.md`, carrying its requirements/constraints section over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in both files and set `manifest.json` status to `decided` (then `archived`).
+Shape the durable artifact from the block document (`wb read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and `notes.md`, and set `manifest.json` status to `decided` (then `archived`).
