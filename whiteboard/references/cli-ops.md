@@ -2,8 +2,6 @@
 
 Brief how-to for the `wb` CLI — the portable way to drive a whiteboard session from any harness. Run `wb help` for the full reference. `wb` is on PATH (`~/.local/bin/wb`); if not, invoke `<skill-dir>/whiteboard/bin/wb` or `node <skill-dir>/whiteboard/cli/main.mjs …`.
 
-A session lives at `~/whiteboard/<project>/<YYYY-MM-slug>/` (`<project>` = repo name, or cwd basename outside a repo). The document is the fold over `changes/<rev>.json`; you never hand-write it — every mutation is a staged `wb change` then `wb change send`.
-
 ## Sessions
 
 ```bash
