@@ -39,10 +39,56 @@ const myProject = process.env.WHITEBOARD_PROJECT || path.basename(process.cwd())
 const excerpt = (t: string, n = 120) => t.slice(0, n).replace(/\s+/g, " ").trim();
 
 // pi-tui is only resolvable inside pi's runtime. Resolve lazily so the module
-// loads under bare-node tests; the renderer is never called there.
+// loads under bare-node tests; the renderer falls back to WhiteboardLine there.
+// NOTE: a static `import { Text } from "@earendil-works/pi-tui"` would be aliased
+// to pi's bundled copy by jiti at load time, but it would break these out-of-tree
+// bare-node tests (no pi-tui in node_modules). createRequire / dynamic import()
+// bypass jiti's aliases, so they only resolve when the extension has its own
+// node_modules with pi-tui installed (the documented out-of-tree setup).
 const require_ = createRequire(import.meta.url);
 let TextC: any = null;
 try { TextC = require_("@earendil-works/pi-tui").Text; } catch {}
+
+// Minimal leaf TUI component used when the real pi-tui Text class is unavailable.
+// pi-tui's layout treats any object with a `render(width) -> string[]` method as a
+// valid leaf; returning a bare `{ toString }` object (the old fallback) made
+// Container.render throw `child.render is not a function` and crashed pi on the
+// next render tick. This component renders the colored "[whiteboard] " prefix
+// (ANSI only appears there) and word-wraps the plain content tail to width.
+const ANSI = /\x1b\[[0-9;]*m/g;
+const PREFIX_RE = /^((?:\x1b\[[0-9;]*m)*\[whiteboard\] (?:\x1b\[[0-9;]*m)*)/;
+class WhiteboardLine {
+  body: string;
+  pad: number;
+  constructor(body: string, pad = 0) { this.body = body; this.pad = pad; }
+  invalidate() {}
+  render(width: number) {
+    const w = Math.max(1, Math.floor(width) - this.pad);
+    const m = this.body.match(PREFIX_RE);
+    const prefix = m ? m[1] : "";
+    const prefixVis = prefix.replace(ANSI, "").length;
+    const rest = this.body.slice(prefix.length);
+    const words = rest.split(/\s+/).filter(Boolean);
+    const out: string[] = [];
+    let cur = prefix;            // current line text
+    let curVis = prefixVis;      // visible width of cur
+    let indentVis = prefixVis;   // visible width of the current line's lead-in
+    for (const word of words) {
+      const add = curVis > indentVis ? " " + word : word;
+      if (curVis + add.length > w && curVis > indentVis) {
+        out.push(cur);
+        cur = "  " + word;
+        curVis = 2 + word.length;
+        indentVis = 2;
+      } else {
+        cur += add;
+        curVis += add.length;
+      }
+    }
+    if (cur || out.length === 0) out.push(cur);
+    return this.pad > 0 ? out.map((l) => " ".repeat(this.pad) + l) : out;
+  }
+}
 
 async function isViewerUp() {
   try { const r = await fetch(`${VIEWER_URL}/api/sessions`); return r.ok; } catch { return false; }
@@ -172,8 +218,12 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerMessageRenderer("whiteboard", (message: any, options: any, theme: any) => {
+    const pad = options?.outputPad ?? 0;
     const body = theme?.fg ? theme.fg("accent", "[whiteboard] ") + String(message.content || "") : `[whiteboard] ${message.content || ""}`;
-    return TextC ? new TextC(body, options?.outputPad ?? 0, 0) : { toString: () => body };
+    // Prefer the real Text component when pi-tui is resolvable; otherwise render
+    // via the self-contained WhiteboardLine. Never return a non-component.
+    if (TextC) { try { return new TextC(body, pad, 0); } catch {} }
+    return new WhiteboardLine(body, pad);
   });
 
   registerWhiteboardTool(pi as any);
