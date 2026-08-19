@@ -3,11 +3,11 @@
 // LLM mutates the doc via a tool call instead of shelling out. The CLI stays
 // the human escape hatch (`/wb`); this is the agent path.
 //
-// typebox is only resolvable inside pi's runtime, so registration is deferred
-// to registerWhiteboardTool(pi), which requires typebox lazily and no-ops under
-// bare-node tests.
+// typebox is resolved by jiti's alias to pi's bundled copy when the extension
+// is loaded under pi. index.ts does the static `import { Type } from "typebox"`
+// (the canonical pattern from pi's docs/examples) and passes Type in here, so
+// this module stays harness-agnostic and never does its own typebox resolution.
 
-import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveSession } from "../cli/store.mjs";
@@ -16,8 +16,6 @@ import { readTagged, readMd, readJson } from "../cli/blocks.mjs";
 import {
   startChange, sendChange, discardChange, statusChange, stageSubcommand, isChangeSub,
 } from "../cli/staging.mjs";
-
-const require_ = createRequire(import.meta.url);
 
 const SUBS = [
   "start", "send", "discard", "status",
@@ -90,9 +88,7 @@ function execute(_toolCallId, p, _signal, _onUpdate, _ctx) {
   } catch (e) { return err(`whiteboard: ${e.message}`); }
 }
 
-export function registerWhiteboardTool(pi) {
-  let Type;
-  try { Type = require_("typebox"); } catch { return; } // not in pi runtime
+export function registerWhiteboardTool(pi, Type) {
   pi.registerTool({
     name: "whiteboard",
     label: "Whiteboard",
