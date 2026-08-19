@@ -1,8 +1,11 @@
 // migrate.mjs — turn a plain markdown string into wb blocks.
-// Default strategy: each top-level heading (## …) starts a new block named by
-// the heading slug, carrying the heading + its body. Content before the first
-// heading becomes a block named "intro". Duplicate slugs get -2, -3 suffixes.
-// This is one-time; the agent can split further with `wb write add`.
+// Default strategy: each H1/H2 heading starts a new block named by the heading
+// slug, carrying the heading + its body. Content before the first heading
+// becomes a block named "intro". H3–H6 stay inside their parent block (they are
+// subheadings, not block boundaries). Lines inside fenced code blocks (``` or
+// ~~~) are never treated as headings, so `#` comment lines in bash/rust/python
+// don't split. Duplicate slugs get -2, -3 suffixes.
+// This is one-time; the agent can split further with `wb change add`.
 
 import { slugify } from "./store.mjs";
 
@@ -10,6 +13,7 @@ export function parseMarkdownToBlocks(md) {
   const lines = String(md).replace(/\r\n/g, "\n").split("\n");
   const blocks = [];
   let cur = null;
+  let inFence = false, fenceCh = "";
   const used = new Set();
   const unique = (base) => {
     let n = base, i = 2;
@@ -18,7 +22,14 @@ export function parseMarkdownToBlocks(md) {
     return n;
   };
   for (const line of lines) {
-    const m = /^(#{1,6})\s+(.*)$/.exec(line);
+    // track fenced code blocks (``` or ~~~) — never split inside them
+    const fence = /^(\s*)(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (!inFence) { inFence = true; fenceCh = fence[2][0]; }
+      else if (fence[2][0] === fenceCh) inFence = false;
+    }
+    // only H1/H2 start a new block, and only outside a code fence
+    const m = !inFence && /^(#{1,2})\s+(.*)$/.exec(line);
     if (m) {
       cur = { name: unique(slugify(m[2]) || "section"), md: "" };
       blocks.push(cur);

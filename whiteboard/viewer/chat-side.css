@@ -1,0 +1,61 @@
+/* chat-side.css — the chat sidebar for the block-doc viewer.
+   chat.mjs mounts the .chat-list/.chat-input (already styled in styles.css)
+   into #chat-mount inside this panel. This file styles the panel shell, the
+   topbar toggle button, and the panel header/close button. */
+
+.chat-toggle {
+  font: inherit;
+  line-height: 1;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.chat-toggle:hover { border-color: var(--ink); }
+.chat-toggle.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+.chat-side {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.10);
+  padding: 8px 10px 0;
+}
+.chat-side[hidden] { display: none; }
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+.chat-head-title { font-weight: 600; font-size: 13px; }
+.chat-close {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.chat-close:hover { color: var(--ink); border-color: var(--ink); background: var(--hover, #f3f4f6); }
+
+/* the chat mount fills the remaining height; chat-list scrolls, input sticks */
+.chat-side #chat-mount { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.chat-side .chat-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+.chat-side .chat-input { flex: 0 0 auto; }

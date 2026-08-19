@@ -1,19 +1,20 @@
 # Whiteboard Viewer
 
-A localhost web viewer for all whiteboard sessions under a root directory (default `~/whiteboard`). It serves an **explorer** (projects → sessions with unread badges) and a per-session view that renders `deliverable.md` and lets the human add W3C Web Annotation comments anchored to spans of the document at a specific version. Comments and replies are JSON files in each session's `comments/`; the viewer watches the filesystem and re-renders live.
+A localhost web viewer for all whiteboard sessions under a root directory (default `~/whiteboard`). It serves an **explorer** (projects → sessions with unread badges) and a per-session view that renders the **block document** (the fold over `changes/<rev>.json`) and lets the human add comments anchored to a block (optionally to an in-block span). The viewer watches the filesystem and re-renders live.
 
-The companion agent watches a session's `comments/` directory (see `wait-for-comment.mjs`) and writes reply annotation files, which appear live in the viewer and bump the session's unread badge until the human opens it.
+The companion agent detects new comments/chat via `wb listen` (run as a background monitor; see `../cli/main.mjs`) and replies through `wb change`, which appends a change file the viewer picks up live.
 
 ## Layout
 
 ```text
 viewer/
 ├── server.mjs            # Node HTTP + SSE server, root fs watch, session + explorer APIs
-├── wait-for-comment.mjs  # CLI the agent runs: exits when a new human comment lands
-├── lib/session.mjs       # session read/write + unread + list helpers
+├── lib/session.mjs       # session read/write (manifest, notes, chat, viewed) + list helpers
+├── lib/blockdoc.mjs      # block-document API: fold read, comment/reply/resolve append-change
 ├── main.mjs              # client router (explorer vs session view)
 ├── explorer.mjs          # explorer client: sessions list with unread badges
-├── viewer.mjs            # session client: render, selection, anchoring, sidebar, SSE
+├── blockview.mjs         # session client: block render, margin comments, diff, TOC, chat, SSE
+├── comments.mjs          # shared quote-matching helpers (quoteMatch / quoteIndex)
 ├── index.html            # shell
 ├── styles.css
 └── vendor/               # marked + DOMPurify (vendored, no runtime network deps)
@@ -29,9 +30,8 @@ node server.mjs [<root-dir>] [--port 4318] [--open]
 
 - `<root-dir>` defaults to `~/whiteboard`. Sessions are `<root>/<project>/YYYY-MM-<slug>/`.
 - Binds to `127.0.0.1` only (loopback).
-- `GET /` → explorer. `GET /session/<project>/<slug>` → session view (SPA fallback).
+- `GET /` → explorer. `GET /session/<project>/<slug>` → block session view (SPA fallback).
 - Watches the whole root; pushes explorer `sessions` events and per-session `refresh` events via SSE.
-- Snapshots `deliverable.md` to `versions/<sha12>.md` on every read/change.
 
 ## HTTP API
 
@@ -39,25 +39,28 @@ node server.mjs [<root-dir>] [--port 4318] [--open]
 |---|---|---|
 | `/api/sessions` | GET | list all sessions with name, status, comment count, unread, lastActivity |
 | `/api/events` | GET | explorer SSE (`sessions` events) |
-| `/api/session/<p>/<s>/session` | GET | manifest + current deliverable version |
-| `/api/session/<p>/<s>/deliverable` | GET | `{ content, version }` |
-| `/api/session/<p>/<s>/notes` | GET | `{ content }` |
-| `/api/session/<p>/<s>/comments` | GET | `{ annotations: […] }` |
-| `/api/session/<p>/<s>/comments` | POST | create a comment or reply (W3C annotation file) |
-| `/api/session/<p>/<s>/seen` | POST | mark session seen (clears unread badge) |
+| `/api/session/<p>/<s>/session` | GET | manifest + `viewedVersion` + resolved map |
+| `/api/session/<p>/<s>/document` | GET | the folded block document (`blocks`, `comments`, `attachments`, `rev`, `hash`) |
+| `/api/session/<p>/<s>/revisions` | GET | revision list (rev, at, title, by, op counts) |
+| `/api/session/<p>/<s>/revisions/<rev>` | GET | document state at a rev (for diffing) |
+| `/api/session/<p>/<s>/jump` | POST | focus the iTerm pane that authored a rev (provenance) |
+| `/api/session/<p>/<s>/notes` | GET | `{ content }` (notes.md) |
+| `/api/session/<p>/<s>/comments` | GET | `{ comments: […] }` |
+| `/api/session/<p>/<s>/comments` | POST | create a comment (`{block,text,selector,creator}`) or reply (`{replyTo,text,creator}`) — appends a change |
+| `/api/session/<p>/<s>/resolved` | GET / POST | read/toggle the resolved map |
+| `/api/session/<p>/<s>/viewed` | GET / POST | read/mark the reviewed rev (diff "Done" button) |
+| `/api/session/<p>/<s>/chat` | GET / POST | file-queue chat (human posts; agent writes reply files) |
 | `/api/session/<p>/<s>/manifest` | PATCH | update manifest fields (e.g. status) |
 | `/api/session/<p>/<s>/events` | GET | per-session SSE (`refresh` events) |
 
 ## Unread
 
-Unread count = annotations whose `creator.name` is not `user` and whose `created` is after the session's `lastSeenAt` (stored in `.seen.json`). Opening a session view POSTs `/seen` and clears the badge. New agent replies bump it again until the human reopens.
+Unread count = actionable user comments (unresolved, no agent reply) + unanswered user chat messages, computed from the folded document and `chat/`. The explorer badge and the pi extension footer both use this.
 
-## Comment watcher (agent-side)
+## Comment detection (agent-side)
 
 ```bash
-node wait-for-comment.mjs <session-dir> [--timeout 0]
+wb listen [--session <project>/<slug>] [--timeout 0]
 ```
 
-Baselines existing comments, then exits `0` (printing the new annotation's `urn:uuid:…` id) as soon as a new top-level human comment without an agent reply appears. `--timeout N` exits `2` (`idle`) after N seconds. The agent runs this as a background monitor wired to wake it on completion, then writes a reply annotation file and relaunches the watcher.
-
-See `../references/annotations.md` for the W3C Web Annotation shapes.
+Baselines existing actionable items, then prints one JSONL event (`{"kind":"comment"|"chat","id","block","session","excerpt"}`) and exits `0` as soon as a NEW actionable item appears. `--timeout N` exits `2` with `{"kind":"idle"}` after N seconds. Run it as a background monitor; its completion wakes the agent, which replies via `wb change` and relaunches the monitor. Under pi, the extension wakes the agent natively (attributed whiteboard message) instead.
