@@ -139,7 +139,7 @@ export default function (pi: ExtensionAPI) {
   let mySessionId: string | null = null;
   let toolsRegistered = false;
   // Resolve typebox (jiti alias under pi; null under bare-node tests) and register
-  // the 9 whiteboard tools. toolsReady is awaited in session_start so the active
+  // the 10 whiteboard tools. toolsReady is awaited in session_start so the active
   // set is applied AFTER the tools exist (setActiveTools ignores unknown names).
   const toolsReady = import("typebox")
     .then((m: any) => m?.Type).catch(() => null)
@@ -161,24 +161,20 @@ export default function (pi: ExtensionAPI) {
 
   // The active session for THIS pi session: the tool-tracked current session
   // (set by wb_new/wb_use) wins; else the most-recently-modified session we own
-  // (manifest.owner === mySessionId); else the most-recently-modified session in
-  // this project (last-resort so the footer always shows *something* — the
-  // session being worked on is usually the newest). Tool resolution stays
+  // (manifest.owner === mySessionId). If neither, the footer shows nothing —
+  // a project-wide fallback would pin this agent to another agent's session,
+  // since sessions share a project key (basename(cwd)). Tool resolution stays
   // separate (currentSession only); this is footer/info display.
   function activeSession(): string | null {
     const t = getCurrentSession();
     if (t) return t;
     const owned = resolveOwnedSession(myProject, ROOT, mySessionId);
     if (owned) return `${owned.project}/${owned.slug}`;
-    let best: any = null, bestM = 0;
-    try {
-      for (const s of listSessions(ROOT)) {
-        if (s.project !== myProject) continue;
-        const m = fs.statSync(s.dir).mtimeMs;
-        if (m > bestM) { bestM = m; best = s; }
-      }
-    } catch {}
-    return best ? `${best.project}/${best.slug}` : null;
+    // No tool-tracked and no owned session: show nothing. A project-wide
+    // newest-session fallback here would pin this agent to another agent's
+    // session (sessions share a project key = basename(cwd)); ownership is
+    // the only correct scoping for the footer.
+    return null;
   }
 
   function updateStatus(ctx: any) {
@@ -186,11 +182,13 @@ export default function (pi: ExtensionAPI) {
       const sess = activeSession();
       let unread = 0;
       try { for (const s of listSessions(ROOT)) if (s.project === myProject && mine(s)) unread += sessionUnread(s); } catch {}
-      // Show the active whiteboard session in the footer, with unread count when any.
-      // No hasUI guard: setStatus is a safe no-op in non-UI modes (per docs), and
-      // guarding on ctx.hasUI skipped the set when hasUI was undefined in the TUI.
-      const label = sess ? `📓 ${sess}${unread ? ` · ${unread} unread` : ""}` : "📓 whiteboard (no session)";
-      ctx?.ui?.setStatus?.("whiteboard", label);
+      // Show the active whiteboard session in the footer, with unread count when
+      // any. No hasUI guard: setStatus is a safe no-op in non-UI modes (per docs),
+      // and guarding on ctx.hasUI skipped the set when hasUI was undefined in the
+      // TUI. When this agent has no session, clear the footer entirely rather
+      // than advertising "(no session)".
+      if (sess) ctx?.ui?.setStatus?.("whiteboard", `📓 ${sess}${unread ? ` · ${unread} unread` : ""}`);
+      else ctx?.ui?.setStatus?.("whiteboard", undefined);
     } catch {}
   }
 
@@ -267,7 +265,7 @@ export default function (pi: ExtensionAPI) {
     await toolsReady;
     try {
       if ((pi as any).getActiveTools && (pi as any).setActiveTools) {
-        const DOC = new Set(["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_attach", "wb_tag"]);
+        const DOC = new Set(["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_apply", "wb_attach", "wb_tag"]);
         let active: string[] = (pi as any).getActiveTools().filter((n: string) => !DOC.has(n));
         active = [...new Set([...active, "wb_new", "wb_list"])];   // fresh agent: only the two loaders
         if (cur) active = [...new Set([...active, ...DOC])];         // owning agent: unlock everything (smooth wake)
