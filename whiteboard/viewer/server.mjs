@@ -48,15 +48,17 @@ function sessionDir(root, project, slug) {
 }
 
 // ---- SSE clients ----
-const explorerClients = new Set();
-const reloadClients = new Set();
-const sessionClients = new Map(); // key "project/slug" -> Set<res>
-const sessionClientsFor = (key) => {
-  if (!sessionClients.has(key)) sessionClients.set(key, new Set());
-  return sessionClients.get(key);
-};
+// One multiplexed stream per page (see /api/stream below) carries all three
+// event types: "reload" (viewer-asset change), "sessions" (explorer list
+// changed), "refresh" (a session's document changed). A client optionally
+// tags itself with the session it's viewing (?session=project/slug); refresh
+// events are routed only to clients tagged with the matching session. This
+// keeps each tab to ONE live connection instead of three — three per tab
+// exhausted the browser's ~6-per-origin HTTP/1.1 pool after 2-3 tabs, which
+// made ordinary fetches (e.g. /api/sessions) queue forever.
+const streamClients = new Set(); // { res, session: string|null }
 
-function sseStart(res) {
+function sseStart(res, client) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-store, no-transform",
@@ -65,13 +67,16 @@ function sseStart(res) {
   });
   res.write(": hello\n\n");
   const keep = setInterval(() => { try { res.write(": ping\n\n"); } catch {} }, 15000);
-  res.on("close", () => { clearInterval(keep); explorerClients.delete(res); reloadClients.delete(res); for (const set of sessionClients.values()) set.delete(res); });
+  res.on("close", () => { clearInterval(keep); streamClients.delete(client); });
   return res;
 }
 
-function broadcast(set, event, data) {
+function broadcast(event, data, filterFn) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const c of set) { try { c.write(payload); } catch {} }
+  for (const c of streamClients) {
+    if (filterFn && !filterFn(c)) continue;
+    try { c.res.write(payload); } catch {}
+  }
 }
 
 // ---- HTTP helpers ----
@@ -141,7 +146,6 @@ async function handleSession(req, res, root, project, slug, rest) {
   const dir = sessionDir(root, project, slug);
   if (!dir) return sendJson(res, 404, { error: "session not found" });
   S.ensureDirs(dir);
-  const key = `${project}/${slug}`;
   const m = req.method;
 
   if (rest === "session" && m === "GET") {
@@ -173,7 +177,6 @@ async function handleSession(req, res, root, project, slug, rest) {
   }
   if (rest === "notes" && m === "GET") return sendJson(res, 200, { content: S.readNotes(dir) });
   if (rest === "comments" && m === "GET") return sendJson(res, 200, B.getAnnotations(dir));
-  if (rest === "events" && m === "GET") { sseStart(res); sessionClientsFor(key).add(res); return; }
   if (rest === "comments" && m === "POST") {
     const data = await readBody(req).catch(() => null);
     if (!data) return sendJson(res, 400, { error: "bad json" });
@@ -207,7 +210,7 @@ async function handleSession(req, res, root, project, slug, rest) {
     if (!data) return sendJson(res, 400, { error: "bad json" });
     const next = { ...S.readManifest(dir), ...data };
     fs.writeFileSync(path.join(dir, S.MANIFEST), JSON.stringify(next, null, 2) + "\n", "utf8");
-    broadcast(explorerClients, "sessions", {});
+    broadcast("sessions", {});
     return sendJson(res, 200, next);
   }
   // Chat (file-queue; agent writes reply files directly, viewer renders live)
@@ -234,7 +237,7 @@ function main() {
   // Watch the whole root recursively; broadcast to affected session + explorer.
   try {
     fs.watch(root, { recursive: true }, (_evt, filename) => {
-      broadcast(explorerClients, "sessions", {});
+      broadcast("sessions", {});
       if (filename) {
         const segs = filename.split(path.sep);
         if (segs.length >= 2 && S.isSessionDir(path.join(root, segs[0], segs[1]))) {
@@ -244,11 +247,13 @@ function main() {
           const leaf = segs[segs.length - 1];
           if (leaf === S.VIEWED_FILE) return;
           const key = `${segs[0]}/${segs[1]}`;
-          broadcast(sessionClientsFor(key), "refresh", {});
+          broadcast("refresh", {}, (c) => c.session === key);
           return;
         }
       }
-      for (const set of sessionClients.values()) broadcast(set, "refresh", {});
+      // Change not attributable to one session dir (e.g. a new session
+      // appearing): nudge every session-tagged client to refresh.
+      broadcast("refresh", {}, (c) => !!c.session);
     });
   } catch (e) { console.error("watch root failed:", e.message); }
 
@@ -260,12 +265,19 @@ function main() {
       if (!filename) return;
       if (/\.(mjs|js|css|html)$/.test(filename)) {
         if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => broadcast(reloadClients, "reload", {}), 150);
+        reloadTimer = setTimeout(() => broadcast("reload", {}), 150);
       }
     });
   } catch (e) { console.error("watch viewer failed:", e.message); }
 
   const server = http.createServer(async (req, res) => {
+    if (process.env.WB_DEBUG_LOG) {
+      const started = Date.now();
+      fs.appendFileSync(process.env.WB_DEBUG_LOG, `${new Date().toISOString()} -> ${req.method} ${req.url}
+`);
+      res.on("close", () => fs.appendFileSync(process.env.WB_DEBUG_LOG, `${new Date().toISOString()} <- ${req.method} ${req.url} ${res.statusCode} ${Date.now() - started}ms
+`));
+    }
     try {
       const u = new URL(req.url, `http://localhost:${port}`);
       const p = decodeURIComponent(u.pathname);
@@ -285,8 +297,15 @@ function main() {
 
       // API
       if (p === "/api/sessions" && req.method === "GET") return sendJson(res, 200, { sessions: S.listSessions(root) });
-      if (p === "/api/events" && req.method === "GET") { sseStart(res); explorerClients.add(res); return; }
-      if (p === "/api/reload" && req.method === "GET") { sseStart(res); reloadClients.add(res); return; }
+      if (p === "/api/stream" && req.method === "GET") {
+        const session = u.searchParams.get("session") || null;
+        const client = { res, session };
+        streamClients.add(client);
+        sseStart(res, client);
+        if (process.env.WB_DEBUG_LOG) fs.appendFileSync(process.env.WB_DEBUG_LOG, `${new Date().toISOString()} SSE +stream session=${session} (clients=${streamClients.size})
+`);
+        return;
+      }
 
       const sess = p.match(/^\/api\/session\/([^/]+)\/([^/]+)\/(.+)$/);
       if (sess) return await handleSession(req, res, root, sess[1], sess[2], sess[3]);
@@ -300,6 +319,17 @@ function main() {
     }
   });
 
+  server.on("error", (err) => {
+    // EADDRINUSE means another viewer instance already owns this port; that
+    // one serves the webui, so a losing spawn should exit cleanly instead of
+    // throwing an unhandled 'error' event. Other listen errors are real.
+    if (err && err.code === "EADDRINUSE") {
+      console.error(`whiteboard viewer: port ${port} already in use — another instance is serving it; exiting.`);
+      process.exit(0);
+    }
+    console.error("whiteboard viewer: listen error:", err);
+    process.exit(1);
+  });
   server.listen(port, "127.0.0.1", () => {
     const url = `http://127.0.0.1:${port}`;
     console.log(`whiteboard viewer: ${url}  (root: ${root})`);

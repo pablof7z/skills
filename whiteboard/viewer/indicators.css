@@ -1,0 +1,44 @@
+/* indicators.css — off-screen indicators for agent annotations the user still
+   needs to respond to or see. When such a card is scrolled out of the doc
+   viewport, a small count appears at the top/bottom edge of the scroll area;
+   clicking it jumps to the nearest one. Cards that await the user get a subtle
+   left-accent so they're distinguishable from already-addressed threads. */
+
+/* card awaiting the user: a quiet left accent + a tiny status dot */
+.thread.awaits-user,
+.wb-tag.awaits-user {
+  border-left: 3px solid var(--accent);
+}
+.thread.awaits-user .excerpt .collapse-btn { color: var(--accent); }
+
+/* the edge indicator pill (mirrors the old .att-edge shape) */
+.await-edge {
+  position: fixed;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  user-select: none;
+  transition: filter 0.12s;
+}
+.await-edge[hidden] { display: none; }
+.await-edge:hover { filter: brightness(1.07); }
+.await-edge .await-edge-flag { line-height: 1; font-size: 9px; opacity: 0.9; }
+.await-edge .await-edge-count { min-width: 10px; text-align: center; }
+.await-edge .await-edge-arrow { line-height: 1; }
+
+:root[data-theme="dark"] .await-edge { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); }
+
+/* in narrow mode the threads live in the drawer, not the doc viewport — hide
+   the doc-edge indicators (they're already hidden by JS, this is a guard) */
+.doc-wrap.narrow-comments ~ * .await-edge,
+html.narrow-comments .await-edge { display: none; }

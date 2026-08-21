@@ -21,19 +21,20 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import {
   listSessions, loadDoc, isActionable, chatActionable, sessionUnread,
 } from "./scan.mjs";
 import { registerWhiteboardTools, setCurrentSession, getCurrentSession } from "./tool.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const VIEWER_DIR = path.join(__dirname, "..", "viewer");
-const SERVER = path.join(VIEWER_DIR, "server.mjs");
+// Resolve symlinks so a symlinked extension install (e.g. ~/.pi/agent/extensions/
+// whiteboard -> repo/extension) derives sibling `cli/` and `viewer/` paths from the
+// real location, not the link's parent. Without this, `/wb <args>` looks for
+// `<extensions>/cli/main.mjs` (missing) instead of `<repo>/cli/main.mjs`.
+const __dirname = path.dirname(fs.realpathSync(fileURLToPath(import.meta.url)));
 const CLI = path.join(__dirname, "..", "cli", "main.mjs");
 const ROOT = path.join(os.homedir(), "whiteboard");
-const PORT = Number(process.env.WHITEBOARD_PORT || "4318");
-const VIEWER_URL = `http://127.0.0.1:${PORT}`;
+import { ensureViewer, VIEWER_URL } from "./viewer.mjs";
 const myProject = process.env.WHITEBOARD_PROJECT || path.basename(process.cwd());
 
 // pi-tui is only resolvable inside pi's runtime. Resolve lazily so the module
@@ -86,10 +87,6 @@ class WhiteboardLine {
     if (cur || out.length === 0) out.push(cur);
     return this.pad > 0 ? out.map((l) => " ".repeat(this.pad) + l) : out;
   }
-}
-
-async function isViewerUp() {
-  try { const r = await fetch(`${VIEWER_URL}/api/sessions`); return r.ok; } catch { return false; }
 }
 
 function tokenize(s: string): string[] {
@@ -152,12 +149,6 @@ export default function (pi: ExtensionAPI) {
     return s.owner === mySessionId;
   }
 
-  async function ensureViewer() {
-    if (await isViewerUp()) return;
-    const child = spawn("node", [SERVER, ROOT, "--port", String(PORT)], { stdio: "ignore", detached: true });
-    child.unref();
-    for (let i = 0; i < 25; i++) { if (await isViewerUp()) return; await new Promise((r) => setTimeout(r, 200)); }
-  }
 
   // The active session for THIS pi session: the tool-tracked current session
   // (set by wb_new/wb_use) wins; else the most-recently-modified session we own

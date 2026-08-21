@@ -1,6 +1,9 @@
 // Explorer: lists all whiteboard sessions under the root with unread badges,
-// as a flat list sorted by last activity. Live-updates via SSE. Project filter
-// pills persist their selection in localStorage.
+// as a flat list sorted by last activity. Live-updates via the page's shared
+// SSE stream (see main.mjs). Project filter pills persist their selection in
+// localStorage.
+
+import { onSessions } from "./main.mjs";
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -149,10 +152,11 @@ export function initExplorer(root) {
   }
 
   refresh();
-  const es = new EventSource("/api/events");
-  es.addEventListener("sessions", refresh);
-  es.addEventListener("error", () => { /* auto-reconnect */ });
+  const offSessions = onSessions(refresh);
   // Recompute relative-time labels ("just now" -> "1m ago" …) while the page
   // stays open, without refetching. allSessions is the cached list render() keeps.
-  setInterval(() => { if (allSessions.length) render(allSessions); }, 30000);
+  const timer = setInterval(() => { if (allSessions.length) render(allSessions); }, 30000);
+  // Tear down our stream registration + timer when the router re-routes
+  // (back/forward / SPA navigation).
+  return { destroy() { offSessions(); clearInterval(timer); } };
 }

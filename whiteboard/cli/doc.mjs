@@ -19,6 +19,8 @@ import crypto from "node:crypto";
 import { versionHash, validName, slugify, agentName, provenance } from "./store.mjs";
 import { resolveKind, isTagKind } from "./kinds.mjs";
 
+export { selectorFor } from "./selector.mjs";
+
 export const CHANGES = "changes";
 const PAD = 6;
 const newId = () => "c-" + crypto.randomBytes(3).toString("hex");
@@ -230,37 +232,3 @@ export function tagClearOp(doc, block, kind, { selector, path = DEFAULT_PATH } =
   return existing ? detachOp(existing.id) : null;
 }
 export function changeIdFor(title) { return slugify(title) || null; }
-
-// Strip inline markdown syntax (code spans, emphasis, links) the way the
-// viewer's markdown renderer collapses it to text — outside fenced code
-// blocks, which render verbatim (only the fence markers themselves drop).
-// Selectors are matched against that rendered textContent, so slicing
-// prefix/suffix straight from the raw block source leaves stray backticks
-// etc. in the selector and it can never re-match in the DOM.
-function stripInlineMd(s) {
-  return s
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/(\*\*|__)([^*_]+?)\1/g, "$2")
-    .replace(/(\*|_)([^*_]+?)\1/g, "$2")
-    .replace(/~~([^~]+?)~~/g, "$1");
-}
-function mdToPlainText(md) {
-  const src = String(md);
-  const fence = /^```[^\n]*\n([\s\S]*?)\n```$/gm;
-  let out = "", last = 0, m;
-  while ((m = fence.exec(src))) {
-    out += stripInlineMd(src.slice(last, m.index)) + m[1];
-    last = m.index + m[0].length;
-  }
-  return out + stripInlineMd(src.slice(last));
-}
-
-export function selectorFor(md, exact) {
-  const plain = mdToPlainText(md);
-  const i = plain.indexOf(exact);
-  if (i === -1) throw new Error(`quote not found in block: "${exact.slice(0, 40)}…"`);
-  const prefix = i > 0 ? plain.slice(Math.max(0, i - 32), i) : "";
-  const suffix = plain.slice(i + exact.length, i + exact.length + 32);
-  return { exact, prefix, suffix };
-}

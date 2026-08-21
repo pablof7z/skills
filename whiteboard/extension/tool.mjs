@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { resolveSession } from "../cli/store.mjs";
 import { loadDoc, DEFAULT_PATH } from "../cli/doc.mjs";
+import { applyOps } from "../cli/apply.mjs";
 import { readJson, readMd, readMdAgent } from "../cli/blocks.mjs";
 import {
   startChange, sendChange, discardChange, stageSubcommand,
@@ -27,10 +28,11 @@ import {
   tagSet, tagClear, listAnnotations,
 } from "../cli/annotations.mjs";
 import { ATTACH_KINDS, TAG_KINDS } from "../cli/kinds.mjs";
+import { ensureViewer } from "./viewer.mjs";
 
 const BLOCK_OPS = ["add", "edit", "move", "rename", "remove"];
 // Tools that are inactive for a fresh agent and unlocked by wb_new/wb_list/wb_use.
-const DOC_TOOLS = ["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_attach", "wb_tag"];
+const DOC_TOOLS = ["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_apply", "wb_attach", "wb_tag"];
 
 // Path to the wb CLI — source of truth for session lifecycle (new/list/use).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,6 +44,16 @@ async function runCli(args) {
     cwd: process.cwd(), maxBuffer: 4 * 1024 * 1024, env: process.env,
   });
   return stdout.trim();
+}
+
+// Best-effort: make sure the webui viewer is up whenever a whiteboard tool runs
+// (spawn-if-down via ./viewer.mjs). Fire-and-forget — tools operate on
+// ~/whiteboard files directly and must not wait on the viewer binding.
+function withViewer(execute) {
+  return async (id, p, sig, on, ctx) => {
+    ensureViewer().catch(() => {});
+    return execute(id, p, sig, on, ctx);
+  };
 }
 
 // The tool tracks the current session itself — no env reliance. Seeded by the
@@ -224,6 +236,22 @@ async function wb_change_finish(_id, p, _sig, _on, ctx) {
   } catch (e) { return err(`wb_change_finish: ${e.message}`); }
 }
 
+// Apply a whole array of block ops as a single all-or-nothing change — no
+// staging transaction. Every op is built, then validated in WIP order against
+// the live doc; if ANY op is invalid (bad block name, missing field, a diff
+// that won't apply, an unknown op) nothing is written. On success one change
+// (one rev) is appended with all the ops. `by` is attributed at the change
+// level (block ops don't carry their own author).
+async function wb_apply(_id, p, _sig, _on, ctx) {
+  if (!p.title) return err("wb_apply: `title` is required");
+  if (!Array.isArray(p.ops) || !p.ops.length) return err("wb_apply: `ops` (non-empty array) is required");
+  const r = getSession(); if (r.error) return err(r.error);
+  try {
+    const ch = applyOps(r.s, { title: p.title, ops: p.ops, summary: p.summary, by: p.by, piSessionId: piSid(ctx) });
+    return txt(`applied ${ch.ops} op(s) as one atomic change: ${JSON.stringify(ch)}`);
+  } catch (e) { return err(`wb_apply: ${e.message}`); }
+}
+
 // Tool descriptions are the primary agent-facing surface (lazy tools carry no
 // promptSnippet/promptGuidelines), so they spell out params + a short example.
 const D = {
@@ -237,6 +265,7 @@ const D = {
   wb_attach: "Anchor a replyable thread to a span of a block, or work with an existing thread. NOT staged — a direct write. params: { op: \"attach\"|\"reply\"|\"resolve\"|\"reopen\"|\"list\", block?, on?, kind?, content?, id?, by?, path?, open? }. `on` is the anchor text within the block (REQUIRED for attach; the thread anchors to that span). `kind` (attach only): question|warning|objection|note. op=attach: block+on+kind+content(+by?+path?). op=reply: id+content(+by?). op=resolve/reopen: id. op=list: (+block?+path?+open?). Examples: wb_attach({ op:\"attach\", block:\"goal\", on:\"Build the thing.\", kind:\"question\", content:\"is this right?\" }); wb_attach({ op:\"reply\", id:\"c-abc\", content:\"noted\" }); wb_attach({ op:\"resolve\", id:\"c-abc\" }).",
   wb_tag: "Set or clear a short status tag anchored to a span of a block, or list tags. NOT staged — a direct write. params: { op: \"set\"|\"clear\"|\"list\", block?, on?, kind?, content?, by?, path? }. `on` is the anchor text within the block (REQUIRED for set/clear). `kind`: unverified|superseded|needs-attention|decided. op=set: block+on+kind(+content?+by?+path?) — idempotent (a second set of the same tag on the same span is a no-op). op=clear: block+on+kind(+by?+path?). op=list: (+block?+path?). Examples: wb_tag({ op:\"set\", block:\"opts\", on:\"- A\", kind:\"superseded\" }); wb_tag({ op:\"clear\", block:\"opts\", on:\"- A\", kind:\"superseded\" }).",
   wb_finish: "Commit or abandon the open staging transaction. params: { op: \"commit\"|\"abandon\" }. commit applies the staged ARTIFACT ops as one change (returns rev + op count); abandon discards them. Example: wb_change_finish({ op:\"commit\" }).",
+  wb_apply: "Apply a whole array of block ops as a single ALL-OR-NOTHING change — no staging transaction (no wb_change_start/finish dance). Every op is built, then validated in WIP order against the live doc; if ANY op is invalid (bad block name, missing field, a diff that won't apply, an unknown op) NOTHING is written and the error is returned. On success one change (one rev) is appended with all ops. params: { title (required), ops (required, non-empty array), summary?, by? }. `by` is attributed at the change level. Each op: { op: \"add\"|\"edit\"|\"move\"|\"rename\"|\"remove\", path?, block?, name?, names?, text?, diff?, before?, after? }. op=add: name+text(+before?/after?/path?). op=edit: block+text OR block+diff (resolved against the WIP doc so a later edit can patch an earlier op's result). op=move: block+before|after. op=rename: block(old)+name(new). op=remove: block | names[]. Example: wb_apply({ title:\"restructure\", ops:[{op:\"add\",name:\"goal\",text:\"# Goal\n…\"},{op:\"edit\",block:\"goal\",diff:\"@@\\n- old\\n+ new\"},{op:\"remove\",names:[\"stale\"]}] }).",
 };
 
 export function registerWhiteboardTools(pi, Type) {
@@ -247,17 +276,17 @@ export function registerWhiteboardTools(pi, Type) {
   pi.registerTool({
     name: "wb_new", label: "Whiteboard new", description: D.wb_new,
     parameters: Type.Object({ slug: Type.String({ description: "session slug; slugified to [a-z0-9-]" }) }),
-    execute: wb_new,
+    execute: withViewer(wb_new),
   });
   pi.registerTool({
     name: "wb_list", label: "Whiteboard list", description: D.wb_list,
     parameters: Type.Object({ json: opt(Type.Boolean({ description: "return JSON array instead of plain lines" })) }),
-    execute: wb_list,
+    execute: withViewer(wb_list),
   });
   pi.registerTool({
     name: "wb_use", label: "Whiteboard use", description: D.wb_use,
     parameters: Type.Object({ slug: Type.String({ description: '"project/slug" or just "slug" (project from cwd)' }) }),
-    execute: wb_use,
+    execute: withViewer(wb_use),
   });
   pi.registerTool({
     name: "wb_read", label: "Whiteboard read", description: D.wb_read,
@@ -266,17 +295,17 @@ export function registerWhiteboardTools(pi, Type) {
       path: opt(Type.String({ description: "scope to one file path (default \"default.md\")" })),
       block: opt(Type.String({ description: "filter to one block within the path (md only)" })),
     }),
-    execute: wb_read,
+    execute: withViewer(wb_read),
   });
   pi.registerTool({
     name: "wb_note", label: "Whiteboard note", description: D.wb_note,
     parameters: Type.Object({ text: Type.String(), by: opt(Type.String()) }),
-    execute: wb_note,
+    execute: withViewer(wb_note),
   });
   pi.registerTool({
     name: "wb_change_start", label: "Whiteboard change start", description: D.wb_start,
     parameters: Type.Object({ title: Type.String(), summary: opt(Type.String()), by: opt(Type.String()) }),
-    execute: wb_change_start,
+    execute: withViewer(wb_change_start),
   });
   pi.registerTool({
     name: "wb_change_block", label: "Whiteboard change block", description: D.wb_block,
@@ -287,7 +316,7 @@ export function registerWhiteboardTools(pi, Type) {
       text: opt(Type.String()), diff: opt(Type.String()),
       before: opt(Type.String()), after: opt(Type.String()), by: opt(Type.String()),
     }),
-    execute: wb_change_block,
+    execute: withViewer(wb_change_block),
   });
   pi.registerTool({
     name: "wb_attach", label: "Whiteboard attach", description: D.wb_attach,
@@ -297,7 +326,7 @@ export function registerWhiteboardTools(pi, Type) {
       kind: opt(Type.Union(ATTACH_KINDS.map(lit))), content: opt(Type.String()), id: opt(Type.String()),
       by: opt(Type.String()), path: opt(Type.String()), open: opt(Type.Boolean()),
     }),
-    execute: wb_attach,
+    execute: withViewer(wb_attach),
   });
   pi.registerTool({
     name: "wb_tag", label: "Whiteboard tag", description: D.wb_tag,
@@ -307,11 +336,27 @@ export function registerWhiteboardTools(pi, Type) {
       kind: opt(Type.Union(TAG_KINDS.map(lit))), content: opt(Type.String()),
       by: opt(Type.String()), path: opt(Type.String()),
     }),
-    execute: wb_tag,
+    execute: withViewer(wb_tag),
   });
   pi.registerTool({
     name: "wb_change_finish", label: "Whiteboard change finish", description: D.wb_finish,
     parameters: Type.Object({ op: Type.Union([lit("commit"), lit("abandon")]) }),
-    execute: wb_change_finish,
+    execute: withViewer(wb_change_finish),
+  });
+  const OP = Type.Object({
+    op: Type.Union(BLOCK_OPS.map(lit)),
+    path: opt(Type.String({ description: "file path the block belongs to (default \"default.md\")" })),
+    block: opt(Type.String()), name: opt(Type.String()), names: opt(Type.Array(Type.String())),
+    text: opt(Type.String()), diff: opt(Type.String()),
+    before: opt(Type.String()), after: opt(Type.String()),
+  });
+  pi.registerTool({
+    name: "wb_apply", label: "Whiteboard apply (atomic ops)", description: D.wb_apply,
+    parameters: Type.Object({
+      title: Type.String(),
+      ops: Type.Array(OP, { description: "block ops to apply as one all-or-nothing change" }),
+      summary: opt(Type.String()), by: opt(Type.String()),
+    }),
+    execute: withViewer(wb_apply),
   });
 }

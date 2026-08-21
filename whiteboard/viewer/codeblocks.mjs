@@ -19,7 +19,7 @@ export function initCodeBlocks() {
     if (mermaidLoading) return mermaidLoading;
     mermaidLoading = new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+      s.src = "/vendor/mermaid.min.js";
       s.onload = () => { try { window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" }); } catch {} resolve(window.mermaid); };
       s.onerror = () => reject(new Error("mermaid load failed"));
       document.head.appendChild(s);

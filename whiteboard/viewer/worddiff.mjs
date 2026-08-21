@@ -63,15 +63,39 @@ function wordLcsOps(a, b) {
   return ops;
 }
 
-// Render one paired (deleted, inserted) line as inline word-diff markdown.
-// Consecutive same-type tokens (and the whitespace between them) are coalesced
-// into a single <del>/<ins> run, so a fully-rewritten line renders as one
-// continuous red/green span instead of one box per word. A one-word edit still
-// renders granularly. Whitespace tokens between two tokens of the same run stay
-// inside the span (continuous background); whitespace at a run boundary is left
-// plain so the highlight doesn't bleed past the change.
-function renderInlinePair(delLine, insLine, renderMd) {
+// Decide whether a paired line is still recognizably the same text. Small,
+// localized edits read well inline; rewritten or fragmented lines are clearer as
+// one deleted line followed by one inserted line.
+function isInlineEdit(ops) {
+  const words = ops.filter((op) => !op.tok.ws);
+  const equal = words.filter((op) => op.t === "eq").length;
+  const deleted = words.filter((op) => op.t === "del").length;
+  const inserted = words.filter((op) => op.t === "ins").length;
+  const changed = deleted + inserted;
+  const similarity = (2 * equal) / Math.max(1, (equal + deleted) + (equal + inserted));
+  let runs = 0;
+  let lastChange = null;
+  for (const op of words) {
+    if (op.t === "eq") { lastChange = null; continue; }
+    if (op.t !== lastChange) { runs++; lastChange = op.t; }
+  }
+  const localizedReplacement = equal > 0 && changed <= 2 && runs <= 2;
+  const limitedRewrite = similarity >= 0.6 &&
+    changed <= Math.max(4, Math.ceil((equal * 2 + changed) * 0.35)) && runs <= 4;
+  return localizedReplacement || limitedRewrite;
+}
+
+// Render one paired (deleted, inserted) line at the most useful granularity.
+// Whitespace tokens between two tokens of the same inline run stay inside the
+// span; whitespace at a run boundary remains plain.
+function renderPair(delLine, insLine, renderMd) {
+  if (!delLine.trim() && !insLine.trim()) return "";
+  if (!delLine.trim()) return `<div class="wb-ins">${renderMd(insLine)}</div>`;
+  if (!insLine.trim()) return `<div class="wb-del">${renderMd(delLine)}</div>`;
   const ops = wordLcsOps(tokenize(delLine), tokenize(insLine));
+  if (!isInlineEdit(ops)) {
+    return `<div class="wb-del">${renderMd(delLine)}</div><div class="wb-ins">${renderMd(insLine)}</div>`;
+  }
   let src = "";
   let run = null; // { tag: "del"|"ins", text }
   const flush = () => { if (run) { src += `<${run.tag}>${run.text}</${run.tag}>`; run = null; } };
@@ -99,7 +123,7 @@ function renderInlinePair(delLine, insLine, renderMd) {
     }
   }
   flush();
-  return renderMd(src);
+  return `<div class="wb-mod">${renderMd(src)}</div>`;
 }
 
 // Emit a modification region (a deleted run directly followed by an inserted
@@ -108,11 +132,11 @@ function renderInlinePair(delLine, insLine, renderMd) {
 function emitMod(dels, inss, renderMd, out) {
   const pairs = Math.min(dels.length, inss.length);
   for (let k = 0; k < pairs; k++)
-    out.push(`<div class="wb-mod">${renderInlinePair(dels[k], inss[k], renderMd)}</div>`);
+    out.push(renderPair(dels[k], inss[k], renderMd));
   for (let k = pairs; k < dels.length; k++)
-    out.push(`<div class="wb-del">${renderMd(dels[k])}</div>`);
+    if (dels[k].trim()) out.push(`<div class="wb-del">${renderMd(dels[k])}</div>`);
   for (let k = pairs; k < inss.length; k++)
-    out.push(`<div class="wb-ins">${renderMd(inss[k])}</div>`);
+    if (inss[k].trim()) out.push(`<div class="wb-ins">${renderMd(inss[k])}</div>`);
 }
 
 export function renderWordDiff(oldContent, newContent, renderMd) {

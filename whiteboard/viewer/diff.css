@@ -76,3 +76,15 @@
   color: var(--danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+.diff-empty {
+  display: grid;
+  gap: 6px;
+  max-width: 620px;
+  margin: 48px auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.diff-empty strong { color: var(--ink); }

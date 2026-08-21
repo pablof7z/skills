@@ -2,9 +2,11 @@
 // Renders each block as a <section data-block-id> with its markdown, shows block
 // flags as badges, and renders comments as margin notes anchored to the block
 // (by block name, with an optional in-block selector span highlight). Reply +
-// resolve via the API. Live via SSE. Legacy deliverable.md sessions use the
-// separate viewer.mjs path; this module only runs for model === "blocks".
+// resolve via the API. Live via the page's shared SSE stream (see main.mjs).
+// Legacy deliverable.md sessions use the separate viewer.mjs path; this
+// module only runs for model === "blocks".
 
+import { onRefresh, onStatus } from "./main.mjs";
 import { initCodeBlocks } from "./codeblocks.mjs";
 import { initTocRail } from "./toc-rail.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
@@ -141,8 +143,17 @@ export function initBlockViewer(rootEl, project, slug) {
   const drawerCloseEl = document.getElementById("drawer-close");
   const drawerScrollEl = document.getElementById("drawer-scroll");
   const docWrapEl = document.getElementById("doc-wrap");
+  // Off-screen indicators for agent annotations the user hasn't addressed.
+  // Shown at the top/bottom edge of the doc viewport when such a card is
+  // scrolled out of view; click to jump to the nearest one.
+  const awaitAboveEl = Object.assign(document.createElement("div"), { className: "await-edge above", hidden: true });
+  awaitAboveEl.innerHTML = `<span class="await-edge-flag">●</span><span class="await-edge-count">0</span><span class="await-edge-arrow">↑</span>`;
+  const awaitBelowEl = Object.assign(document.createElement("div"), { className: "await-edge below", hidden: true });
+  awaitBelowEl.innerHTML = `<span class="await-edge-flag">●</span><span class="await-edge-count">0</span><span class="await-edge-arrow">↓</span>`;
+  docScrollEl.appendChild(awaitAboveEl);
+  docScrollEl.appendChild(awaitBelowEl);
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, notes: "", view: "document", resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
+  const state = { doc: null, name: "", notes: "", view: "document", activePath: null, resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
     diffMode: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, diffBeforeDoc: null, diffAfterDoc: null, narrow: false };
 
   const composer = initBlockComposer({
@@ -157,11 +168,46 @@ export function initBlockViewer(rootEl, project, slug) {
   const whoClass = (n) => (String(n || "").toLowerCase() === "agent" ? "agent" : "user");
 
   function annotationsOn(b) { return (state.doc?.annotations || []).filter((a) => a.block === b.name && (a.path || DEFAULT_PATH) === (b.path || DEFAULT_PATH)); }
+  // Distinct file paths in first-appearance order; the blocks of the active
+  // file only (what the main column renders); switch the active file (used by
+  // the TOC file-tree headers in multi-file sessions).
+  function distinctPaths() {
+    const out = [], seen = new Set();
+    for (const b of state.doc?.blocks || []) { const p = b.path || DEFAULT_PATH; if (!seen.has(p)) { seen.add(p); out.push(p); } }
+    return out;
+  }
+  function visibleBlocks() { return (state.doc?.blocks || []).filter((b) => (b.path || DEFAULT_PATH) === state.activePath); }
+  async function switchFile(p) {
+    state.activePath = p;
+    if (state.diffMode) {
+      await diff.render();   // re-render the diff for the newly-active file
+    } else {
+      renderBlocks();
+      await codeblocks.enhance(docEl);
+      renderComments();
+    }
+    renderTOC();
+    if (distinctPaths().length > 1) titleEl.textContent = `${state.name} · ${p}`;
+    docScrollEl.scrollTop = 0;
+  }
+
+  // An annotation "awaits the user" when the agent has spoken (or flagged) and
+  // the user hasn't replied or dismissed it — it still needs the human's eyes.
+  // Tags are attention markers (needs-attention / unverified) the agent set and
+  // the user hasn't cleared. Threads await when the agent has voice and no user
+  // reply has followed. Resolved threads don't await anyone.
+  function hasAgentVoice(a) { return a.author === "agent" || (Array.isArray(a.replies) && a.replies.some((r) => r.author === "agent")); }
+  function hasUserReply(a) { return Array.isArray(a.replies) && a.replies.some((r) => r.author === "user"); }
+  function awaitsUser(a) {
+    if (a.isTag) return a.state === "active" && (a.kind === "needs-attention" || a.kind === "unverified");
+    if (state.resolved.has(a.id)) return false;
+    return hasAgentVoice(a) && !hasUserReply(a);
+  }
 
   function renderBlocks() {
     docEl.innerHTML = "";
     state.anchored = {};
-    for (const b of state.doc?.blocks || []) {
+    for (const b of visibleBlocks()) {
       const sec = document.createElement("section");
       sec.className = "block";
       sec.dataset.blockId = b.name;
@@ -173,7 +219,7 @@ export function initBlockViewer(rootEl, project, slug) {
       // by kind. state.anchored[id] === true  -> highlighted (card omits the quote);
       // false -> anchor no longer matches (stale, shown in the card); undefined ->
       // resolved thread (not highlighted this pass, shown).
-      for (const a of annotationsOn(b.name)) {
+      for (const a of annotationsOn(b)) {
         if (!a.isTag && state.resolved.has(a.id)) continue; // resolved threads: no highlight
         if (a.isTag && a.state !== "active") continue; // cleared tags: no highlight
         state.anchored[a.id] = highlightIn(sec.querySelector(".block-md"), a.selector, a.id, styleOf(a.kind).cls);
@@ -188,7 +234,7 @@ export function initBlockViewer(rootEl, project, slug) {
   // only differ by label).
   function buildCardEl(b, c, isResolved) {
     const card = document.createElement("div");
-    card.className = "thread " + styleOf(c.kind).cls + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "") + (state.collapsed[c.id] ? " collapsed" : "");
+    card.className = "thread " + styleOf(c.kind).cls + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "") + (state.collapsed[c.id] ? " collapsed" : "") + ((!isResolved && awaitsUser(c)) ? " awaits-user" : "");
     card.dataset.annoId = c.id;
     // Show the anchored text inside the card ONLY when it is NOT highlighted in the
     // document. When the anchor still matches, the highlight in the main text is the
@@ -198,8 +244,8 @@ export function initBlockViewer(rootEl, project, slug) {
     const hasSel = !!(c.selector && c.selector.exact);
     const showQuote = hasSel && !state.anchored[c.id];
     const stale = hasSel && state.anchored[c.id] === false;
-    const staleTitle = stale ? ` title="Anchor no longer matches the current block (it may have been edited)"` : "";
-    const quote = showQuote ? `<span class="excerpt-quote${stale ? " stale" : ""}"${staleTitle}>“${esc(c.selector.exact)}”</span>` : "";
+    const staleTitle = stale ? ` title="Unanchored: the saved context no longer matches this block"` : "";
+    const quote = showQuote ? `<span class="excerpt-quote${stale ? " stale" : ""}"${staleTitle}>${stale ? "Unanchored: " : ""}“${esc(c.selector.exact)}”</span>` : "";
     let replies = "";
     for (const r of c.replies || []) {
       replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when" data-at="${esc(r.at)}">${ago(r.at)}</span><div class="body">${renderBody(r.body)}</div></div>`;
@@ -245,7 +291,7 @@ export function initBlockViewer(rootEl, project, slug) {
   function buildTagEl(b, a) {
     const s = styleOf(a.kind);
     const card = document.createElement("div");
-    card.className = "wb-tag " + s.cls;
+    card.className = "wb-tag " + s.cls + (awaitsUser(a) ? " awaits-user" : "");
     card.dataset.annoId = a.id;
     card.title = esc(a.body ? `${s.label} — ${a.body}` : s.label);
     card.innerHTML = `<span class="tag-icon">${s.icon}</span><span class="tag-label">${esc(s.label)}</span>${a.body ? `<span class="tag-body">${esc(a.body)}</span>` : ""}`;
@@ -285,7 +331,7 @@ export function initBlockViewer(rootEl, project, slug) {
     commentsToggleEl.hidden = true;
     let lastBottom = -8;
     let i = -1;
-    for (const b of state.doc?.blocks || []) {
+    for (const b of visibleBlocks()) {
       i++;
       const sec = docEl.querySelector(`section[data-block-idx="${i}"]`);
       if (!sec) continue;
@@ -312,6 +358,7 @@ export function initBlockViewer(rootEl, project, slug) {
         if (expanded) for (const a of resolved) lastBottom = renderCard(b, a, blockTop, lastBottom, true);
       }
     }
+    updateAwaitingIndicators();
   }
 
   // Narrow mode: comments flow inside the right-side drawer; the doc gets full
@@ -323,7 +370,7 @@ export function initBlockViewer(rootEl, project, slug) {
     let count = 0;
     let any = false;
     let i = -1;
-    for (const b of state.doc?.blocks || []) {
+    for (const b of visibleBlocks()) {
       i++;
       const all = annotationsOn(b);
       if (!all.length) continue;
@@ -354,7 +401,41 @@ export function initBlockViewer(rootEl, project, slug) {
     if (!any) drawerScrollEl.innerHTML = '<div class="drawer-empty">No annotations.</div>';
     ctCountEl.textContent = String(count);
     commentsToggleEl.hidden = false;
+    awaitAboveEl.hidden = true;
+    awaitBelowEl.hidden = true; // narrow mode: drawer holds the threads; no doc-edge indicators
   }
+
+  // Off-screen agent-annotation indicators: when a card the user still needs to
+  // address is scrolled out of the viewport, surface a small count at the
+  // top/bottom edge so it can't be missed. Click jumps to the nearest one.
+  // The scroller is the window (#doc-scroll doesn't constrain its height, so the
+  // body scrolls), so we measure against window.innerHeight and listen to window
+  // scroll — not #doc-scroll.
+  function updateAwaitingIndicators() {
+    if (state.narrow || state.view !== "document") { awaitAboveEl.hidden = awaitBelowEl.hidden = true; return; }
+    const vh = window.innerHeight;
+    const above = [], below = [];
+    for (const card of railEl.querySelectorAll(".awaits-user")) {
+      const r = card.getBoundingClientRect();
+      if (r.height === 0) continue;
+      if (r.bottom <= 2) above.push({ card, y: r.top });
+      else if (r.top >= vh - 2) below.push({ card, y: r.top });
+    }
+    if (above.length) { above.sort((a, b) => b.y - a.y); showAwaitEdge(awaitAboveEl, above.length, above[0].card); } else awaitAboveEl.hidden = true;
+    if (below.length) { below.sort((a, b) => a.y - b.y); showAwaitEdge(awaitBelowEl, below.length, below[0].card); } else awaitBelowEl.hidden = true;
+  }
+  function showAwaitEdge(el, count, target) {
+    el.hidden = false;
+    el.querySelector(".await-edge-count").textContent = count;
+    el._target = target;
+    el.style.left = (window.innerWidth / 2) + "px";
+    el.style.top = el.classList.contains("above") ? "8px" : (window.innerHeight - el.offsetHeight - 8) + "px";
+  }
+  awaitAboveEl.addEventListener("click", () => awaitAboveEl._target && awaitAboveEl._target.scrollIntoView({ behavior: "smooth", block: "center" }));
+  awaitBelowEl.addEventListener("click", () => awaitBelowEl._target && awaitBelowEl._target.scrollIntoView({ behavior: "smooth", block: "center" }));
+  docScrollEl.addEventListener("scroll", () => requestAnimationFrame(updateAwaitingIndicators));
+  window.addEventListener("scroll", () => requestAnimationFrame(updateAwaitingIndicators), { passive: true });
+  window.addEventListener("resize", () => requestAnimationFrame(updateAwaitingIndicators));
 
   // TOC lists the rendered headings (h1/h2/h3) inside each block — the actual
   // titles/subtitles — instead of the block name slugs. A block with no heading
@@ -369,42 +450,53 @@ export function initBlockViewer(rootEl, project, slug) {
       li.addEventListener("click", () => el.scrollIntoView({ behavior: "smooth", block: "start" }));
       tocList.appendChild(li);
     };
-    const blocks = state.doc?.blocks || [];
-    const paths = []; const seen = new Set();
-    for (const b of blocks) { const p = b.path || DEFAULT_PATH; if (!seen.has(p)) { seen.add(p); paths.push(p); } }
+    const paths = distinctPaths();
     const multi = paths.length > 1;
-    const headsFor = (idx) => {
+    const headsForIdx = (idx) => {
       const sec = docEl.querySelector(`section[data-block-idx="${idx}"]`);
       return sec ? [...sec.querySelectorAll("h1, h2, h3")] : [];
     };
+    const hasAtt = (b) => annotationsOn(b).some((a) => a.isTag ? true : !state.resolved.has(a.id));
+    // Single file: flat list of block headings (no file header).
     if (!multi) {
-      blocks.forEach((b, idx) => {
-        const heads = headsFor(idx);
-        const att = annotationsOn(b).some((a) => a.isTag ? true : !state.resolved.has(a.id));
+      visibleBlocks().forEach((b, idx) => {
+        const heads = headsForIdx(idx);
         const sec = docEl.querySelector(`section[data-block-idx="${idx}"]`) || docEl;
-        if (!heads.length) { append(b.name, 1, att, sec); return; }
-        for (const h of heads) append(h.textContent, Number(h.tagName.slice(1)), att, h);
+        if (!heads.length) { append(b.name, 1, hasAtt(b), sec); return; }
+        for (const h of heads) append(h.textContent, Number(h.tagName.slice(1)), hasAtt(b), h);
       });
       return;
     }
-    // Multi-file: a file group header per path, then its blocks' headings.
-    for (const p of paths) {
-      const idxs = [];
-      blocks.forEach((b, i) => { if ((b.path || DEFAULT_PATH) === p) idxs.push(i); });
-      const firstSec = docEl.querySelector(`section[data-block-idx="${idxs[0]}"]`);
-      const fileLi = document.createElement("li");
-      fileLi.className = "toc-item toc-file";
-      fileLi.innerHTML = `<span class="toc-text">📄 ${esc(p)}</span>`;
-      if (firstSec) fileLi.addEventListener("click", () => firstSec.scrollIntoView({ behavior: "smooth", block: "start" }));
-      tocList.appendChild(fileLi);
-      for (const idx of idxs) {
-        const b = blocks[idx];
-        const heads = headsFor(idx);
-        const att = annotationsOn(b).some((a) => a.isTag ? true : !state.resolved.has(a.id));
-        const sec = docEl.querySelector(`section[data-block-idx="${idx}"]`) || docEl;
-        if (!heads.length) { append(b.name, 2, att, sec); continue; }
-        for (const h of heads) append(h.textContent, Number(h.tagName.slice(1)) + 1, att, h);
+    // Multi-file: one switchable header per file. Only the active file's blocks
+    // are listed (others collapse to their header). In diff mode each header
+    // carries a dot when that file has changes in the before→after range, so
+    // you can see that a non-selected file changed too. Clicking a header
+    // switches the active file (re-rendering the diff for it in diff mode).
+    const changedPaths = new Set();
+    if (state.diffMode && state.diffBeforeDoc && state.diffAfterDoc) {
+      const bmap = new Map();
+      for (const b of state.diffBeforeDoc.blocks || []) bmap.set((b.path || DEFAULT_PATH) + "\u0000" + b.name, b.md || "");
+      for (const b of state.diffAfterDoc.blocks || []) {
+        const k = (b.path || DEFAULT_PATH) + "\u0000" + b.name;
+        if (!bmap.has(k) || bmap.get(k) !== (b.md || "")) changedPaths.add(b.path || DEFAULT_PATH);
+        bmap.delete(k);
       }
+      for (const k of bmap.keys()) changedPaths.add(k.split("\u0000")[0]);
+    }
+    for (const p of paths) {
+      const isActive = p === state.activePath;
+      const fileLi = document.createElement("li");
+      fileLi.className = "toc-item toc-file" + (isActive ? " active" : "") + (changedPaths.has(p) ? " has-changes" : "");
+      fileLi.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="toc-text">📄 ${esc(p)}</span>`;
+      fileLi.addEventListener("click", () => { if (state.activePath !== p) switchFile(p); });
+      tocList.appendChild(fileLi);
+      if (!isActive) continue;
+      visibleBlocks().forEach((b, idx) => {
+        const heads = headsForIdx(idx);
+        const sec = docEl.querySelector(`section[data-block-idx="${idx}"]`) || docEl;
+        if (!heads.length) { append(b.name, 2, hasAtt(b), sec); return; }
+        for (const h of heads) append(h.textContent, Number(h.tagName.slice(1)) + 1, hasAtt(b), h);
+      });
     }
   }
 
@@ -416,10 +508,13 @@ export function initBlockViewer(rootEl, project, slug) {
       fetch(`${API}/revisions`).then((r) => r.json()).catch(() => ({ revisions: [] })),
     ]);
     state.doc = d; state.notes = n.content || "";
+    state.name = s.name || "Whiteboard";
+    const paths = distinctPaths();
+    if (!paths.includes(state.activePath)) state.activePath = paths[0] || DEFAULT_PATH;
     state.viewedRev = Number(s.viewedVersion) || 0;
     state.revisions = rev.revisions || [];
     state.resolved = new Set(Object.keys(s.resolved || {}));
-    titleEl.textContent = s.name || "Whiteboard";
+    titleEl.textContent = paths.length > 1 ? `${state.name} · ${state.activePath}` : state.name;
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;
     notesViewEl.innerHTML = n.content ? renderMarkdown(n.content) : "<p class=\"empty-notes\">No notes yet.</p>";
@@ -428,11 +523,12 @@ export function initBlockViewer(rootEl, project, slug) {
     renderComments();
     renderTOC();
     chat.refresh();
-    if (state.diffMode) { await diff.render(); return; }
-    // A block-changing change came in since the user last clicked “Done”: jump
-    // into the diff, comparing last-viewed → current. Only on live (SSE)
-    // refresh, not the initial load, and only if there really are block changes.
-    if (auto && state.viewedRev > 0 && state.viewedRev < (d.rev ?? 0) &&
+    if (state.diffMode) { await diff.render(); renderTOC(); return; }
+    // There are block changes the user hasn't reviewed yet (viewedRev < current):
+    // jump into the diff comparing last-viewed → current. Fires both on a live
+    // (SSE) refresh and on a manual reload, so reopening the page after edits
+    // lands on the diff rather than silently showing the new version.
+    if (state.viewedRev < (d.rev ?? 0) && (d.rev ?? 0) > 1 &&
         state.revisions.some((r) => r.rev > state.viewedRev && r.rev <= (d.rev ?? 0) && r.blocks > 0)) {
       await diff.enter();
       setView("document");
@@ -441,7 +537,7 @@ export function initBlockViewer(rootEl, project, slug) {
 
   const diff = initDiffMode({
     API, state, docEl, codeblocks, renderMarkdown,
-    diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl,
+    diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, renderTOC,
     onExit: () => { renderBlocks(); renderComments(); renderTOC(); },
   });
   const chat = initChat(chatMountEl, API);
@@ -450,7 +546,13 @@ export function initBlockViewer(rootEl, project, slug) {
     const es = new EventSource(`${API}/events`);
     es.addEventListener("open", () => { connEl.textContent = "live"; connEl.classList.remove("bad"); });
     es.addEventListener("error", () => { connEl.textContent = "reconnecting…"; connEl.classList.add("bad"); });
-    es.addEventListener("refresh", () => runRefresh({ auto: true }));
+    // Coalesce the noisy burst of refresh events (fs.watch fires several per
+    // write) into one re-render, and never let a render error kill the stream.
+    let t = null;
+    es.addEventListener("refresh", () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { t = null; runRefresh({ auto: true }).catch((e) => console.error("wb refresh", e)); }, 80);
+    });
     return es;
   }
 
@@ -461,6 +563,7 @@ export function initBlockViewer(rootEl, project, slug) {
     notesViewEl.hidden = (v !== "notes");
     tocRailEl.hidden = (v !== "document");
     diffBarEl.hidden = (v !== "document") || !state.diffMode;
+    updateAwaitingIndicators();
   }
   viewTabsEl.addEventListener("click", (e) => { const tab = e.target.closest(".view-tab"); if (tab) setView(tab.dataset.view); });
   diffToggleEl.addEventListener("click", () => state.diffMode ? diff.exit() : diff.enter());
@@ -487,11 +590,20 @@ export function initBlockViewer(rootEl, project, slug) {
   const narrowMq = window.matchMedia("(max-width: 920px)");
   applyNarrow(narrowMq.matches);
   narrowMq.addEventListener("change", (e) => applyNarrow(e.matches));
-  runRefresh().then(connectSSE);
+  let es = null, destroyed = false;
+  runRefresh().catch((e) => console.error("wb init", e)).finally(() => {
+    if (destroyed) return; // navigated away before SSE connected — nothing to keep
+    es = connectSSE();
+  });
 
   // Auto-refresh the relative time labels every 30s without a full re-render
   // (a full re-render would wipe in-progress reply textareas).
-  setInterval(() => { (state.narrow ? drawerScrollEl : railEl).querySelectorAll("[data-at]").forEach((el) => { el.textContent = ago(el.dataset.at); }); }, 30000);
+  const timer = setInterval(() => { (state.narrow ? drawerScrollEl : railEl).querySelectorAll("[data-at]").forEach((el) => { el.textContent = ago(el.dataset.at); }); }, 30000);
+
+  // Tear down our SSE + timer when the router re-routes (back/forward / SPA
+  // navigation) so we don't leak an EventSource per navigation and exhaust the
+  // browser's per-origin connection pool (which makes the page hang on reload).
+  return { destroy() { destroyed = true; try { es && es.close(); } catch {} clearInterval(timer); } };
 }
 
 function cssEscape(s) {

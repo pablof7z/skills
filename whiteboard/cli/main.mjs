@@ -13,6 +13,7 @@ import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
 import { loadDoc, appendChange, DEFAULT_PATH } from "./doc.mjs";
 import { startChange, sendChange, discardChange, statusChange, stageSubcommand, isChangeSub } from "./staging.mjs";
+import { applyOps } from "./apply.mjs";
 import { attachCreate, attachReply, attachResolve, attachReopen, tagSet, tagClear, listAnnotations } from "./annotations.mjs";
 import { actionableItems } from "./scan.mjs";
 
@@ -30,6 +31,10 @@ const HELP = `wb — whiteboard change-log document CLI
   wb change send                          COMMIT staged ops as one change
   wb change status                        peek at staged ops
   wb change discard  (alias: kill)        abort the staging transaction
+  wb apply <title> --ops '<json>' | --file ops.json [--summary S] [--by B]
+                                          apply an array of block ops as ONE all-or-nothing change (no staging tx);
+                                          if any op is invalid nothing is written. ops: JSON array of
+                                          {op:add|edit|move|rename|remove, path?, block?, name?, names?, text?, diff?, before?, after?}
   wb note <text|--file>                   append to notes.md
   wb attach <block> --on "quote" --kind question|warning|objection|note --content T
                                           anchor a thread to a span (direct write)
@@ -164,6 +169,22 @@ async function main() {
       if (first && isChangeSub(first)) return out(stageSubcommand(s, first, rest.slice(1), flags) + "\n");
       const title = flags.title || first;
       return out(startChange(s, { title, summary: flags.summary, by: flags.by }) + "\n");
+    }
+    case "apply": {
+      // Apply an array of block ops as one all-or-nothing change — no staging
+      // transaction. Ops come from --ops '<json>', --file <path>, or stdin (a
+      // JSON array). Each op: { op, path?, block?, name?, names?, text?, diff?,
+      // before?, after? }. If any op is invalid nothing is written.
+      const s = session();
+      const title = flags.title || rest[0];
+      if (!title) throw new Error('usage: wb apply <title> --ops \'<json>\' | --file <ops.json> [--summary S] [--by B]');
+      let ops;
+      if (flags.ops !== undefined) ops = JSON.parse(flags.ops);
+      else if (flags.file) ops = JSON.parse(fs.readFileSync(flags.file, "utf8"));
+      else if (!process.stdin.isTTY) ops = JSON.parse(fs.readFileSync(0, "utf8"));
+      else throw new Error('wb apply: pass ops via --ops \'<json>\', --file <path>, or stdin (JSON array)');
+      const ch = applyOps(s, { title, ops, summary: flags.summary, by: flags.by, piSessionId: process.env.PI_SESSION_ID || null });
+      return out(`applied ${ch.ops} op(s) as one atomic change: ${JSON.stringify(ch)}\n`);
     }
     case "note": {
       const s = session();

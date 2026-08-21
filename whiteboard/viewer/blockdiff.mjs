@@ -3,9 +3,10 @@
 // Kept in its own module so blockview.mjs stays under the repo's 300-LOC soft
 // limit. Three pure helpers: a relative-time label, a select-option builder
 // for the before/after revision picker, and a whole-document diff renderer
-// that delegates inline word-level diffing to worddiff.mjs.
+// (a focused line/word diff for each changed block).
 
 import { renderWordDiff } from "./worddiff.mjs";
+
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -34,16 +35,17 @@ export function buildPickerOptions(revisions, currentRev, viewedRev) {
   const revBy = new Map((revisions || []).map((r) => [r.rev, r]));
   const cur = revBy.get(currentRev);
   const ch = (n) => `${n} change${n === 1 ? "" : "s"}`;
+  const meta = (r) => r.blocks ? `${ch(r.blocks)} to document · ${ago(r.at)}` : r.changes ? `${ch(r.changes)} to annotations · ${ago(r.at)}` : `no document change · ${ago(r.at)}`;
   const push = (value, title, meta, group, by = null, jump = false) => {
     const key = String(value); if (seen.has(key)) return; seen.add(key);
     out.push({ value, title, meta, group, by, jump });
   };
-  push("current", "Current", cur ? `${ch(cur.changes || 0)} · ${ago(cur.at)}` : "now", "shortcut");
+  push("current", "Current", cur ? meta(cur) : "now", "shortcut");
   if (viewedRev && viewedRev !== currentRev) {
     const v = revBy.get(viewedRev);
-    push(viewedRev, "Last viewed (Done)", v ? `${ch(v.changes || 0)} · ${ago(v.at)}` : "—", "shortcut");
+    push(viewedRev, "Last viewed (Done)", v ? meta(v) : "—", "shortcut");
   }
-  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, `${ch(r.changes || 0)} · ${ago(r.at)}`, "rev", r.by || null, !!(r.via && r.via.itermSessionId));
+  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, meta(r), "rev", r.by || null, !!(r.via && r.via.itermSessionId));
   return out;
 }
 
@@ -94,25 +96,48 @@ function mountRevPicker(container, options, value, onJump) {
 //  - only before -> <section> with "− <name>" header, .block-md = red wb-del
 // Sections are ordered by afterDoc; removed-only-before blocks are appended.
 // renderMarkdown: (md) -> sanitized HTML. Pure string output.
+const DP = "default.md";
+const bkey = (b) => `${b.path || DP}\u0000${b.name}`;
+
+// Render the diff of a block document for changed blocks only. Block identity is
+// (path, name). Edited blocks retain their unchanged context and mark only the
+// removed and inserted words or lines. Added blocks: green "+ name"; removed
+// blocks: red "− name".
 export function renderBlockDiff({ beforeDoc, afterDoc, renderMarkdown }) {
-  const before = new Map((beforeDoc?.blocks || []).map((b) => [b.name, b]));
+  const before = new Map((beforeDoc?.blocks || []).map((b) => [bkey(b), b]));
   const after = afterDoc?.blocks || [];
-  const afterNames = new Set(after.map((b) => b.name));
+  const afterKeys = new Set(after.map(bkey));
   const parts = [];
   for (const b of after) {
-    const old = before.get(b.name);
+    const old = before.get(bkey(b));
     if (old) {
-      parts.push(section(b.name, renderWordDiff(old.md || "", b.md || "", renderMarkdown), blockFlags(b)));
+      if ((old.md || "") === (b.md || "")) continue; // unchanged — skip
+      parts.push(diffBlock(b.name, old.md || "", b.md || "", renderMarkdown, blockFlags(b)));
     } else {
-      parts.push(section(`+ ${b.name}`, `<div class="wb-ins">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-added"));
+      parts.push(section(`+ ${b.name}`, `<div class="block-md wb-ins">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-added"));
     }
   }
   for (const b of beforeDoc?.blocks || []) {
-    if (!afterNames.has(b.name)) {
-      parts.push(section(`− ${b.name}`, `<div class="wb-del">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-removed"));
+    if (!afterKeys.has(bkey(b))) {
+      parts.push(section(`− ${b.name}`, `<div class="block-md wb-del">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-removed"));
     }
   }
-  return parts.join("");
+  return parts.length ? parts.join("") : emptyDiff(beforeDoc, afterDoc);
+}
+
+function emptyDiff(beforeDoc, afterDoc) {
+  const before = new Map((beforeDoc?.annotations || []).map((a) => [a.id, JSON.stringify(a)]));
+  const after = new Map((afterDoc?.annotations || []).map((a) => [a.id, JSON.stringify(a)]));
+  const ids = new Set([...before.keys(), ...after.keys()]);
+  const changed = [...ids].filter((id) => before.get(id) !== after.get(id)).length;
+  const detail = changed ? `${changed} annotation${changed === 1 ? " changed" : "s changed"}; document blocks did not.` : "No document blocks or annotations changed.";
+  return `<section class="diff-empty"><strong>No document blocks changed between these revisions.</strong><span>${esc(detail)}</span></section>`;
+}
+
+// An edited block: one continuous rendering with unchanged context and compact
+// inline or whole-line markers for the actual edit.
+function diffBlock(name, oldMd, newMd, renderMarkdown, flags) {
+  return `<section class="block wb-changed"><div class="block-head"><span class="block-name">${esc(name)}</span>${flags}</div><div class="block-md wb-diff">${renderWordDiff(oldMd, newMd, renderMarkdown)}</div></section>`;
 }
 
 function blockFlags(b) {
@@ -141,7 +166,7 @@ function section(name, mdHtml, flags, extraCls = "") {
 // the viewer wires to buttons/selects and the refresh hook.
 export function initDiffMode({
   API, state, docEl, codeblocks, renderMarkdown,
-  diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit,
+  diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit, renderTOC,
 }) {
   let beforePicker = null, afterPicker = null;
   async function jumpToRev(rev) {
@@ -173,8 +198,13 @@ export function initDiffMode({
       return;
     }
     state.diffBeforeDoc = beforeDoc; state.diffAfterDoc = afterDoc;
-    docEl.innerHTML = renderBlockDiff({ beforeDoc, afterDoc, renderMarkdown });
+    // The diff shows the active file only; the full docs stay on state so the
+    // TOC can mark which (other) files have changes in this before→after range.
+    const fp = state.activePath;
+    const filt = (doc) => ({ ...doc, blocks: (doc.blocks || []).filter((b) => (b.path || "default.md") === fp) });
+    docEl.innerHTML = renderBlockDiff({ beforeDoc: filt(beforeDoc), afterDoc: filt(afterDoc), renderMarkdown });
     await codeblocks.enhance(docEl);
+    renderTOC?.();
   }
 
   async function enter() {

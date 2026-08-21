@@ -2,35 +2,36 @@
    Shows the revision's title (semibold) with a muted "N changes · ago" line,
    instead of a bare system <select> with "rev N · ago". */
 
-.diff-bar .diff-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted, #888); }
+.diff-bar .diff-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); opacity: 0.72; }
 
 .rev-picker { position: relative; display: inline-block; min-width: 200px; }
 
 .rev-picker-btn {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 4px 8px; border: 1px solid var(--border, #ddd); border-radius: 6px;
-  background: var(--surface, #fff); color: inherit; cursor: pointer; text-align: left;
+  padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--ink); cursor: pointer; text-align: left;
 }
-.rev-picker-btn:hover { border-color: var(--accent, #3b82f6); }
+.rev-picker-btn:hover, .rev-picker-btn:focus-visible { border-color: var(--agent); }
+.rev-picker-btn:focus-visible { outline: 2px solid var(--agent); outline-offset: 2px; }
 .rev-picker-btn .rp-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
-.rev-picker-btn .rp-meta { font-size: 11px; color: var(--muted, #999); white-space: nowrap; flex: 0 0 auto; }
-.rev-picker-btn .rp-caret { font-size: 10px; color: var(--muted, #999); flex: 0 0 auto; }
+.rev-picker-btn .rp-meta { font-size: 11px; color: var(--ink); opacity: 0.65; white-space: nowrap; flex: 0 0 auto; }
+.rev-picker-btn .rp-caret { font-size: 10px; color: var(--ink); opacity: 0.65; flex: 0 0 auto; }
 
 .rev-picker-panel {
   position: absolute; top: calc(100% + 2px); left: 0; z-index: 50;
   min-width: 260px; max-height: 320px; overflow-y: auto;
-  border: 1px solid var(--border, #ddd); border-radius: 8px;
-  background: var(--surface, #fff); box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); color: var(--ink); box-shadow: 0 8px 24px rgba(0,0,0,0.28);
   padding: 4px;
 }
 .rp-opt { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
-.rp-opt:hover { background: var(--hover, #f3f4f6); }
-.rp-opt.sel { background: var(--accent-soft, #eef2ff); }
+.rp-opt:hover { background: rgba(63, 185, 80, 0.10); }
+.rp-opt.sel { background: rgba(63, 185, 80, 0.18); }
 .rp-opt .rp-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rp-opt .rp-meta { font-size: 11px; color: var(--muted, #999); }
+.rp-opt .rp-meta { font-size: 11px; color: var(--ink); opacity: 0.65; }
 .rp-opt .rp-meta-row { display: flex; align-items: center; gap: 6px; }
 .rp-opt .rp-meta { flex: 1 1 auto; }
-.rp-by { font-size: 11px; color: var(--muted, #999); white-space: nowrap; flex: 0 0 auto; }
-.rp-jump { flex: 0 0 auto; border: none; background: transparent; color: var(--muted, #999); cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; }
-.rp-jump:hover { color: var(--accent, #3b82f6); background: var(--hover, #f3f4f6); }
-.rp-sep { height: 1px; margin: 4px 2px; background: var(--border, #eee); }
+.rp-by { font-size: 11px; color: var(--ink); opacity: 0.65; white-space: nowrap; flex: 0 0 auto; }
+.rp-jump { flex: 0 0 auto; border: none; background: transparent; color: var(--ink); opacity: 0.65; cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; }
+.rp-jump:hover { color: var(--agent); opacity: 1; background: rgba(63, 185, 80, 0.10); }
+.rp-sep { height: 1px; margin: 4px 2px; background: var(--line); }
