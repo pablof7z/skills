@@ -237,5 +237,43 @@ const detailedStory = renderWordDiff(storyOld, storyNew, marked.parse, { detail:
 includes(detailedStory, '<div class="wb-mod">', "More detail retains explicit word-level rewrite view");
 includes(detailedStory, "<del>", "More detail exposes inner deletions on demand");
 
+// 26) one difficult item must not promote an entire ordered list to two lists.
+const questionsOld = [
+  "1. **`ContactList::from_event`.** The operations half is built. Exporting `ContactList` is a vocabulary change needing approval. The README assumes it.",
+  "2. **Query builder.** This item is unchanged.",
+  "3. **Tag axis.** This item is also unchanged.",
+].join("\n");
+const questionsNew = [
+  "1. **`ContactList::from_event`.** The operations half is built. Export `ContactList`. Vocabulary approved — this is implementation work, not a gate. The README assumes it.",
+  "2. **Query builder.** This item is unchanged.",
+  "3. **Tag axis.** This item is also unchanged.",
+].join("\n");
+const questions = renderWordDiff(questionsOld, questionsNew, marked.parse);
+count(questions, "<ol", 1, "changed ordered list remains one list");
+count(questions, "<li", 3, "changed ordered list keeps one row per logical item");
+count(questions, "This item is unchanged", 1, "unchanged list item is not duplicated");
+includes(questions, 'start="1"', "changed list retains its starting number");
+includes(questions, "Vocabulary approved", "new content appears inside only the changed item");
+
+// 27) rendering item bodies independently must retain task-list checkboxes.
+const tasks = renderWordDiff(
+  "- [x] already done\n- [ ] old task text",
+  "- [x] already done\n- [ ] new task text",
+  marked.parse,
+);
+count(tasks, 'type="checkbox"', 2, "task-list items retain checkbox inputs");
+count(tasks, 'checked=""', 1, "checked task remains checked");
+excludes(tasks, "[x] already done", "task marker is not rendered as literal text");
+excludes(tasks, "[ ] new task text", "unchecked marker is not rendered as literal text");
+
+// 28) repeated source markers still number ordered items sequentially.
+const repeatedMarkers = renderWordDiff(
+  "1. old text\n1. unchanged text",
+  "1. new text\n1. unchanged text",
+  marked.parse,
+);
+count(repeatedMarkers, "<li>", 2, "repeated markers keep two logical items");
+excludes(repeatedMarkers, " value=", "source markers do not override sequential numbering");
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -69,23 +69,52 @@ function sentenceUnits(text) {
     .map(({ segment }) => ({ raw: segment, key: segment.trim() }));
 }
 
-// A flat list remains one Markdown list while individual item bodies receive
-// inline detail. Complex/nested items deliberately fall back as one unit.
-function mergeFlatListSource(oldText, newText, detail, inlineLexer) {
-  const oldLines = oldText.trimEnd().split("\n"), newLines = newText.trimEnd().split("\n");
-  const item = /^\s{0,3}(?:[-+*]|\d+[.)])\s+/;
-  if (oldLines.length < 2 || oldLines.length !== newLines.length ||
-      !oldLines.every((line) => item.test(line)) || !newLines.every((line) => item.test(line))) return null;
-  const merged = [];
-  for (let i = 0; i < oldLines.length; i++) {
-    if (oldLines[i] === newLines[i]) merged.push(newLines[i]);
-    else {
-      const source = mergeInlineSource(oldLines[i], newLines[i], detail, inlineLexer);
-      if (source === null) return null;
-      merged.push(source);
-    }
-  }
-  return merged.join("\n");
+function flatListItems(text) {
+  const lines = String(text).trimEnd().split("\n");
+  if (lines.length < 2) return null;
+  const items = lines.map((line) => {
+    const match = line.match(/^\s{0,3}([-+*]|\d+[.)])\s+(.*)$/su);
+    if (!match) return null;
+    const task = match[2].match(/^\[([ xX])\]\s+(.*)$/su);
+    return {
+      marker: match[1],
+      body: task ? task[2] : match[2],
+      task: !!task,
+      checked: !!task && task[1].toLowerCase() === "x",
+    };
+  });
+  return items.every(Boolean) ? items : null;
+}
+
+function inlineHtml(source, renderMd) {
+  const html = renderMd(source).trim();
+  const paragraph = html.match(/^<p>([\s\S]*)<\/p>$/u);
+  return paragraph ? paragraph[1] : html;
+}
+
+// Preserve one list and its numbering while each item independently chooses
+// inline detail or a sentence/item-level before-and-after rendering.
+function renderFlatListDiff(oldText, newText, renderMd, detail, inlineLexer) {
+  const oldItems = flatListItems(oldText), newItems = flatListItems(newText);
+  if (!oldItems || !newItems || oldItems.length !== newItems.length) return null;
+  const ordered = /^\d/u.test(newItems[0].marker);
+  if (![...oldItems, ...newItems].every((item) => /^\d/u.test(item.marker) === ordered)) return null;
+  if (newItems.some((item, index) => item.task !== oldItems[index].task ||
+      item.checked !== oldItems[index].checked)) return null;
+  const tag = ordered ? "ol" : "ul";
+  const start = ordered ? ` start="${Number.parseInt(newItems[0].marker, 10)}"` : "";
+  const rows = newItems.map((item, index) => {
+    const old = oldItems[index];
+    const task = item.task ? `<input${item.checked ? ' checked=""' : ""} disabled="" type="checkbox"> ` : "";
+    if (old.body === item.body) return `<li>${task}${inlineHtml(item.body, renderMd)}</li>`;
+    const source = mergeInlineSource(old.body, item.body, detail, inlineLexer);
+    if (source !== null) return `<li>${task}${inlineHtml(source, renderMd)}</li>`;
+    const sentences = renderSentenceDiff(old.body, item.body, renderMd, detail, inlineLexer);
+    const change = sentences ?? `<div class="wb-del">${renderMd(old.body)}</div>` +
+      `<div class="wb-ins">${renderMd(item.body)}</div>`;
+    return `<li>${task}${change}</li>`;
+  });
+  return `<${tag}${start}>${rows.join("")}</${tag}>`;
 }
 
 // Render one paired deleted/inserted Markdown unit at useful granularity.
@@ -93,8 +122,9 @@ function renderPair(delLine, insLine, renderMd, detail, inlineLexer) {
   if (!delLine.trim() && !insLine.trim()) return "";
   if (!delLine.trim()) return `<div class="wb-ins">${renderMd(insLine)}</div>`;
   if (!insLine.trim()) return `<div class="wb-del">${renderMd(delLine)}</div>`;
-  const source = mergeFlatListSource(delLine, insLine, detail, inlineLexer) ??
-    mergeInlineSource(delLine, insLine, detail, inlineLexer);
+  const list = renderFlatListDiff(delLine, insLine, renderMd, detail, inlineLexer);
+  if (list !== null) return `<div class="wb-mod">${list}</div>`;
+  const source = mergeInlineSource(delLine, insLine, detail, inlineLexer);
   if (source === null) {
     const sentences = renderSentenceDiff(delLine, insLine, renderMd, detail, inlineLexer);
     if (sentences !== null) return sentences;
