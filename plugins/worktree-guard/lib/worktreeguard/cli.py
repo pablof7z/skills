@@ -17,9 +17,9 @@ from .hooks import cmd_hook_harness
 from .notifications import notify_auto_grant
 from .install import install_hooks
 from .storage import (
-    active_grants, auto_grant_base_edits_enabled, create_grant,
-    deny_log_path, read_denials, read_requests, request_human_approval, request_log_path,
-    set_auto_grant_base_edits, stable_hook_shim_path, state_path, write_request,
+    VALID_REPO_MODES, active_grants, all_repo_modes, auto_grant_base_edits_enabled, create_grant,
+    deny_log_path, read_denials, read_requests, repo_mode, request_human_approval, request_log_path,
+    set_auto_grant_base_edits, set_repo_mode, stable_hook_shim_path, state_path, write_request,
 )
 
 
@@ -64,6 +64,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     auto_grant.add_argument("value", nargs="?", choices=["on", "off"])
     auto_grant.set_defaults(func=cmd_config_auto_grant_edits)
+
+    repo_config = config_settings.add_parser(
+        "repo", help="Show or change the per-repo guard mode"
+    )
+    repo_config.add_argument("path", nargs="?")
+    repo_config.add_argument("value", nargs="?", choices=sorted(VALID_REPO_MODES))
+    repo_config.add_argument(
+        "--list", action="store_true", help="List all configured per-repo modes"
+    )
+    repo_config.set_defaults(func=cmd_config_repo)
 
     doctor = subparsers.add_parser("doctor", help="Check the local WorktreeGuard installation")
     doctor.set_defaults(func=cmd_doctor)
@@ -110,6 +120,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Base checkout guarded: {repo.base_path}")
         print("Blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
         print(f"Auto-grant base access requests: {on_off(auto_grant_base_edits_enabled())}")
+        print(f"Guard mode: {repo_mode(repo.base_path)}")
     else:
         print(f"Linked worktree unrestricted: {repo.worktree_path}")
         print(f"Base checkout: {repo.base_path}")
@@ -126,6 +137,7 @@ def cmd_current(args: argparse.Namespace) -> int:
         "is_base_checkout": repo.worktree_path == repo.base_path,
         "blocked_git_commands": sorted(BLOCKED_GIT_COMMANDS),
         "auto_grant_base_edits": auto_grant_base_edits_enabled(),
+        "guard_mode": repo_mode(repo.base_path),
     })
     return 0
 
@@ -183,6 +195,24 @@ def cmd_config_auto_grant_edits(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_repo(args: argparse.Namespace) -> int:
+    if args.list:
+        modes = all_repo_modes()
+        if not modes:
+            print("No per-repo modes configured (all repos use full).")
+            return 0
+        for path in sorted(modes):
+            print(f"{path}: {modes[path]}")
+        return 0
+    if not args.path:
+        raise WorktreeGuardError("A repository path is required (or pass --list).")
+    repo = discover_repo(Path(args.path))
+    if args.value is not None:
+        set_repo_mode(repo.base_path, args.value)
+    print(f"repo {repo.base_path}: {repo_mode(repo.base_path)}")
+    return 0
+
+
 def cmd_doctor(_args: argparse.Namespace) -> int:
     git_path = shutil.which("git")
     print(f"git: {git_path or 'missing'}")
@@ -201,6 +231,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
     print(f"auto-grant base access requests: {on_off(auto_grant_base_edits_enabled())}")
     print(f"active overrides: {len(active_grants())}")
+    print(f"per-repo modes configured: {len(all_repo_modes())}")
     return 0 if git_path else 1
 
 

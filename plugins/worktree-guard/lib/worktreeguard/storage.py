@@ -15,8 +15,11 @@ from .core import (
 )
 
 
-STATE_VERSION = 4
+STATE_VERSION = 5
 AUTO_GRANT_PREFERENCE = "auto_grant_base_edits"
+REPO_MODES = "repo_modes"
+VALID_REPO_MODES = frozenset({"full", "files-only", "off"})
+DEFAULT_REPO_MODE = "full"
 
 
 def load_hook_payload(stdin: bytes) -> dict[str, Any]:
@@ -59,6 +62,14 @@ def load_state() -> dict[str, Any]:
     preferences = payload.get("preferences", {})
     if not isinstance(preferences, dict):
         preferences = {}
+    raw_repo_modes = payload.get(REPO_MODES, {})
+    if not isinstance(raw_repo_modes, dict):
+        raw_repo_modes = {}
+    repo_modes = {
+        str(path): mode
+        for path, mode in raw_repo_modes.items()
+        if isinstance(path, str) and mode in VALID_REPO_MODES
+    }
     session_grants = [
         grant for grant in grants
         if isinstance(grant, dict)
@@ -71,6 +82,7 @@ def load_state() -> dict[str, Any]:
         "preferences": {
             AUTO_GRANT_PREFERENCE: bool(preferences.get(AUTO_GRANT_PREFERENCE, True)),
         },
+        REPO_MODES: repo_modes,
     }
 
 
@@ -152,6 +164,23 @@ def set_auto_grant_base_edits(enabled: bool) -> None:
     state = load_state()
     state["preferences"][AUTO_GRANT_PREFERENCE] = enabled
     save_state(state)
+
+
+def repo_mode(base_path: Path) -> str:
+    modes = load_state()[REPO_MODES]
+    return modes.get(str(resolve_path(base_path)), DEFAULT_REPO_MODE)
+
+
+def set_repo_mode(base_path: Path, mode: str) -> None:
+    if mode not in VALID_REPO_MODES:
+        raise ValueError(f"invalid guard mode: {mode!r}")
+    state = load_state()
+    state[REPO_MODES][str(resolve_path(base_path))] = mode
+    save_state(state)
+
+
+def all_repo_modes() -> dict[str, str]:
+    return dict(load_state()[REPO_MODES])
 
 
 def request_human_approval(*, repo: Repo, reason: str, timeout: int) -> bool:

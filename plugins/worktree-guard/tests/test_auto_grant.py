@@ -71,7 +71,7 @@ class BaseAccessTests(unittest.TestCase):
             encoding="utf-8",
         )
         state = load_state()
-        self.assertEqual(state["version"], 4)
+        self.assertEqual(state["version"], 5)
         self.assertEqual([grant["id"] for grant in state["grants"]], ["session"])
         self.assertTrue(auto_grant_base_edits_enabled())
 

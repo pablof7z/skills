@@ -39,6 +39,7 @@ malicious or deliberately obfuscated caller.
 <plugin-root>/bin/wtg current --repo <path>
 <plugin-root>/bin/wtg request-base-access --repo <path> --reason "<reason>"
 <plugin-root>/bin/wtg config auto-grant-edits [on|off]
+<plugin-root>/bin/wtg config repo <path> [full|files-only|off]
 <plugin-root>/bin/wtg denials --tail 20
 <plugin-root>/bin/wtg doctor
 <plugin-root>/bin/wtg install-hooks
@@ -61,6 +62,20 @@ and WorktreeGuard recorded exactly one denial.
 `config auto-grant-edits` prints the current preference when no value is
 provided. `on` is the default.
 
+`config repo <path> [full|files-only|off]` sets or shows a per-repo guard
+mode, keyed by the repo's resolved base checkout path. `full` (the default
+for any repo with no entry) blocks both the six Git commands and native file
+writes in the base checkout, as described above. `files-only` disables only
+the Git-command block, so the six commands run freely in the base checkout,
+while native file writes there still require a grant. `off` disables the
+guard entirely for that repo's base checkout; linked worktrees are already
+unrestricted and are unaffected by any mode. Modes are stored in
+`state.json` and, like the rest of WorktreeGuard, are a convenience
+guardrail, not a security boundary — a repo set to `off` or `files-only` is
+trusting the agent, not sandboxing it. Run `config repo <path>` with no mode
+to print the effective mode, or `config repo --list` to list every
+configured repo.
+
 ## Architecture
 
 The shared `lib/worktreeguard/` package owns the policy and CLI. The Codex,
@@ -73,7 +88,9 @@ own permission system; base access is requested through `wtg`, not through a
 Claude, Codex, or Grok prompt.
 
 All Git main worktrees are guarded by default. No repository registration or
-protection database is required. Local grants are stored in
+protection database is required. A per-repo guard mode (see `config repo`
+above) can relax that default down to `files-only` or `off` for a specific
+base checkout. Local grants are stored in
 `~/.local/state/worktreeguard/state.json` alongside the auto-grant preference;
 denials are appended to `~/worktreeguard-denied-actions.jsonl`. Notifications are
 local, non-interactive, and best-effort; notification delivery failure does not

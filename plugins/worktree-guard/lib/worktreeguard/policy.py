@@ -10,6 +10,7 @@ from typing import Union
 from .core import BLOCKED_GIT_COMMANDS, Repo, resolve_path
 from .git import is_main_worktree
 from .operations import native_write_targets, operation_is_native_write, operation_is_shell
+from .storage import repo_mode
 
 
 CONTROL_TOKENS = {"&&", "||", ";", "|", "&"}
@@ -53,7 +54,7 @@ def blocked_file_operation(
     targets = native_write_targets(operation, resolved_cwd)
     for target in targets:
         repo = base_repo_containing(target)
-        if repo is not None:
+        if repo is not None and repo_mode(repo.base_path) != "off":
             return BlockedFileOperation(
                 str(operation.get("tool_name") or "file write"),
                 resolved_cwd,
@@ -64,7 +65,7 @@ def blocked_file_operation(
     if targets:
         return None
     is_base, repo = is_main_worktree(resolved_cwd)
-    if is_base and repo is not None:
+    if is_base and repo is not None and repo_mode(repo.base_path) != "off":
         return BlockedFileOperation(
             str(operation.get("tool_name") or "file write"),
             resolved_cwd,
@@ -109,7 +110,7 @@ def blocked_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None
         if subcommand not in BLOCKED_GIT_COMMANDS:
             continue
         is_base, repo = is_main_worktree(git_cwd)
-        if is_base and repo is not None:
+        if is_base and repo is not None and repo_mode(repo.base_path) == "full":
             return BlockedGitOperation(subcommand, command, git_cwd, repo.base_path)
     return None
 
