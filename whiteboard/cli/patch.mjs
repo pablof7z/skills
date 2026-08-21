@@ -13,7 +13,9 @@ function parseHunks(diff) {
   for (const line of lines) {
     if (line.startsWith("@@")) {
       const m = line.match(HUNK);
-      if (m) { cur = { oldStart: +m[1], lines: [] }; hunks.push(cur); }
+      if (!m) throw new Error(`malformed hunk header: ${line}`);
+      cur = { oldStart: +m[1], lines: [] };
+      hunks.push(cur);
       continue;
     }
     if (!cur) continue; // skip ---/+++ headers and anything before the first hunk
@@ -22,6 +24,7 @@ function parseHunks(diff) {
     }
     // a blank line or "\ No newline" marker is not a diff content line — ignore
   }
+  if (!hunks.length) throw new Error("diff produced no hunks (empty or unparseable diff)");
   return hunks;
 }
 

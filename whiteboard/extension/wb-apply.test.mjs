@@ -74,6 +74,15 @@ r = await apply({ title: "bad op", ops: [{ op: "explode", name: "x", text: "y" }
 ok(r.isError, "4 rejected unknown op");
 ok(loadDoc(DIR).rev === revBefore4, "4 rev unchanged");
 
+// 5) malformed diff in an edit op: rejected, doc unchanged, rev unchanged
+const revBefore5 = loadDoc(DIR).rev;
+r = await apply({ title: "malformed diff", ops: [
+  { op: "edit", block: "intro", diff: "@@ -\n-x\n+y" },
+] });
+ok(r.isError, "5 rejected (malformed diff): " + JSON.stringify(r.content?.[0]?.text));
+ok(loadDoc(DIR).rev === revBefore5, "5 rev unchanged");
+ok(loadDoc(DIR).blocks.find((b) => b.name === "intro").md.includes("edited"), "5 intro content unchanged");
+
 console.log(`\n${pass} passed, ${fail} failed`);
 fs.rmSync(ROOT, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

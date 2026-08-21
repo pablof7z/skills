@@ -16,13 +16,12 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { resolveSession } from "../cli/store.mjs";
 import { loadDoc, DEFAULT_PATH } from "../cli/doc.mjs";
-import { applyOps } from "../cli/apply.mjs";
+import { applyOps, APPLY_BLOCK_OPS } from "../cli/apply.mjs";
 import { readJson, readMd, readMdAgent } from "../cli/blocks.mjs";
 import {
   startChange, sendChange, discardChange, stageSubcommand,
-  loadStaging, previewDoc,
+  loadStaging, previewDoc, resolveEditDiff,
 } from "../cli/staging.mjs";
-import { applyUnifiedDiff } from "../cli/patch.mjs";
 import {
   attachCreate, attachReply, attachResolve, attachReopen,
   tagSet, tagClear, listAnnotations,
@@ -30,7 +29,7 @@ import {
 import { ATTACH_KINDS, TAG_KINDS } from "../cli/kinds.mjs";
 import { ensureViewer } from "./viewer.mjs";
 
-const BLOCK_OPS = ["add", "edit", "move", "rename", "remove"];
+const BLOCK_OPS = APPLY_BLOCK_OPS;
 // Tools that are inactive for a fresh agent and unlocked by wb_new/wb_list/wb_use.
 const DOC_TOOLS = ["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_apply", "wb_attach", "wb_tag"];
 
@@ -189,9 +188,7 @@ async function wb_change_block(_id, p, _sig, _on, ctx) {
       if (!p.block) return err("wb_change_block edit: `block` is required");
       const stg = loadStaging(r.s);
       if (!stg) return err("no change in progress — start with wb_change_start");
-      const block = previewDoc(r.s, stg.ops).blocks.find((b) => b.name === p.block && (b.path || DEFAULT_PATH) === (p.path || DEFAULT_PATH));
-      if (!block) return err(`no block "${p.block}" in ${p.path || DEFAULT_PATH}`);
-      const md = applyUnifiedDiff(block.md, String(p.diff));
+      const md = resolveEditDiff(previewDoc(r.s, stg.ops).blocks, p.block, p.path || DEFAULT_PATH, String(p.diff));
       return txt(stageSubcommand(r.s, "edit", [p.block], { text: md, path: p.path }));
     }
     const { pos, flags } = toStageArgs(op, p);

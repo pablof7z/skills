@@ -13,8 +13,7 @@
 
 import { loadDoc, DEFAULT_PATH, appendChange, validateOpsInOrder, changeIdFor } from "./doc.mjs";
 import { slugify, agentName, provenance } from "./store.mjs";
-import { applyUnifiedDiff } from "./patch.mjs";
-import { previewDoc } from "./staging.mjs";
+import { previewDoc, resolveEditDiff } from "./staging.mjs";
 
 export const APPLY_BLOCK_OPS = ["add", "edit", "move", "rename", "remove"];
 
@@ -36,9 +35,7 @@ function buildOp(session, built, input) {
       // Resolve the diff against the WIP doc (after the ops so far) so a later
       // edit can patch a block an earlier op added/edited in this same apply.
       const wip = previewDoc(session, built);
-      const block = wip.blocks.find((b) => b.name === name && (b.path || DEFAULT_PATH) === p);
-      if (!block) throw new Error(`no block "${name}" in ${p}`);
-      md = applyUnifiedDiff(block.md, String(input.diff));
+      md = resolveEditDiff(wip.blocks, name, p, String(input.diff));
     } else throw new Error("edit: `text` or `diff` required");
     return { op: "edit", name, md, path: p };
   }

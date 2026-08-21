@@ -43,6 +43,15 @@ export function previewDoc(session, stagedOps) {
   return fold([...changes, { rev: max + 1, at: new Date().toISOString(), ops: stagedOps }]);
 }
 
+// Resolve a unified diff against a WIP block: find it by (name,path), throw if
+// missing, and apply the diff. Shared by apply.mjs, stageSubcommand's edit-diff
+// branch, and the extension's wb_change_block edit-diff branch.
+export function resolveEditDiff(blocks, name, fpath, diff) {
+  const block = blocks.find((b) => b.name === name && (b.path || DEFAULT_PATH) === fpath);
+  if (!block) throw new Error(`no block "${name}" in ${fpath}`);
+  return applyUnifiedDiff(block.md, diff);
+}
+
 function readContent(flags, { optional = false } = {}) {
   if (flags.text !== undefined) return String(flags.text);
   if (flags.file) return fs.readFileSync(flags.file, "utf8");
@@ -135,9 +144,7 @@ export function stageSubcommand(session, sub, positional, flags) {
       if (flags.diff !== undefined) {
         if (flags.text !== undefined || flags.file) throw new Error("pass either --diff or --file/--text, not both");
         const diff = flags.diff === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(flags.diff, "utf8");
-        const block = previewDoc(session, loadStaging(session).ops).blocks.find((b) => b.name === name && b.path === fpath);
-        if (!block) throw new Error(`no block "${name}" in ${fpath}`);
-        md = applyUnifiedDiff(block.md, diff);
+        md = resolveEditDiff(previewDoc(session, loadStaging(session).ops).blocks, name, fpath, diff);
       } else md = readContent(flags);
       return `edit ${name} accepted (${stageOp(session, { op: "edit", name, md, path: fpath }).ops.length} staged). \`wb change send\` when done.`;
     }
