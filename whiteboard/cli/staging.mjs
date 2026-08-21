@@ -17,6 +17,7 @@ import {
 } from "./doc.mjs";
 import { slugify, agentName, provenance } from "./store.mjs";
 import { applyUnifiedDiff } from "./patch.mjs";
+import { summarizeEdit, editDetail, summarizeAdd, summarizeRemove } from "./diff-summary.mjs";
 
 const STAGING = ".staging.json";
 export const STALE_MS = 5 * 60 * 1000; // 5 min
@@ -52,6 +53,34 @@ export function resolveEditDiff(blocks, name, fpath, diff) {
   return applyUnifiedDiff(block.md, diff);
 }
 
+// Per-op content-delta string, shared by apply.mjs and sendChange so the two
+// transports (`wb apply` and `wb change send`) report deltas identically.
+export function formatOpDelta(op) {
+  const p = op.path || DEFAULT_PATH;
+  switch (op.op) {
+    case "edit": {
+      const s = summarizeEdit(op.oldMd || "", op.md);
+      return [`edit ${op.name} (${p}) — ${s.text}`, ...editDetail(op.oldMd || "", op.md)].join("\n");
+    }
+    case "add": return `add ${op.name} (${p}) — +${summarizeAdd(op.md)}`;
+    case "remove": return `remove ${(op.names || [op.name]).join(", ")} (${p}) — −${summarizeRemove(op.oldMd || "")}`;
+    case "rename": return `rename ${op.from} → ${op.to} (${p})`;
+    case "move": {
+      const anchor = op.before ? `before ${op.before}` : op.after ? `after ${op.after}` : null;
+      return `move ${op.name} (${p})` + (anchor ? ` — ${anchor}` : "");
+    }
+    default: return `${op.op} (${p})`;
+  }
+}
+
+// Strip the transient `oldMd` capture (used only to compute deltas) before an
+// op is persisted to the change log — it must not bloat the on-disk format.
+export function stripOldMd(op) {
+  if (op.oldMd === undefined) return op;
+  const { oldMd, ...rest } = op;
+  return rest;
+}
+
 function readContent(flags, { optional = false } = {}) {
   if (flags.text !== undefined) return String(flags.text);
   if (flags.file) return fs.readFileSync(flags.file, "utf8");
@@ -74,29 +103,41 @@ export function startChange(session, { title, summary, by, piSessionId }) {
   return `${note}started "${title}". Stage ops with \`wb change <edit|add|move|rename|remove>\`, then \`wb change send\`.`;
 }
 
+// Look up a block's md in the LIVE doc (before any staged ops) — the content
+// deltas measure drift over the whole staging transaction, not step-by-step.
+function liveMd(session, name, p) {
+  const doc = loadDoc(session.dir);
+  const b = doc && doc.blocks.find((x) => x.name === name && (x.path || DEFAULT_PATH) === p);
+  return b ? b.md : "";
+}
+
 function stageOp(session, op) {
   const st = loadStaging(session);
   if (!st) throw new Error(`no change in progress — start with \`wb change "<title>"\`.`);
   validateOps(previewDoc(session, st.ops), [op]);
+  if (op.op === "edit") op.oldMd = liveMd(session, op.name, op.path || DEFAULT_PATH);
+  else if (op.op === "remove") op.oldMd = (op.names || [op.name]).map((n) => liveMd(session, n, op.path || DEFAULT_PATH)).join("\n\n");
   st.ops.push(op);
   saveStaging(session, st);
   return st;
 }
 
-export function sendChange(session, { by, piSessionId } = {}) {
+export function sendChange(session, { by, piSessionId, dryRun = false } = {}) {
   const st = loadStaging(session);
   if (!st) throw new Error('no change in progress — start with `wb change "<title>"`.');
   if (!st.ops.length) throw new Error("no ops staged — add some with `wb change <edit|add|…>` before `wb change send`.");
   const doc = loadDoc(session.dir);
   if (!doc) throw new Error(`no document in ${session.dir}`);
   validateOpsInOrder(doc, st.ops); // re-check against the live doc, walking ops in WIP order so an op can reference one added earlier in the same tx
+  const deltas = st.ops.map(formatOpDelta);
+  if (dryRun) return { dryRun: true, deltas };
   // Populate via.piSessionId from the harness (the extension process has no
   // PI_SESSION_ID env); keep all other provenance fields from this process.
   const pid = piSessionId ?? st.piSessionId ?? null;
   const via = pid ? { ...provenance(), piSessionId: pid } : undefined;
-  const ch = appendChange(session.dir, { id: changeIdFor(st.title), title: st.title, by: by || st.by || agentName(), summary: st.summary, ops: st.ops, via });
+  const ch = appendChange(session.dir, { id: changeIdFor(st.title), title: st.title, by: by || st.by || agentName(), summary: st.summary, ops: st.ops.map(stripOldMd), via });
   clearStaging(session);
-  return ch;
+  return { ...ch, deltas };
 }
 
 export function discardChange(session) {

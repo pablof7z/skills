@@ -28,13 +28,16 @@ const HELP = `wb — whiteboard change-log document CLI
   wb use <slug>                           claim a session for this agent (stamps manifest.owner)
   wb read [--md|--json] [--path P] [slug]   project the doc (default: tagged <name>…</name>)
   wb change "<title>" [--summary S]       START a staging transaction (one at a time)
-  wb change send                          COMMIT staged ops as one change
+  wb change send [--dry-run]              COMMIT staged ops as one change; prints a per-op content
+                                          delta (word/line diff vs the pre-edit block) for each op.
+                                          --dry-run computes deltas but writes nothing.
   wb change status                        peek at staged ops
   wb change discard  (alias: kill)        abort the staging transaction
-  wb apply <title> --ops '<json>' | --file ops.json [--summary S] [--by B]
+  wb apply <title> --ops '<json>' | --file ops.json [--summary S] [--by B] [--dry-run]
                                           apply an array of block ops as ONE all-or-nothing change (no staging tx);
                                           if any op is invalid nothing is written. ops: JSON array of
                                           {op:add|edit|move|rename|remove, path?, block?, name?, names?, text?, diff?, before?, after?}
+                                          prints a per-op content delta for each op; --dry-run writes nothing.
   wb note <text|--file>                   append to notes.md
   wb attach <block> --on "quote" --kind question|warning|objection|note --content T
                                           anchor a thread to a span (direct write)
@@ -66,7 +69,7 @@ A staging left open >5m auto-sends when you next start a new \`wb change "<title
 
 function parse(argv) {
   const positional = [], flags = {};
-  const BOOL = new Set(["json", "md", "help", "clear", "open"]);
+  const BOOL = new Set(["json", "md", "help", "clear", "open", "dry-run"]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--") { positional.push(...argv.slice(i + 1)); break; }
@@ -162,7 +165,12 @@ async function main() {
     case "change": {
       const s = session();
       const first = rest[0];
-      if (first === "send") { const ch = sendChange(s); return out(`change "${ch.title}" applied (rev ${ch.rev}, ${ch.ops.length} ops) → changes/${String(ch.rev).padStart(6, "0")}.json\n`); }
+      if (first === "send") {
+        const ch = sendChange(s, { dryRun: !!flags["dry-run"] });
+        const deltaLines = (ch.deltas || []).map((d) => d.split("\n").map((l) => "  " + l).join("\n")).join("\n");
+        if (ch.dryRun) return out(`dry-run — would commit ${ch.deltas.length} op(s), nothing written:\n${deltaLines}\n`);
+        return out(`change "${ch.title}" applied (rev ${ch.rev}, ${ch.ops.length} ops) → changes/${String(ch.rev).padStart(6, "0")}.json\n${deltaLines}\n`);
+      }
       if (first === "discard" || first === "kill") return out(discardChange(s) + "\n");
       if (first === "status") return out(statusChange(s) + "\n");
       if (REMOVED_ANNOTATION_OPS.has(first)) throw new Error(`\`wb change ${first}\` moved: annotation ops are direct writes under \`wb attach\` / \`wb tag\`, not staged via \`wb change\`.`);
@@ -183,8 +191,10 @@ async function main() {
       else if (flags.file) ops = JSON.parse(fs.readFileSync(flags.file, "utf8"));
       else if (!process.stdin.isTTY) ops = JSON.parse(fs.readFileSync(0, "utf8"));
       else throw new Error('wb apply: pass ops via --ops \'<json>\', --file <path>, or stdin (JSON array)');
-      const ch = applyOps(s, { title, ops, summary: flags.summary, by: flags.by, piSessionId: process.env.PI_SESSION_ID || null });
-      return out(`applied ${ch.ops} op(s) as one atomic change: ${JSON.stringify(ch)}\n`);
+      const ch = applyOps(s, { title, ops, summary: flags.summary, by: flags.by, piSessionId: process.env.PI_SESSION_ID || null, dryRun: !!flags["dry-run"] });
+      const deltaLines = (ch.deltas || []).map((d) => d.split("\n").map((l) => "  " + l).join("\n")).join("\n");
+      if (ch.dryRun) return out(`dry-run — would apply ${ch.deltas.length} op(s), nothing written:\n${deltaLines}\n`);
+      return out(`applied ${ch.ops} op(s) as one atomic change: ${JSON.stringify(ch)}\n${deltaLines}\n`);
     }
     case "note": {
       const s = session();

@@ -222,12 +222,20 @@ async function wb_tag(_id, p) {
   } catch (e) { return err(`wb_tag: ${e.message}`); }
 }
 
+// Indent each line of every delta string for display under a result line.
+function renderDeltas(deltas) {
+  return (deltas || []).map((d) => d.split("\n").map((l) => "  " + l).join("\n")).join("\n");
+}
+
 async function wb_change_finish(_id, p, _sig, _on, ctx) {
   const op = p.op;
   if (!op) return err("wb_change_finish: `op` is required");
   const r = getSession(); if (r.error) return err(r.error);
   try {
-    if (op === "commit") return txt(`change applied: ${JSON.stringify(sendChange(r.s, { piSessionId: piSid(ctx) }))}`);
+    if (op === "commit") {
+      const ch = sendChange(r.s, { piSessionId: piSid(ctx) });
+      return txt(`change applied: ${JSON.stringify(ch)}\n${renderDeltas(ch.deltas)}`);
+    }
     if (op === "abandon") return txt(discardChange(r.s));
     return err(`wb_change_finish: unknown op "${op}" (commit|abandon)`);
   } catch (e) { return err(`wb_change_finish: ${e.message}`); }
@@ -244,8 +252,9 @@ async function wb_apply(_id, p, _sig, _on, ctx) {
   if (!Array.isArray(p.ops) || !p.ops.length) return err("wb_apply: `ops` (non-empty array) is required");
   const r = getSession(); if (r.error) return err(r.error);
   try {
-    const ch = applyOps(r.s, { title: p.title, ops: p.ops, summary: p.summary, by: p.by, piSessionId: piSid(ctx) });
-    return txt(`applied ${ch.ops} op(s) as one atomic change: ${JSON.stringify(ch)}`);
+    const ch = applyOps(r.s, { title: p.title, ops: p.ops, summary: p.summary, by: p.by, piSessionId: piSid(ctx), dryRun: !!p.dryRun });
+    if (ch.dryRun) return txt(`dry-run — would apply:\n${renderDeltas(ch.deltas)}\n(nothing committed)`);
+    return txt(`applied ${ch.ops} op(s) as one atomic change: ${JSON.stringify(ch)}\n${renderDeltas(ch.deltas)}`);
   } catch (e) { return err(`wb_apply: ${e.message}`); }
 }
 
@@ -261,8 +270,8 @@ const D = {
   wb_block: "Stage an ARTIFACT op on the current session's open transaction: add/edit/move/rename/remove a block. params: { op, path?, block?, name?, names?, text?, diff?, before?, after?, by? }. `path` is the file the block belongs to (default \"default.md\"); block names are unique within a path. op=add: name+text(+before?/after?+path?). op=edit: block+text(OR diff, unified diff applied in-process)+path?. op=move: block+before?/after?+path?. op=rename: block(old)+name(new)+path?. op=remove: block|names[]+path?. Examples: wb_change_block({ op:\"add\", path:\"references/pi.md\", name:\"examples\", text:\"# Examples\\n…\" }); wb_change_block({ op:\"edit\", block:\"goal\", diff:\"@@\\n- old\\n+ new\" }).",
   wb_attach: "Anchor a replyable thread to a span of a block, or work with an existing thread. NOT staged — a direct write. params: { op: \"attach\"|\"reply\"|\"resolve\"|\"reopen\"|\"list\", block?, on?, kind?, content?, id?, by?, path?, open? }. `on` is the anchor text within the block (REQUIRED for attach; the thread anchors to that span). `kind` (attach only): question|warning|objection|note. op=attach: block+on+kind+content(+by?+path?). op=reply: id+content(+by?). op=resolve/reopen: id. op=list: (+block?+path?+open?). Examples: wb_attach({ op:\"attach\", block:\"goal\", on:\"Build the thing.\", kind:\"question\", content:\"is this right?\" }); wb_attach({ op:\"reply\", id:\"c-abc\", content:\"noted\" }); wb_attach({ op:\"resolve\", id:\"c-abc\" }).",
   wb_tag: "Set or clear a short status tag anchored to a span of a block, or list tags. NOT staged — a direct write. params: { op: \"set\"|\"clear\"|\"list\", block?, on?, kind?, content?, by?, path? }. `on` is the anchor text within the block (REQUIRED for set/clear). `kind`: unverified|superseded|needs-attention|decided. op=set: block+on+kind(+content?+by?+path?) — idempotent (a second set of the same tag on the same span is a no-op). op=clear: block+on+kind(+by?+path?). op=list: (+block?+path?). Examples: wb_tag({ op:\"set\", block:\"opts\", on:\"- A\", kind:\"superseded\" }); wb_tag({ op:\"clear\", block:\"opts\", on:\"- A\", kind:\"superseded\" }).",
-  wb_finish: "Commit or abandon the open staging transaction. params: { op: \"commit\"|\"abandon\" }. commit applies the staged ARTIFACT ops as one change (returns rev + op count); abandon discards them. Example: wb_change_finish({ op:\"commit\" }).",
-  wb_apply: "Apply a whole array of block ops as a single ALL-OR-NOTHING change — no staging transaction (no wb_change_start/finish dance). Every op is built, then validated in WIP order against the live doc; if ANY op is invalid (bad block name, missing field, a diff that won't apply, an unknown op) NOTHING is written and the error is returned. On success one change (one rev) is appended with all ops. params: { title (required), ops (required, non-empty array), summary?, by? }. `by` is attributed at the change level. Each op: { op: \"add\"|\"edit\"|\"move\"|\"rename\"|\"remove\", path?, block?, name?, names?, text?, diff?, before?, after? }. op=add: name+text(+before?/after?/path?). op=edit: block+text OR block+diff (resolved against the WIP doc so a later edit can patch an earlier op's result). op=move: block+before|after. op=rename: block(old)+name(new). op=remove: block | names[]. Example: wb_apply({ title:\"restructure\", ops:[{op:\"add\",name:\"goal\",text:\"# Goal\n…\"},{op:\"edit\",block:\"goal\",diff:\"@@\\n- old\\n+ new\"},{op:\"remove\",names:[\"stale\"]}] }).",
+  wb_finish: "Commit or abandon the open staging transaction. params: { op: \"commit\"|\"abandon\" }. commit applies the staged ARTIFACT ops as one change (returns rev + op count) and the result text lists a per-op content delta — a word/line diff of each edited block's old md vs new md — so you can see exactly what changed (and catch retyping drift on full-text edits); abandon discards them. Example: wb_change_finish({ op:\"commit\" }).",
+  wb_apply: "Apply a whole array of block ops as a single ALL-OR-NOTHING change — no staging transaction (no wb_change_start/finish dance). Every op is built, then validated in WIP order against the live doc; if ANY op is invalid (bad block name, missing field, a diff that won't apply, an unknown op) NOTHING is written and the error is returned. On success one change (one rev) is appended with all ops, and the result text lists a per-op content delta — a word/line diff of each edited block's old md vs new md (hunks + added/removed word counts, with per-hunk context for `edit` ops) — so a full-text `edit` can't silently drift without you seeing it. params: { title (required), ops (required, non-empty array), summary?, by?, dryRun? }. `by` is attributed at the change level. `dryRun: true` builds + validates the ops and returns the same per-op deltas WITHOUT writing anything — use it to preview an edit's drift before committing. Each op: { op: \"add\"|\"edit\"|\"move\"|\"rename\"|\"remove\", path?, block?, name?, names?, text?, diff?, before?, after? }. op=add: name+text(+before?/after?/path?). op=edit: block+text OR block+diff (resolved against the WIP doc so a later edit can patch an earlier op's result). op=move: block+before|after. op=rename: block(old)+name(new). op=remove: block | names[]. Example: wb_apply({ title:\"restructure\", ops:[{op:\"add\",name:\"goal\",text:\"# Goal\n…\"},{op:\"edit\",block:\"goal\",diff:\"@@\\n- old\\n+ new\"},{op:\"remove\",names:[\"stale\"]}] }). Preview: wb_apply({ title:\"x\", dryRun:true, ops:[…] }).",
 };
 
 export function registerWhiteboardTools(pi, Type) {
@@ -353,6 +362,7 @@ export function registerWhiteboardTools(pi, Type) {
       title: Type.String(),
       ops: Type.Array(OP, { description: "block ops to apply as one all-or-nothing change" }),
       summary: opt(Type.String()), by: opt(Type.String()),
+      dryRun: opt(Type.Boolean({ description: "compute + return per-op content deltas without writing anything" })),
     }),
     execute: withViewer(wb_apply),
   });
