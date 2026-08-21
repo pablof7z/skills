@@ -56,6 +56,7 @@ Then `/reload` or start a new pi session. Verify with `pi -p "ok"` (loads with n
 ```bash
 node --experimental-strip-types extension/test-blocks.ts      # attributed wake + scoping
 node --experimental-strip-types extension/test-ownership.ts   # only the owning agent wakes
+node extension/wb-diff.test.mjs                               # wb diff CLI + Pi tool
 ```
 
 `test-blocks.ts` verifies: (1) a session with a new actionable `user` comment produces a `sendMessage` wake; (2) a session in a different project does NOT wake. `test-ownership.ts` verifies only the agent that owns the session wakes.

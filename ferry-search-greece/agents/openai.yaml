@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ferry Search Greece"
+  short_description: "Find Greek ferry routes, ports, and schedules across operators"
+  default_prompt: "Use this skill whenever someone asks for Greek ferry routes, schedules, departure ports, fares, or booking sources between islands and mainland."

@@ -25,7 +25,7 @@ import { execFile } from "node:child_process";
 import {
   listSessions, loadDoc, isActionable, chatActionable, sessionUnread,
 } from "./scan.mjs";
-import { registerWhiteboardTools, setCurrentSession, getCurrentSession } from "./tool.mjs";
+import { activateInitialTools, registerWhiteboardTools, setCurrentSession, getCurrentSession } from "./tool.mjs";
 
 // Resolve symlinks so a symlinked extension install (e.g. ~/.pi/agent/extensions/
 // whiteboard -> repo/extension) derives sibling `cli/` and `viewer/` paths from the
@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
   let mySessionId: string | null = null;
   let toolsRegistered = false;
   // Resolve typebox (jiti alias under pi; null under bare-node tests) and register
-  // the 10 whiteboard tools. toolsReady is awaited in session_start so the active
+  // the 12 whiteboard tools. toolsReady is awaited in session_start so the active
   // set is applied AFTER the tools exist (setActiveTools ignores unknown names).
   const toolsReady = import("typebox")
     .then((m: any) => m?.Type).catch(() => null)
@@ -254,15 +254,7 @@ export default function (pi: ExtensionAPI) {
     const cur = resolveOwnedSession(myProject, ROOT, mySessionId);
     // Tools must be registered before setActiveTools (unknown names are ignored).
     await toolsReady;
-    try {
-      if ((pi as any).getActiveTools && (pi as any).setActiveTools) {
-        const DOC = new Set(["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_apply", "wb_attach", "wb_tag"]);
-        let active: string[] = (pi as any).getActiveTools().filter((n: string) => !DOC.has(n));
-        active = [...new Set([...active, "wb_new", "wb_list"])];   // fresh agent: only the two loaders
-        if (cur) active = [...new Set([...active, ...DOC])];         // owning agent: unlock everything (smooth wake)
-        (pi as any).setActiveTools(active);
-      }
-    } catch {}
+    try { activateInitialTools(pi as any, Boolean(cur)); } catch {}
     if (cur) {
       process.env.WB_SESSION = `${cur.project}/${cur.slug}`;
       setCurrentSession(`${cur.project}/${cur.slug}`);

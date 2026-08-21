@@ -13,7 +13,7 @@ import { initBlockComposer } from "./blockcomposer.mjs";
 import { initDiffMode, ago } from "./blockdiff.mjs";
 import { initEdgeIndicator } from "./edge-indicators.mjs";
 import { initChat } from "./chat.mjs";
-import { quoteMatch } from "./comments.mjs";
+import { anchorText, anchorTextNodes, normalizeAnchorSelector, quoteMatch, relativeTop } from "./comments.mjs";
 import { styleOf } from "./annotations.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -46,7 +46,8 @@ function renderBody(text) { return renderMarkdown(text); }
 // rendered text has more whitespace chars than the stored exact).
 function highlightIn(blockMd, selector, id, kindCls) {
   if (!selector || !selector.exact) return false;
-  const r = quoteMatch(blockMd.textContent, selector.exact, selector.prefix, selector.suffix);
+  const canonical = normalizeAnchorSelector(blockMd, selector);
+  const r = quoteMatch(anchorText(blockMd), canonical.exact, canonical.prefix, canonical.suffix);
   if (!r) return false;
   return wrapRange(blockMd, r.start, r.end, id, kindCls);
 }
@@ -54,9 +55,8 @@ function highlightIn(blockMd, selector, id, kindCls) {
 // Walk text nodes, split, and wrap [start,end) in a <mark class="wb-anno <kindCls>" data-anno-id=id>.
 function wrapRange(root, start, end, id, kindCls) {
   const map = [];
-  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
   let n, cum = 0;
-  while ((n = w.nextNode())) map.push({ node: n, start: cum, end: (cum += n.nodeValue.length) });
+  for (n of anchorTextNodes(root)) map.push({ node: n, start: cum, end: (cum += n.nodeValue.length) });
   const si = map.findIndex((m) => start >= m.start && start < m.end);
   const ei = map.findIndex((m) => end > m.start && end <= m.end);
   if (si === -1 || ei === -1) return false;
@@ -64,17 +64,15 @@ function wrapRange(root, start, end, id, kindCls) {
   if (relS > 0) sn.splitText(relS);
   const startTail = relS > 0 ? sn.nextSibling : sn;
   const map2 = [];
-  const w2 = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
   let nn, c = 0;
-  while ((nn = w2.nextNode())) map2.push({ node: nn, start: c, end: (c += nn.nodeValue.length) });
+  for (nn of anchorTextNodes(root)) map2.push({ node: nn, start: c, end: (c += nn.nodeValue.length) });
   const ee = map2.find((m) => end > m.start && end <= m.end);
   if (!ee) return false;
   const relE = end - ee.start;
   if (relE > 0 && relE < ee.node.nodeValue.length) ee.node.splitText(relE);
   const wrapped2 = [];
-  const w3 = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
   let tn, on = false;
-  while ((tn = w3.nextNode())) {
+  for (tn of anchorTextNodes(root)) {
     if (tn === startTail) on = true;
     if (on) { wrapped2.push(tn); if (tn === ee.node) break; }
   }
@@ -188,8 +186,7 @@ export function initBlockViewer(rootEl, project, slug) {
     if (state.diffMode) {
       await diff.render();   // re-render the diff for the newly-active file
     } else {
-      renderBlocks();
-      await codeblocks.enhance(docEl);
+      await renderBlocks();
       renderComments();
     }
     renderTOC();
@@ -210,9 +207,10 @@ export function initBlockViewer(rootEl, project, slug) {
     return hasAgentVoice(a) && !hasUserReply(a);
   }
 
-  function renderBlocks() {
+  async function renderBlocks() {
     docEl.innerHTML = "";
     state.anchored = {};
+    const rendered = [];
     for (const b of visibleBlocks()) {
       const sec = document.createElement("section");
       sec.className = "block";
@@ -221,6 +219,10 @@ export function initBlockViewer(rootEl, project, slug) {
       sec.dataset.blockIdx = String(docEl.children.length);
       sec.innerHTML = '<div class="block-md">' + renderMarkdown(b.md) + '</div>';
       docEl.appendChild(sec);
+      rendered.push({ b, sec });
+    }
+    await codeblocks.enhance(docEl);
+    for (const { b, sec } of rendered) {
       // Highlight the anchor span of every open thread and active tag, colored
       // by kind. state.anchored[id] === true  -> highlighted (card omits the quote);
       // false -> anchor no longer matches (stale, shown in the card); undefined ->
@@ -320,9 +322,9 @@ export function initBlockViewer(rootEl, project, slug) {
   function anchorYFor(sec, c) {
     if (state.anchored[c.id]) {
       const mark = sec.querySelector(`mark.wb-anno[data-anno-id="${cssEscape(c.id)}"]`);
-      if (mark) return mark.offsetTop;
+      if (mark) return relativeTop(mark, railEl);
     }
-    return sec.offsetTop;
+    return relativeTop(sec, railEl);
   }
 
   function renderComments() {
@@ -341,7 +343,7 @@ export function initBlockViewer(rootEl, project, slug) {
       i++;
       const sec = docEl.querySelector(`section[data-block-idx="${i}"]`);
       if (!sec) continue;
-      const blockTop = sec.offsetTop;
+      const blockTop = relativeTop(sec, railEl);
       const all = annotationsOn(b);
       const tags = all.filter((a) => a.isTag);          // active tags (cleared ones are folded out)
       const threads = all.filter((a) => !a.isTag);
@@ -491,8 +493,7 @@ export function initBlockViewer(rootEl, project, slug) {
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;
     notesViewEl.innerHTML = n.content ? renderMarkdown(n.content) : "<p class=\"empty-notes\">No notes yet.</p>";
-    renderBlocks();
-    await codeblocks.enhance(docEl);
+    await renderBlocks();
     renderComments();
     renderTOC();
     chat.refresh();
@@ -512,7 +513,7 @@ export function initBlockViewer(rootEl, project, slug) {
     API, state, docEl, codeblocks, renderMarkdown,
     diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, renderTOC,
     updateChangeEdge: () => changeEdge.update(),
-    onExit: () => { renderBlocks(); renderComments(); renderTOC(); },
+    onExit: async () => { await renderBlocks(); renderComments(); renderTOC(); },
   });
   const chat = initChat(chatMountEl, API);
 

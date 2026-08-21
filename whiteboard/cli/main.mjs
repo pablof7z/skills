@@ -12,6 +12,7 @@ import { resolveSession, claimSession, listSessions, sessionDir, projectFromCwd,
 import { readTagged, readMd, readJson } from "./blocks.mjs";
 import { parseMarkdownToBlocks } from "./migrate.mjs";
 import { loadDoc, appendChange, DEFAULT_PATH } from "./doc.mjs";
+import { diffRevisions } from "./revision-diff.mjs";
 import { startChange, sendChange, discardChange, statusChange, stageSubcommand, isChangeSub } from "./staging.mjs";
 import { applyOps } from "./apply.mjs";
 import { attachCreate, attachReply, attachResolve, attachReopen, tagSet, tagClear, listAnnotations } from "./annotations.mjs";
@@ -27,6 +28,8 @@ const HELP = `wb — whiteboard change-log document CLI
   wb list [--json]                        list sessions for this project
   wb use <slug>                           claim a session for this agent (stamps manifest.owner)
   wb read [--md|--json] [--path P] [slug]   project the doc (default: tagged <name>…</name>)
+  wb diff <before-rev> <after-rev> [--path P]  unified artifact diff between two revisions;
+                                          a revision is 0, an existing rev, or "current"
   wb change "<title>" [--summary S]       START a staging transaction (one at a time)
   wb change send                          COMMIT staged ops as one change
   wb change status                        peek at staged ops
@@ -158,6 +161,10 @@ async function main() {
       if (flags.json) return out(readJson(doc));
       if (flags.md) return out(readMd(doc, flags.path));
       return out(readTagged(doc, flags.path));
+    }
+    case "diff": {
+      const s = session();
+      return out(diffRevisions(s.dir, { before: rest[0], after: rest[1], path: flags.path }));
     }
     case "change": {
       const s = session();

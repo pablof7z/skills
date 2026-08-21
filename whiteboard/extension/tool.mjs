@@ -1,5 +1,4 @@
-// tool.mjs — the nine whiteboard tools the pi extension registers, exposed via
-// pi's lazy/active tool pattern. Two loaders (`wb_new`, `wb_list`) are always
+// tool.mjs — Whiteboard Pi-tool behavior. Two loaders (`wb_new`, `wb_list`) are always
 // active for a fresh agent; calling either unlocks the doc + mutation tools
 // (`wb_use`, `wb_read`, `wb_note`, `wb_change_*`). Owning agents get the full
 // set at session_start so an attributed-comment wake can reply immediately.
@@ -27,11 +26,13 @@ import {
   tagSet, tagClear, listAnnotations,
 } from "../cli/annotations.mjs";
 import { ATTACH_KINDS, TAG_KINDS } from "../cli/kinds.mjs";
+import { diffRevisions } from "../cli/revision-diff.mjs";
 import { ensureViewer } from "./viewer.mjs";
+import { registerWhiteboardToolDefinitions } from "./tool-registry.mjs";
 
 const BLOCK_OPS = APPLY_BLOCK_OPS;
 // Tools that are inactive for a fresh agent and unlocked by wb_new/wb_list/wb_use.
-const DOC_TOOLS = ["wb_use", "wb_read", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_apply", "wb_attach", "wb_tag"];
+const DOC_TOOLS = ["wb_use", "wb_read", "wb_diff", "wb_note", "wb_change_start", "wb_change_block", "wb_change_finish", "wb_apply", "wb_attach", "wb_tag"];
 
 // Path to the wb CLI — source of truth for session lifecycle (new/list/use).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +73,13 @@ function unlockDocTools() {
   } catch {} // best-effort; missing methods (tests) → no-op
 }
 const UNLOCK_MSG = `\ndoc + mutation tools now available: ${DOC_TOOLS.join(", ")}`;
+
+export function activateInitialTools(pi, hasCurrentSession) {
+  if (!pi?.getActiveTools || !pi?.setActiveTools) return;
+  const active = pi.getActiveTools().filter((name) => !DOC_TOOLS.includes(name));
+  const loaders = [...new Set([...active, "wb_new", "wb_list"])];
+  pi.setActiveTools(hasCurrentSession ? [...new Set([...loaders, ...DOC_TOOLS])] : loaders);
+}
 
 // Map structured tool params to the (positional, flags) shape stageSubcommand
 // expects, so the CLI's validation is reused verbatim.
@@ -156,6 +164,12 @@ async function wb_read(_id, p) {
     return txt(readMdAgent({ blocks: [fb], annotations: (doc.annotations || []).filter((a) => a.block === p.block && (a.path || DEFAULT_PATH) === fp), rev: doc.rev, updatedAt: doc.updatedAt }));
   }
   return txt(readMdAgent(doc, p.path));
+}
+
+async function wb_diff(_id, p) {
+  const r = getSession(); if (r.error) return err(r.error);
+  try { return txt(diffRevisions(r.s.dir, { before: p.before, after: p.after, path: p.path })); }
+  catch (e) { return err(`wb_diff: ${e.message}`); }
 }
 
 async function wb_note(_id, p) {
@@ -256,6 +270,7 @@ const D = {
   wb_list: "List whiteboard sessions for this project. Unlocks the doc + mutation tools. params: { json?: boolean } (default: plain lines). Example: wb_list({}).",
   wb_use: "Switch to (claim) an existing whiteboard session and make it current. Unlocks the doc + mutation tools. params: { slug } (required; \"project/slug\" or just \"slug\"). Example: wb_use({ slug: \"skills/2026-08-feature-x\" }).",
   wb_read: "Project the current session's block document. params: { format?: \"md\"|\"json\" (default md), path?: string, block?: string }. md = block bodies + an action-section (## Open threads — unresolved id·path·block·kind·author + replies; ## Tags — active status tags; ## Meta — rev/updatedAt). With no path and multiple files, emits a `## 📄 <path>` header per file (the file tree). json = full structured doc (blocks + annotations). `path` scopes to one file; `block` (with `path`) to one block. Example: wb_read({}) or wb_read({ path: \"references/pi.md\" }).",
+  wb_diff: "Return a read-only unified diff of artifact content between two revisions. params: { before, after, path? }; each revision is a non-negative number or \"current\". `path` limits a multi-file document. Attachments and tags are not part of this artifact diff. Example: wb_diff({ before: 3, after: \"current\" }).",
   wb_note: "Append a timestamped line to the session's notes.md scratchpad. params: { text (required), by? }. Example: wb_note({ text: \"decided option E\" }).",
   wb_start: "Open a staging transaction (one at a time); stage ops with wb_change_block, then commit/abandon with wb_change_finish. Annotations (questions/warnings/objections/notes + status tags) are NOT staged — use wb_attach/wb_tag directly. params: { title (required), summary?, by? }. Example: wb_change_start({ title: \"refactor auth\" }).",
   wb_block: "Stage an ARTIFACT op on the current session's open transaction: add/edit/move/rename/remove a block. params: { op, path?, block?, name?, names?, text?, diff?, before?, after?, by? }. `path` is the file the block belongs to (default \"default.md\"); block names are unique within a path. op=add: name+text(+before?/after?+path?). op=edit: block+text(OR diff, unified diff applied in-process)+path?. op=move: block+before?/after?+path?. op=rename: block(old)+name(new)+path?. op=remove: block|names[]+path?. Examples: wb_change_block({ op:\"add\", path:\"references/pi.md\", name:\"examples\", text:\"# Examples\\n…\" }); wb_change_block({ op:\"edit\", block:\"goal\", diff:\"@@\\n- old\\n+ new\" }).",
@@ -266,94 +281,18 @@ const D = {
 };
 
 export function registerWhiteboardTools(pi, Type) {
-  if (!Type) return; // bare-node (tests): typebox not installed → tools don't register
+  if (!Type) return; // bare-node tests load behavior without registering tools
   piHandle = pi;
-  const opt = (T) => Type.Optional(T);
-  const lit = (s) => Type.Literal(s);
-  pi.registerTool({
-    name: "wb_new", label: "Whiteboard new", description: D.wb_new,
-    parameters: Type.Object({ slug: Type.String({ description: "session slug; slugified to [a-z0-9-]" }) }),
-    execute: withViewer(wb_new),
-  });
-  pi.registerTool({
-    name: "wb_list", label: "Whiteboard list", description: D.wb_list,
-    parameters: Type.Object({ json: opt(Type.Boolean({ description: "return JSON array instead of plain lines" })) }),
-    execute: withViewer(wb_list),
-  });
-  pi.registerTool({
-    name: "wb_use", label: "Whiteboard use", description: D.wb_use,
-    parameters: Type.Object({ slug: Type.String({ description: '"project/slug" or just "slug" (project from cwd)' }) }),
-    execute: withViewer(wb_use),
-  });
-  pi.registerTool({
-    name: "wb_read", label: "Whiteboard read", description: D.wb_read,
-    parameters: Type.Object({
-      format: opt(Type.Union([lit("md"), lit("json")])),
-      path: opt(Type.String({ description: "scope to one file path (default \"default.md\")" })),
-      block: opt(Type.String({ description: "filter to one block within the path (md only)" })),
-    }),
-    execute: withViewer(wb_read),
-  });
-  pi.registerTool({
-    name: "wb_note", label: "Whiteboard note", description: D.wb_note,
-    parameters: Type.Object({ text: Type.String(), by: opt(Type.String()) }),
-    execute: withViewer(wb_note),
-  });
-  pi.registerTool({
-    name: "wb_change_start", label: "Whiteboard change start", description: D.wb_start,
-    parameters: Type.Object({ title: Type.String(), summary: opt(Type.String()), by: opt(Type.String()) }),
-    execute: withViewer(wb_change_start),
-  });
-  pi.registerTool({
-    name: "wb_change_block", label: "Whiteboard change block", description: D.wb_block,
-    parameters: Type.Object({
-      op: Type.Union(BLOCK_OPS.map(lit)),
-      path: opt(Type.String({ description: "file path the block belongs to (default \"default.md\")" })),
-      block: opt(Type.String()), name: opt(Type.String()), names: opt(Type.Array(Type.String())),
-      text: opt(Type.String()), diff: opt(Type.String()),
-      before: opt(Type.String()), after: opt(Type.String()), by: opt(Type.String()),
-    }),
-    execute: withViewer(wb_change_block),
-  });
-  pi.registerTool({
-    name: "wb_attach", label: "Whiteboard attach", description: D.wb_attach,
-    parameters: Type.Object({
-      op: Type.Union([lit("attach"), lit("reply"), lit("resolve"), lit("reopen"), lit("list")]),
-      block: opt(Type.String()), on: opt(Type.String({ description: "anchor text within the block (required for attach)" })),
-      kind: opt(Type.Union(ATTACH_KINDS.map(lit))), content: opt(Type.String()), id: opt(Type.String()),
-      by: opt(Type.String()), path: opt(Type.String()), open: opt(Type.Boolean()),
-    }),
-    execute: withViewer(wb_attach),
-  });
-  pi.registerTool({
-    name: "wb_tag", label: "Whiteboard tag", description: D.wb_tag,
-    parameters: Type.Object({
-      op: Type.Union([lit("set"), lit("clear"), lit("list")]),
-      block: opt(Type.String()), on: opt(Type.String({ description: "anchor text within the block (required for set/clear)" })),
-      kind: opt(Type.Union(TAG_KINDS.map(lit))), content: opt(Type.String()),
-      by: opt(Type.String()), path: opt(Type.String()),
-    }),
-    execute: withViewer(wb_tag),
-  });
-  pi.registerTool({
-    name: "wb_change_finish", label: "Whiteboard change finish", description: D.wb_finish,
-    parameters: Type.Object({ op: Type.Union([lit("commit"), lit("abandon")]) }),
-    execute: withViewer(wb_change_finish),
-  });
-  const OP = Type.Object({
-    op: Type.Union(BLOCK_OPS.map(lit)),
-    path: opt(Type.String({ description: "file path the block belongs to (default \"default.md\")" })),
-    block: opt(Type.String()), name: opt(Type.String()), names: opt(Type.Array(Type.String())),
-    text: opt(Type.String()), diff: opt(Type.String()),
-    before: opt(Type.String()), after: opt(Type.String()),
-  });
-  pi.registerTool({
-    name: "wb_apply", label: "Whiteboard apply (atomic ops)", description: D.wb_apply,
-    parameters: Type.Object({
-      title: Type.String(),
-      ops: Type.Array(OP, { description: "block ops to apply as one all-or-nothing change" }),
-      summary: opt(Type.String()), by: opt(Type.String()),
-    }),
-    execute: withViewer(wb_apply),
+  return registerWhiteboardToolDefinitions(pi, Type, {
+    descriptions: D,
+    withViewer,
+    blockOps: BLOCK_OPS,
+    attachKinds: ATTACH_KINDS,
+    tagKinds: TAG_KINDS,
+    handlers: {
+      wb_new, wb_list, wb_use, wb_read, wb_diff, wb_note,
+      wb_change_start, wb_change_block, wb_attach, wb_tag,
+      wb_change_finish, wb_apply,
+    },
   });
 }

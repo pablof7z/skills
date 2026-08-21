@@ -5,23 +5,11 @@
 // computed against that block's text, then posted via the passed postComment.
 
 import { COMPOSER_KINDS } from "./annotations.mjs";
+import { anchorOffset, anchorText, relativeTop } from "./comments.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
-
-function cumulativeOffsets(root) {
-  const out = [];
-  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-  let n, cum = 0;
-  while ((n = w.nextNode())) { out.push({ node: n, start: cum, end: (cum += n.nodeValue.length) }); }
-  return out;
-}
-
-function offsetIn(root, node, off) {
-  for (const { node: t, start } of cumulativeOffsets(root)) if (t === node) return start + off;
-  return -1;
-}
 
 // The .block-md element containing a node, or null if the selection is outside
 // any block's rendered markdown (e.g. over the block-name label or TOC).
@@ -40,13 +28,14 @@ function blockPathOf(blockMd) {
   return sec && sec.dataset ? (sec.dataset.blockPath || "default.md") : null;
 }
 
-function selectorsFor(blockMd, range, sel) {
-  const full = blockMd.textContent;
-  let start = offsetIn(blockMd, range.startContainer, range.startOffset);
-  let end = offsetIn(blockMd, range.endContainer, range.endOffset);
-  const exact = range.toString();
-  if (start === -1 && exact) start = full.indexOf(exact);
-  if (end === -1 && start >= 0) end = start + exact.length;
+function selectorsFor(blockMd, range) {
+  const full = anchorText(blockMd);
+  let start = anchorOffset(blockMd, range.startContainer, range.startOffset);
+  let end = anchorOffset(blockMd, range.endContainer, range.endOffset);
+  const selected = range.toString();
+  if (start === -1 && selected) start = full.indexOf(selected);
+  if (end === -1 && start >= 0) end = start + selected.length;
+  const exact = start >= 0 && end >= start ? full.slice(start, end) : selected;
   const prefix = start > 0 ? full.slice(Math.max(0, start - 32), start) : "";
   const suffix = end >= 0 && end < full.length ? full.slice(end, end + 32) : "";
   return { exact, prefix, suffix };
@@ -78,16 +67,15 @@ export function initBlockComposer({ docEl, postComment, railEl }) {
     fab.style.top = `${rect.top + window.scrollY - 34}px`;
     document.body.appendChild(fab);
     fab.addEventListener("mousedown", (ev) => ev.preventDefault());
-    fab.addEventListener("click", () => { openComposer(range, sel, blockMd); removeFab(); });
+    fab.addEventListener("click", () => { openComposer(range, blockMd, rect); removeFab(); });
   }
 
-  function openComposer(range, sel, blockMd) {
+  function openComposer(range, blockMd, selectionRect) {
     closeComposer();
     const block = blockNameOf(blockMd);
     const path = blockPathOf(blockMd);
-    const selector = selectorsFor(blockMd, range, sel);
-    const sec = blockMd.parentElement;
-    const anchorY = sec ? sec.offsetTop : 0;
+    const selector = selectorsFor(blockMd, range);
+    const anchorY = relativeTop(selectionRect, railEl);
     composer = document.createElement("div");
     composer.className = "composer";
     composer.style.position = "absolute";

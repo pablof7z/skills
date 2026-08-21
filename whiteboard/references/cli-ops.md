@@ -25,6 +25,17 @@ wb list [--json]                   # list this project's sessions
 wb read [--md|--json]              # default: tagged <name>…</name>; --md = plain markdown; --json = tree
 ```
 
+## Compare revisions
+
+```bash
+wb diff <before-rev> <after-rev> [--path P]
+```
+
+Returns a read-only unified diff of artifact document content. Revisions are
+`0`, an existing revision number, or `current`; `--path` narrows a multi-file
+document to one path. Attachments and tags have their own lifecycle, so they
+are not part of this document-content comparison.
+
 ## Mutate the artifact — one staging transaction
 
 Open a change, stage ops, commit. One staging transaction at a time per session; a staging left open >5 min auto-sends when you next start a new one. Artifact ops only — annotation ops moved to `wb attach`/`wb tag` (running them under `wb change` prints a redirect).

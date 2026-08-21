@@ -1,7 +1,7 @@
 // apply.mjs — apply an array of block ops as a single ALL-OR-NOTHING change,
-// with no staging transaction. Shared by the pi extension (`wb_apply` tool), the
-// `wb apply` CLI subcommand, and the MCP server's `wb_apply` tool so the
-// op-build / validate / append logic lives in one place.
+// with no staging transaction. Shared by the Pi extension (`wb_apply` tool)
+// and the `wb apply` CLI subcommand so their op-build / validate / append logic
+// stays in one place.
 //
 // Every op is built (edit diffs resolve against the WIP doc so a later edit can
 // patch a block an earlier op in the same array added/edited), then validated in

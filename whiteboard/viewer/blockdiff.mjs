@@ -37,16 +37,21 @@ export function buildPickerOptions(revisions, currentRev, viewedRev) {
   const cur = revBy.get(currentRev);
   const ch = (n) => `${n} change${n === 1 ? "" : "s"}`;
   const meta = (r) => r.blocks ? `${ch(r.blocks)} to document · ${ago(r.at)}` : r.changes ? `${ch(r.changes)} to annotations · ${ago(r.at)}` : `no document change · ${ago(r.at)}`;
-  const push = (value, title, meta, group, by = null, jump = false) => {
+  const push = (value, title, meta, group, by = null, jump = false, labels = []) => {
     const key = String(value); if (seen.has(key)) return; seen.add(key);
-    out.push({ value, title, meta, group, by, jump });
+    out.push({ value, title, meta, group, by, jump, labels });
   };
-  push("current", "Current", cur ? meta(cur) : "now", "shortcut");
-  if (viewedRev && viewedRev !== currentRev) {
-    const v = revBy.get(viewedRev);
-    push(viewedRev, "Last viewed (Done)", v ? meta(v) : "—", "shortcut");
+  // No separate shortcut rows: the revision that IS current carries the
+  // "current" sentinel value (so the after-picker keeps tracking the live doc)
+  // and a "Current" label; the rev last viewed (when != current) gets a
+  // "Last viewed" label. Falls back to a synthetic "current" row if the live
+  // rev isn't in the list yet.
+  for (const r of revisions || []) {
+    const isCurrent = r.rev === currentRev;
+    const labels = isCurrent ? ["Current"] : (viewedRev && viewedRev === r.rev) ? ["Last viewed"] : [];
+    push(isCurrent ? "current" : r.rev, r.title || `rev ${r.rev}`, meta(r), "rev", r.by || null, !!(r.via && r.via.itermSessionId), labels);
   }
-  for (const r of revisions || []) push(r.rev, r.title || `rev ${r.rev}`, meta(r), "rev", r.by || null, !!(r.via && r.via.itermSessionId));
+  if (!seen.has("current")) push("current", cur?.title || "Current", cur ? meta(cur) : "now", "rev", cur?.by || null, !!(cur?.via && cur.via.itermSessionId), ["Current"]);
   return out;
 }
 
@@ -60,7 +65,8 @@ function mountRevPicker(container, options, value, onJump) {
   const find = (v) => cur.find((o) => String(o.value) === String(v)) || cur[0];
   const renderBtn = () => {
     const o = find(container.value);
-    container.innerHTML = `<button type="button" class="rev-picker-btn"><span class="rp-title">${esc(o?.title || "—")}</span><span class="rp-caret">▾</span></button>`;
+    const lbls = (o?.labels || []).map((l) => `<span class="rp-label${l === "Last viewed" ? " rp-label-lv" : ""}">${esc(l)}</span>`).join("");
+    container.innerHTML = `<button type="button" class="rev-picker-btn"><span class="rp-title">${esc(o?.title || "—")}</span>${lbls}<span class="rp-caret">▾</span></button>`;
     container.querySelector(".rev-picker-btn").addEventListener("click", (e) => { e.stopPropagation(); panel ? close() : open(); });
   };
   function open() {
@@ -71,7 +77,8 @@ function mountRevPicker(container, options, value, onJump) {
       last = o.group;
       const by = o.by ? `<span class="rp-by" title="authored by ${esc(o.by)}">${esc(o.by)}</span>` : "";
       const jump = o.jump ? `<button type="button" class="rp-jump" title="Open the terminal that made this change">↗</button>` : "";
-      rows.push(`<div class="rp-opt ${String(o.value) === String(container.value) ? "sel" : ""}" data-value="${esc(o.value)}"><span class="rp-title">${esc(o.title)}</span><span class="rp-meta-row"><span class="rp-meta">${esc(o.meta)}</span>${by}${jump}</span></div>`);
+      const lbls = (o.labels || []).map((l) => `<span class="rp-label${l === "Last viewed" ? " rp-label-lv" : ""}">${esc(l)}</span>`).join("");
+      rows.push(`<div class="rp-opt ${String(o.value) === String(container.value) ? "sel" : ""}" data-value="${esc(o.value)}"><span class="rp-title-row"><span class="rp-title">${esc(o.title)}</span>${lbls}</span><span class="rp-meta-row"><span class="rp-meta">${esc(o.meta)}</span>${by}${jump}</span></div>`);
     }
     panel.innerHTML = rows.join("");
     container.appendChild(panel);

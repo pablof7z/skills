@@ -105,6 +105,7 @@ export function initCodeBlocks() {
       pre.classList.add("fs-target");
       const btn = document.createElement("button");
       btn.type = "button"; btn.className = "fs-expand"; btn.setAttribute("aria-label", "Open fullscreen"); btn.textContent = "⤢";
+      btn.dataset.wbAnchorIgnore = "";
       btn.addEventListener("click", (e) => { e.stopPropagation(); openCodeFullscreen(pre); });
       pre.appendChild(btn);
     }

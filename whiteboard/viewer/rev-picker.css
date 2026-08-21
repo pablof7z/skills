@@ -35,3 +35,10 @@
 .rp-jump { flex: 0 0 auto; border: none; background: transparent; color: var(--ink); opacity: 0.65; cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 4px; }
 .rp-jump:hover { color: var(--agent); opacity: 1; background: rgba(63, 185, 80, 0.10); }
 .rp-sep { height: 1px; margin: 4px 2px; background: var(--line); }
+
+/* revision labels: a "Current" / "Last viewed" badge on the matching rev row,
+   instead of separate pinned shortcut rows. */
+.rp-opt .rp-title-row { display: flex; align-items: center; gap: 6px; }
+.rp-label { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--agent); color: #fff; white-space: nowrap; letter-spacing: 0.02em; }
+.rp-label.rp-label-lv { background: var(--line); color: var(--ink); opacity: 0.85; font-weight: 600; }
+.rev-picker-btn .rp-label { font-size: 9px; padding: 0 5px; }

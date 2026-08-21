@@ -24,6 +24,7 @@ const Type = {
   Union: (arr, o) => ({ kind: "union", of: arr, ...(o || {}) }),
   Literal: (s) => ({ kind: "literal", val: s }),
   String: (d) => ({ kind: "string", ...(d || {}) }),
+  Number: (d) => ({ kind: "number", ...(d || {}) }),
   Array: (t, d) => ({ kind: "array", of: t, ...(d || {}) }),
   Boolean: (d) => ({ kind: "boolean", ...(d || {}) }),
 };

@@ -1,0 +1,65 @@
+{
+  "nextId": 7,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "CLI: add wb listen; delete wait-for-comment.mjs",
+      "description": "Add `wb listen` to cli/main.mjs: block-doc only, emits one JSONL event for a new actionable comment/chat and exits 0 (for background-monitor onDone wake). Reuse scan.mjs actionable helpers. Delete viewer/wait-for-comment.mjs. Issue #405.",
+      "status": "completed",
+      "createdAt": 1787122705580,
+      "updatedAt": 1787122834704,
+      "revision": 1,
+      "completedAt": 1787122834704
+    },
+    {
+      "id": "2",
+      "subject": "Extension: one whiteboard tool + attributed wake; drop legacy",
+      "description": "Rewrite extension/index.ts: swap pi.sendUserMessage→pi.sendMessage({customType:\"whiteboard\",display:true},{triggerTurn:true,deliverAs:\"followUp\"}) + registerMessageRenderer; register ONE whiteboard tool wrapping read/staging/note (in extension/tool.mjs); delete all legacy wake/scan branches. Trim scan.mjs to block-only. Update README + tests. Issue #405.",
+      "status": "completed",
+      "createdAt": 1787122705659,
+      "updatedAt": 1787122981522,
+      "revision": 1,
+      "completedAt": 1787122981522
+    },
+    {
+      "id": "3",
+      "subject": "CLI doc.mjs: remove migrateLegacy + legacy baseline/ops",
+      "description": "Remove migrateLegacy(), the legacy `comments` baseline synthesis in fold(), and legacy op names (comment/attention/flag) from fold()+validateOps(). Block-doc attach op is the only path. Issue #405.",
+      "status": "completed",
+      "createdAt": 1787122705806,
+      "updatedAt": 1787122981545,
+      "revision": 1,
+      "completedAt": 1787122981545
+    },
+    {
+      "id": "4",
+      "subject": "Viewer: delete legacy deliverable.md/annotation paths",
+      "description": "Remove all `blockDoc ? ... : legacy` dual paths in server.mjs, viewer.mjs, comments.mjs, lib/session.mjs, history.mjs, nav.mjs. Delete DELIVERABLE/readDeliverable/readComments/computeUnread/versions snapshotting. Block-doc UI only. Update viewer/README.md. Issue #405.",
+      "status": "completed",
+      "createdAt": 1787122705975,
+      "updatedAt": 1787123196608,
+      "revision": 1,
+      "completedAt": 1787123196608
+    },
+    {
+      "id": "5",
+      "subject": "Docs: delete annotations.md; rewrite SKILL.md + note-schema to block-only",
+      "description": "Delete references/annotations.md. Rewrite references/note-schema-and-examples.md to remove deliverable.md. Rewrite SKILL.md: portable watch = wb listen + background monitor (no wait-for-comment.mjs); remove all deliverable.md/legacy/annotation mentions. Issue #405.",
+      "status": "completed",
+      "createdAt": 1787122706106,
+      "updatedAt": 1787123275131,
+      "revision": 1,
+      "completedAt": 1787123275131
+    },
+    {
+      "id": "6",
+      "subject": "Verify + open PR for #405",
+      "description": "Run extension tests (test-blocks.ts), `pi -p ok` load check, wb smoke (new/read/change/listen). Commit on branch whiteboard/pi-native-tools-drop-legacy, open PR closing #405.",
+      "status": "completed",
+      "createdAt": 1787122706197,
+      "updatedAt": 1787123382424,
+      "revision": 1,
+      "completedAt": 1787123382424
+    }
+  ]
+}

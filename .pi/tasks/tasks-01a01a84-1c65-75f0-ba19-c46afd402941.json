@@ -1,0 +1,75 @@
+{
+  "nextId": 8,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Fold model: kinded annotations, drop motivation",
+      "description": "In cli/doc.mjs: add kind vocab (ATTACH_KINDS question/warning/objection/note; TAG_KINDS unverified/superseded/needs-attention/decided). Remove motivation field from attachOp/makeAtt/fold. Unify fold projection to a single `annotations` list (kind, block, path, selector, body, author, at, state, replies) and drop block.flags. Legacy mapping at projection: kind:\"comment\"→note; motivation:\"highlighting\"→kind needs-attention (drop motivation); null selector→synthesize H1 anchor. Update flagOp to general idempotent tag-set on (kind,block,selector). Issue #414.",
+      "status": "completed",
+      "createdAt": 1787153727198,
+      "updatedAt": 1787153814553,
+      "revision": 2,
+      "completedAt": 1787153814553
+    },
+    {
+      "id": "2",
+      "subject": "CLI: wb attach / wb tag direct commands; drop staging annotation ops",
+      "description": "New cli/annotations.mjs: direct (non-staged) commands. `wb attach <block> --on quote --kind question|warning|objection|note --content T [--by]` (append single-op change); `wb attach reply <id> --content T`; `wb attach resolve <id>`; `wb attach reopen <id>`; `wb attach list`. `wb tag <block> --on quote --kind <tagkind> [--content T]` (idempotent set); `wb tag <block> --on quote --kind X --clear`; `wb tag list`. --on mandatory (selectorFor). Wire into cli/main.mjs as new top-level commands. In staging.mjs: drop comment/flag/attention/reply/resolve/unresolve/amend/detach from SUB and stageSubcommand — `wb change` keeps only edit/add/move/rename/remove. Issue #414.",
+      "status": "completed",
+      "createdAt": 1787153735143,
+      "updatedAt": 1787153915114,
+      "revision": 2,
+      "completedAt": 1787153915114
+    },
+    {
+      "id": "3",
+      "subject": "scan.mjs: actionable items from unified annotations",
+      "description": "Update cli/scan.mjs actionableItems to read from the unified doc.annotations. A user-authored annotation (kind in ATTACH_KINDS, i.e. question/warning/objection/note) that is unresolved with no agent reply is actionable. Tags are never actionable (not replyable). Keep chat actionable as-is. Issue #414.",
+      "status": "completed",
+      "createdAt": 1787153737901,
+      "updatedAt": 1787153941586,
+      "revision": 2,
+      "completedAt": 1787153941586
+    },
+    {
+      "id": "4",
+      "subject": "Viewer + readMdAgent: render annotations by kind",
+      "description": "Viewer rendering by kind. New viewer/annotations.mjs: kind→color/icon/label palette + buildAnnotationCard (colored margin card) + buildTagChip. Update viewer/blockview.mjs: remove motivation/attention/edge-indicator special casing; render annotations (threads as colored margin cards colored by kind; tags as colored chips at their anchor span / block head); TOC dot derived from annotations not b.flags. Update viewer/lib/blockdoc.mjs: postComment→postAttach with kind (default question for human composer); resolve unchanged. Update viewer/blockcomposer.mjs to send a kind (default question). Add CSS for kind colors in styles.css. Update cli/blocks.mjs readMdAgent to use doc.annotations (open threads = unresolved attach-kind annotations; tags = active tag-kind annotations) and drop c.motivation. Issue #414.",
+      "status": "completed",
+      "createdAt": 1787153741988,
+      "updatedAt": 1787154530409,
+      "revision": 2,
+      "completedAt": 1787154530409
+    },
+    {
+      "id": "5",
+      "subject": "Extension: wb_attach / wb_tag tools",
+      "description": "Update extension/tool.mjs: remove flag/attention from BLOCK_OPS and comment/reply/resolve/unresolve/amend/detach from THREAD_OPS (drop wb_change_thread). Add wb_attach tool (op: attach/reply/resolve/reopen/list) and wb_tag tool (op: set/clear/list) calling the new direct commands via cli/annotations.mjs or in-process functions. Update tool descriptions. Update DOC_TOOLS/unlock list. Issue #414.",
+      "status": "completed",
+      "createdAt": 1787153745538,
+      "updatedAt": 1787154944685,
+      "revision": 2,
+      "completedAt": 1787154944685
+    },
+    {
+      "id": "6",
+      "subject": "Docs: SKILL.md, cli-ops.md, pi.md",
+      "description": "Update docs: SKILL.md (blocks=artifact only; attachments(tags) = meta with --on; kinds + colors; remove the open-questions-on-blocks rule and the attention mention), references/cli-ops.md (new wb attach/wb tag command surface; drop comment/flag/attention staging ops), references/pi.md (wb_attach/wb_tag tools). Issue #414.",
+      "status": "completed",
+      "createdAt": 1787153748692,
+      "updatedAt": 1787155029586,
+      "revision": 2,
+      "completedAt": 1787155029586
+    },
+    {
+      "id": "7",
+      "subject": "Tests + CLI smoke + PR",
+      "description": "Tests: new cli/annotations.test.mjs (kind validation, --on required, tag idempotency + clear, attach create/reply/resolve/reopen lifecycle, list) and cli/fold.test.mjs (new-kind projection, legacy mapping comment→note / motivation→needs-attention / null-selector→H1 anchor, rename reanchor, remove hide). CLI smoke: temp session, wb attach/tag/read, assert. Run existing tests (anchoring, worddiff, toc-rail) — must still pass. Then open PR for issue #414.",
+      "status": "completed",
+      "createdAt": 1787153751260,
+      "updatedAt": 1787155383652,
+      "revision": 2,
+      "completedAt": 1787155383652
+    }
+  ]
+}

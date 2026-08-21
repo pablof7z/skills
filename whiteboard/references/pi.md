@@ -11,7 +11,7 @@ Brief how-to for using whiteboard inside a pi harness with the **pi-whiteboard e
 
 ## The whiteboard tools (preferred over the CLI)
 
-Ten tools, exposed via pi's **lazy/active** pattern. A fresh agent sees only the two **loaders**; calling either unlocks the rest (pi surfaces the newly-available tool names on the tool result, so they appear on the next request). Owning agents — a session owned by this pi session — get the full set at `session_start`, so an attributed wake can be answered immediately without listing first.
+Twelve tools, exposed via pi's **lazy/active** pattern. A fresh agent sees only the two **loaders**; calling either unlocks the rest (pi surfaces the newly-available tool names on the tool result, so they appear on the next request). Owning agents — a session owned by this pi session — get the full set at `session_start`, so an attributed wake can be answered immediately without listing first.
 
 - **Loaders (always active for a fresh agent):**
   - `wb_new { slug }` — create a session; unlocks the doc + mutation tools.
@@ -19,6 +19,7 @@ Ten tools, exposed via pi's **lazy/active** pattern. A fresh agent sees only the
 - **Unlocked by `wb_new`/`wb_list`/`wb_use`:**
   - `wb_use { slug }` — switch to (claim) an existing session.
   - `wb_read { format?: "md"|"json", path?, block? }` — project the doc. `md` (default) = block bodies + an action-section (`## Open threads` — unresolved `id · path · block · kind · author` + replies; `## Tags` — active status tags; `## Meta` — rev/updatedAt). With no `path` and multiple files, emits a `## 📄 <path>` header per file (the file tree). `json` = full structured doc (blocks + annotations + attachments + rev/hash). `path` scopes to one file; `block` (with `path`) to one block.
+  - `wb_diff { before, after, path? }` — return the unified artifact diff between two revisions. Each revision is `0`, an existing number, or `"current"`; `path` limits a multi-file document. This is read-only and excludes attachments/tags.
   - `wb_note { text, by? }` — append a timestamped line to `notes.md`.
   - **Artifact mutation — the `wb_change_` family (start → ops → finish).** `wb_change` is for **block edits only** (the artifact). Annotations are NOT staged.
     - `wb_change_start { title, summary?, by? }` — open a staging transaction (one at a time).

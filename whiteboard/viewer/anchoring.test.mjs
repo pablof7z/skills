@@ -4,7 +4,14 @@
 // spaces) or raw markdown. The matcher must find the quote without mutating
 // either side, and report a real [start,end] span in the unmodified haystack.
 // Run: node whiteboard/viewer/anchoring.test.mjs
-import { quoteIndex, quoteMatch } from "./comments.mjs";
+import {
+  anchorOffset,
+  anchorText,
+  normalizeAnchorSelector,
+  quoteIndex,
+  quoteMatch,
+  relativeTop,
+} from "./comments.mjs";
 
 let pass = 0, fail = 0;
 function eq(actual, expected, msg) {
@@ -46,6 +53,40 @@ eq(quoteIndex("live demo doc for", "live  demo doc for", "", ""), 0, "exact mult
 
 // 10) empty exact never matches.
 eq(quoteIndex("anything", "", "", ""), -1, "empty exact returns -1");
+
+// 11) a stale viewer-control glyph in one side of the stored context must not
+// make an otherwise well-disambiguated quote stale. This is the fullscreen
+// button regression that made comments after code blocks appear Unanchored.
+const repeated = "code output\nDiscovery\nGroups I've saved\nDiscovery is useful";
+const recovered = quoteMatch(repeated, "Discovery", "code output\n⤢\n", "\nGroups I've saved");
+eq(recovered && recovered.start, 12, "matching suffix recovers an anchor with stale UI text in its prefix");
+
+// 12) the canonical anchor-text projection excludes viewer controls while
+// preserving offsets in visible document text.
+const visibleA = { nodeValue: "before ", parentElement: { closest: () => null } };
+const control = { nodeValue: "⤢", parentElement: { closest: () => ({}) } };
+const visibleB = { nodeValue: "Discovery", parentElement: { closest: () => null } };
+const nodes = [visibleA, control, visibleB];
+const fakeRoot = {
+  querySelectorAll: () => [{ textContent: "⤢" }],
+  ownerDocument: {
+    defaultView: { NodeFilter: { SHOW_TEXT: 4 } },
+    createTreeWalker: () => {
+      let i = 0;
+      return { nextNode: () => nodes[i++] || null };
+    },
+  },
+};
+eq(anchorText(fakeRoot), "before Discovery", "viewer-only control text is absent from anchor text");
+eq(anchorOffset(fakeRoot, visibleB, 4), 11, "anchor offsets use the same control-free projection");
+eq(
+  normalizeAnchorSelector(fakeRoot, { exact: "Discovery", prefix: "before ⤢ ", suffix: " after" }).prefix,
+  "before  ",
+  "legacy selector context drops text from controls now marked anchor-ignored",
+);
+
+// 13) rail coordinates are geometry-relative, independent of offsetParent.
+eq(relativeTop({ top: 442 }, { top: 100 }), 342, "selection top is measured relative to the comment rail");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

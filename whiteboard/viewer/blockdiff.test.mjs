@@ -21,6 +21,11 @@ ok(!broad.includes('class="wb-mod"'), "before-after preference disables inline r
 
 const options = buildPickerOptions([{ rev: 2, changes: 1, blocks: 0, at: new Date().toISOString() }], 2, 0);
 ok(options[0].meta.includes("to annotations"), "picker identifies annotation-only revisions");
+ok(options[0].value === "current" && options[0].labels.includes("Current"), "current rev row carries the current sentinel value + Current label");
+ok(!options.some((o) => o.group === "shortcut"), "no separate shortcut group rows");
+const lv = buildPickerOptions([{ rev: 2, changes: 1, blocks: 0, at: new Date().toISOString() }, { rev: 1, title: "older", changes: 1, blocks: 0, at: new Date().toISOString() }], 2, 1);
+ok(lv.find((o) => Number(o.value) === 1)?.labels.includes("Last viewed"), "viewed (non-current) rev is labeled Last viewed");
+ok(lv.find((o) => o.value === "current")?.labels.includes("Current") && !lv.find((o) => o.value === "current").labels.includes("Last viewed"), "current row labeled Current only");
 
 // Full-file diff: unchanged blocks are rendered as context, not skipped.
 const multiBefore = { blocks: [{ name: "goal", md: "# Goal" }, { name: "notes", md: "static text" }], annotations: [] };
