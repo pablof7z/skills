@@ -31,6 +31,7 @@
 
 .diff-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
@@ -48,6 +49,9 @@
   color: var(--ink);
   border-radius: 4px;
 }
+.diff-detail { margin-left: 4px; }
+.diff-detail span { font-size: 12px; opacity: 0.72; white-space: nowrap; }
+.diff-detail select { min-width: 126px; }
 .diff-arrow { color: var(--ink); opacity: 0.6; }
 .diff-markread {
   margin-left: auto;
@@ -88,3 +92,9 @@
   color: var(--muted);
 }
 .diff-empty strong { color: var(--ink); }
+
+@media (max-width: 820px) {
+  .diff-bar { padding-left: 12px !important; gap: 6px; }
+  .diff-bar .rev-picker { flex: 1 1 180px; min-width: 160px; }
+  .diff-detail { margin-left: 0; }
+}

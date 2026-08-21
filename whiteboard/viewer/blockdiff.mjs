@@ -6,6 +6,7 @@
 // (a focused line/word diff for each changed block).
 
 import { renderWordDiff } from "./worddiff.mjs";
+import { mountDiffDetail } from "./diffprefs.mjs";
 
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -103,7 +104,7 @@ const bkey = (b) => `${b.path || DP}\u0000${b.name}`;
 // (path, name). Edited blocks retain their unchanged context and mark only the
 // removed and inserted words or lines. Added blocks: green "+ name"; removed
 // blocks: red "− name".
-export function renderBlockDiff({ beforeDoc, afterDoc, renderMarkdown }) {
+export function renderBlockDiff({ beforeDoc, afterDoc, renderMarkdown, detail = "adaptive" }) {
   const before = new Map((beforeDoc?.blocks || []).map((b) => [bkey(b), b]));
   const after = afterDoc?.blocks || [];
   const afterKeys = new Set(after.map(bkey));
@@ -112,7 +113,7 @@ export function renderBlockDiff({ beforeDoc, afterDoc, renderMarkdown }) {
     const old = before.get(bkey(b));
     if (old) {
       if ((old.md || "") === (b.md || "")) continue; // unchanged — skip
-      parts.push(diffBlock(b.name, old.md || "", b.md || "", renderMarkdown, blockFlags(b)));
+      parts.push(diffBlock(b.name, old.md || "", b.md || "", renderMarkdown, blockFlags(b), detail));
     } else {
       parts.push(section(`+ ${b.name}`, `<div class="block-md wb-ins">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-added"));
     }
@@ -136,8 +137,8 @@ function emptyDiff(beforeDoc, afterDoc) {
 
 // An edited block: one continuous rendering with unchanged context and compact
 // inline or whole-line markers for the actual edit.
-function diffBlock(name, oldMd, newMd, renderMarkdown, flags) {
-  return `<section class="block wb-changed"><div class="block-head"><span class="block-name">${esc(name)}</span>${flags}</div><div class="block-md wb-diff">${renderWordDiff(oldMd, newMd, renderMarkdown)}</div></section>`;
+function diffBlock(name, oldMd, newMd, renderMarkdown, flags, detail) {
+  return `<section class="block wb-changed"><div class="block-head"><span class="block-name">${esc(name)}</span>${flags}</div><div class="block-md wb-diff">${renderWordDiff(oldMd, newMd, renderMarkdown, { detail })}</div></section>`;
 }
 
 function blockFlags(b) {
@@ -169,6 +170,9 @@ export function initDiffMode({
   diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit, renderTOC,
 }) {
   let beforePicker = null, afterPicker = null;
+  const detailControl = mountDiffDetail(diffBarEl, () => {
+    if (state.diffMode) render();
+  });
   async function jumpToRev(rev) {
     try { await fetch(`${API}/jump`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rev: Number(rev) }) }); } catch {}
   }
@@ -202,7 +206,10 @@ export function initDiffMode({
     // TOC can mark which (other) files have changes in this before→after range.
     const fp = state.activePath;
     const filt = (doc) => ({ ...doc, blocks: (doc.blocks || []).filter((b) => (b.path || "default.md") === fp) });
-    docEl.innerHTML = renderBlockDiff({ beforeDoc: filt(beforeDoc), afterDoc: filt(afterDoc), renderMarkdown });
+    docEl.innerHTML = renderBlockDiff({
+      beforeDoc: filt(beforeDoc), afterDoc: filt(afterDoc), renderMarkdown,
+      detail: detailControl.value,
+    });
     await codeblocks.enhance(docEl);
     renderTOC?.();
   }

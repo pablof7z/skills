@@ -35,11 +35,22 @@ function lineLcsOps(A, B) {
   return ops;
 }
 
-// Split a line into tokens, keeping whitespace runs as their own tokens so the
-// word diff preserves spacing. Each token is { text, ws }.
+const WORD_SEGMENTER = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+  ? new Intl.Segmenter(undefined, { granularity: "word" })
+  : null;
+
+// Split plain prose into locale-aware words, punctuation and grapheme-like
+// units, keeping whitespace runs so rendering preserves the source spacing.
+// Intl.Segmenter makes CJK and emoji edits useful; the Unicode-regex fallback
+// still keeps punctuation independent from neighboring words.
 function tokenize(line) {
+  if (WORD_SEGMENTER) {
+    return [...WORD_SEGMENTER.segment(line)].map(({ segment }) => ({
+      text: segment, ws: /^\s+$/u.test(segment),
+    }));
+  }
   const out = [];
-  const re = /(\s+|\S+)/g;
+  const re = /(\s+|[\p{L}\p{N}\p{M}_]+|[^\s])/gu;
   let m;
   while ((m = re.exec(line)) !== null) out.push({ text: m[0], ws: /^\s+$/.test(m[0]) });
   return out;
@@ -66,34 +77,45 @@ function wordLcsOps(a, b) {
 // Decide whether a paired line is still recognizably the same text. Small,
 // localized edits read well inline; rewritten or fragmented lines are clearer as
 // one deleted line followed by one inserted line.
-function isInlineEdit(ops) {
+function isInlineEdit(ops, detail) {
+  if (detail === "before-after") return false;
   const words = ops.filter((op) => !op.tok.ws);
-  const equal = words.filter((op) => op.t === "eq").length;
-  const deleted = words.filter((op) => op.t === "del").length;
-  const inserted = words.filter((op) => op.t === "ins").length;
+  const chars = (type) => words
+    .filter((op) => op.t === type)
+    .reduce((sum, op) => sum + [...op.tok.text].length, 0);
+  const equal = chars("eq"), deleted = chars("del"), inserted = chars("ins");
+  if (detail === "more-detail") return equal > 0;
   const changed = deleted + inserted;
-  const similarity = (2 * equal) / Math.max(1, (equal + deleted) + (equal + inserted));
-  let runs = 0;
-  let lastChange = null;
+  const similarity = (2 * equal) / Math.max(1, (2 * equal) + changed);
+  let islands = 0, changing = false;
   for (const op of words) {
-    if (op.t === "eq") { lastChange = null; continue; }
-    if (op.t !== lastChange) { runs++; lastChange = op.t; }
+    if (op.t === "eq") { changing = false; continue; }
+    if (!changing) { islands++; changing = true; }
   }
-  const localizedReplacement = equal > 0 && changed <= 2 && runs <= 2;
-  const limitedRewrite = similarity >= 0.6 &&
-    changed <= Math.max(4, Math.ceil((equal * 2 + changed) * 0.35)) && runs <= 4;
+  const localizedReplacement = islands === 1 && equal >= 4 &&
+    (changed <= 24 || similarity >= 0.45 || equal >= 18);
+  const limitedRewrite = similarity >= 0.6 && islands <= 4;
   return localizedReplacement || limitedRewrite;
+}
+
+// Injecting HTML diff tags into Markdown delimiters can corrupt emphasis,
+// links, code and block structure. Until inline changes are applied to rendered
+// text nodes, these units deliberately use safe before/after rendering.
+function hasMarkdownSyntax(line) {
+  const block = /^\s{0,3}(?:#{1,6}\s|>\s?|[-+*]\s|\d+[.)]\s|```|~~~|\|)/m;
+  const inline = /(?:[*_~`]{1,3}|!\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\([^)]*\)|<[^>]+>)/;
+  return block.test(line) || inline.test(line);
 }
 
 // Render one paired (deleted, inserted) line at the most useful granularity.
 // Whitespace tokens between two tokens of the same inline run stay inside the
 // span; whitespace at a run boundary remains plain.
-function renderPair(delLine, insLine, renderMd) {
+function renderPair(delLine, insLine, renderMd, detail) {
   if (!delLine.trim() && !insLine.trim()) return "";
   if (!delLine.trim()) return `<div class="wb-ins">${renderMd(insLine)}</div>`;
   if (!insLine.trim()) return `<div class="wb-del">${renderMd(delLine)}</div>`;
   const ops = wordLcsOps(tokenize(delLine), tokenize(insLine));
-  if (!isInlineEdit(ops)) {
+  if (hasMarkdownSyntax(delLine) || hasMarkdownSyntax(insLine) || !isInlineEdit(ops, detail)) {
     return `<div class="wb-del">${renderMd(delLine)}</div><div class="wb-ins">${renderMd(insLine)}</div>`;
   }
   let src = "";
@@ -129,20 +151,24 @@ function renderPair(delLine, insLine, renderMd) {
 // Emit a modification region (a deleted run directly followed by an inserted
 // run, or vice versa): pair the lines word-by-word, then handle any leftover
 // purely-inserted or purely-deleted lines.
-function emitMod(dels, inss, renderMd, out) {
+function emitMod(dels, inss, renderMd, out, detail) {
   const pairs = Math.min(dels.length, inss.length);
   for (let k = 0; k < pairs; k++)
-    out.push(renderPair(dels[k], inss[k], renderMd));
+    out.push(renderPair(dels[k], inss[k], renderMd, detail));
   for (let k = pairs; k < dels.length; k++)
     if (dels[k].trim()) out.push(`<div class="wb-del">${renderMd(dels[k])}</div>`);
   for (let k = pairs; k < inss.length; k++)
     if (inss[k].trim()) out.push(`<div class="wb-ins">${renderMd(inss[k])}</div>`);
 }
 
-export function renderWordDiff(oldContent, newContent, renderMd) {
+export function renderWordDiff(oldContent, newContent, renderMd, { detail = "adaptive" } = {}) {
+  const oldText = String(oldContent ?? ""), newText = String(newContent ?? "");
+  const sameProse = !hasMarkdownSyntax(oldText) && !hasMarkdownSyntax(newText) &&
+    oldText.replace(/\s+/gu, " ").trim() === newText.replace(/\s+/gu, " ").trim();
+  if (sameProse) return renderMd(newText);
   const ops = lineLcsOps(
-    String(oldContent ?? "").split("\n"),
-    String(newContent ?? "").split("\n"),
+    oldText.split("\n"),
+    newText.split("\n"),
   );
   const out = [];
   let i = 0;
@@ -159,7 +185,7 @@ export function renderWordDiff(oldContent, newContent, renderMd) {
       while (i < ops.length && ops[i].t === "del") dels.push(ops[i].line), i++;
       const inss = [];
       while (i < ops.length && ops[i].t === "ins") inss.push(ops[i].line), i++;
-      if (inss.length) emitMod(dels, inss, renderMd, out);
+      if (inss.length) emitMod(dels, inss, renderMd, out, detail);
       else for (const d of dels) out.push(`<div class="wb-del">${renderMd(d)}</div>`);
       continue;
     }
@@ -169,7 +195,7 @@ export function renderWordDiff(oldContent, newContent, renderMd) {
     while (i < ops.length && ops[i].t === "ins") inss.push(ops[i].line), i++;
     const dels = [];
     while (i < ops.length && ops[i].t === "del") dels.push(ops[i].line), i++;
-    if (dels.length) emitMod(dels, inss, renderMd, out);
+    if (dels.length) emitMod(dels, inss, renderMd, out, detail);
     else for (const ins of inss) out.push(`<div class="wb-ins">${renderMd(ins)}</div>`);
   }
   return out.join("");

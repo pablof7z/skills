@@ -13,6 +13,12 @@ ok(annotationOnly.includes("1 annotation changed; document blocks did not."), "a
 const edited = renderBlockDiff({ beforeDoc: before, afterDoc: { ...after, blocks: [{ name: "goal", md: "# Revised" }] }, renderMarkdown: (md) => md });
 ok(!edited.includes("No document blocks changed"), "block changes retain the normal diff");
 
+const plainBefore = { blocks: [{ name: "goal", md: "Release Monday." }], annotations: [] };
+const plainAfter = { blocks: [{ name: "goal", md: "Release Tuesday." }], annotations: [] };
+const broad = renderBlockDiff({ beforeDoc: plainBefore, afterDoc: plainAfter, renderMarkdown: (md) => md, detail: "before-after" });
+ok(broad.includes('class="wb-del"') && broad.includes('class="wb-ins"'), "detail preference reaches edited blocks");
+ok(!broad.includes('class="wb-mod"'), "before-after preference disables inline rendering");
+
 const options = buildPickerOptions([{ rev: 2, changes: 1, blocks: 0, at: new Date().toISOString() }], 2, 0);
 ok(options[0].meta.includes("to annotations"), "picker identifies annotation-only revisions");
 
