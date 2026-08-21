@@ -542,20 +542,6 @@ export function initBlockViewer(rootEl, project, slug) {
   });
   const chat = initChat(chatMountEl, API);
 
-  function connectSSE() {
-    const es = new EventSource(`${API}/events`);
-    es.addEventListener("open", () => { connEl.textContent = "live"; connEl.classList.remove("bad"); });
-    es.addEventListener("error", () => { connEl.textContent = "reconnecting…"; connEl.classList.add("bad"); });
-    // Coalesce the noisy burst of refresh events (fs.watch fires several per
-    // write) into one re-render, and never let a render error kill the stream.
-    let t = null;
-    es.addEventListener("refresh", () => {
-      if (t) clearTimeout(t);
-      t = setTimeout(() => { t = null; runRefresh({ auto: true }).catch((e) => console.error("wb refresh", e)); }, 80);
-    });
-    return es;
-  }
-
   function setView(v) {
     state.view = v;
     viewTabsEl.querySelectorAll(".view-tab").forEach((t) => t.classList.toggle("active", t.dataset.view === v));
@@ -590,20 +576,23 @@ export function initBlockViewer(rootEl, project, slug) {
   const narrowMq = window.matchMedia("(max-width: 920px)");
   applyNarrow(narrowMq.matches);
   narrowMq.addEventListener("change", (e) => applyNarrow(e.matches));
-  let es = null, destroyed = false;
-  runRefresh().catch((e) => console.error("wb init", e)).finally(() => {
-    if (destroyed) return; // navigated away before SSE connected — nothing to keep
-    es = connectSSE();
+  // Coalesce the noisy burst of refresh events (fs.watch fires several per write) into one re-render.
+  let refreshTimer = null;
+  const offRefresh = onRefresh(() => {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => { refreshTimer = null; runRefresh({ auto: true }).catch((e) => console.error("wb refresh", e)); }, 80);
   });
+  const offStatus = onStatus((s) => {
+    connEl.textContent = s === "live" ? "live" : "reconnecting…";
+    connEl.classList.toggle("bad", s !== "live");
+  });
+  runRefresh().catch((e) => console.error("wb init", e));
 
-  // Auto-refresh the relative time labels every 30s without a full re-render
-  // (a full re-render would wipe in-progress reply textareas).
+  // Auto-refresh relative time labels every 30s without a full re-render (which would wipe in-progress replies).
   const timer = setInterval(() => { (state.narrow ? drawerScrollEl : railEl).querySelectorAll("[data-at]").forEach((el) => { el.textContent = ago(el.dataset.at); }); }, 30000);
 
-  // Tear down our SSE + timer when the router re-routes (back/forward / SPA
-  // navigation) so we don't leak an EventSource per navigation and exhaust the
-  // browser's per-origin connection pool (which makes the page hang on reload).
-  return { destroy() { destroyed = true; try { es && es.close(); } catch {} clearInterval(timer); } };
+  // Tear down our stream registrations + timers on re-route; main.mjs owns the shared EventSource.
+  return { destroy() { offRefresh(); offStatus(); if (refreshTimer) clearTimeout(refreshTimer); clearInterval(timer); } };
 }
 
 function cssEscape(s) {
