@@ -81,14 +81,14 @@ includes(broadSwap, '<div class="wb-del">', "Before & after keeps the old unit s
 includes(broadSwap, '<div class="wb-ins">', "Before & after keeps the new unit separate");
 excludes(broadSwap, '<div class="wb-mod">', "Before & after disables inline spans");
 
-// 9) raw Markdown delimiters are never split by inline tags, even in the most
-// detailed mode.
+// 9) complete Markdown inline nodes may be replaced, but their delimiters are
+// never split by diff tags.
 const emphasis = renderWordDiff(
   "This is **very important**.", "This is **extremely important**.",
   passthrough, { detail: "more-detail" },
 );
-includes(emphasis, '<div class="wb-del">This is **very important**.</div>', "Markdown old unit stays valid");
-includes(emphasis, '<div class="wb-ins">This is **extremely important**.</div>', "Markdown new unit stays valid");
+includes(emphasis, '<del>**very important**</del>', "complete old emphasis node is replaced");
+includes(emphasis, '<ins>**extremely important**</ins>', "complete new emphasis node is replaced");
 excludes(emphasis, "**<del>", "diff tags do not enter emphasis delimiters");
 
 // 10) render-neutral wrapping does not manufacture a text change.
@@ -144,7 +144,7 @@ excludes(fenced, "<p>let second = 2;</p>", "inserted code line never escapes its
 const nestedList = renderWordDiff("- - old nested item", "- * new nested item", passthrough, { detail: "more-detail" });
 excludes(nestedList, '<div class="wb-mod">', "nested list markers never receive inline diff tags");
 const punctuatedEmphasis = renderWordDiff("Use —*carefully* here.", "Use —*sparingly* here.", passthrough, { detail: "more-detail" });
-excludes(punctuatedEmphasis, '<div class="wb-mod">', "emphasis after punctuation remains structurally safe");
+includes(punctuatedEmphasis, '<del>*carefully*</del><ins>*sparingly*</ins>', "emphasis after punctuation changes as atomic nodes");
 
 // 16) fence recognition respects containers and indentation.
 const deceptiveFenceOld = "```rust\n    ```\nlet first = 1;\n```";
@@ -202,6 +202,40 @@ const flatList = renderWordDiff(flatListOld, flatListNew, marked.parse);
 count(flatList, "<ul>", 1, "flat list is rendered once rather than split into fragments");
 count(flatList, "<li>", 3, "all flat-list items remain in the same list");
 includes(flatList, "<del>forget_group</del><ins>remove_group</ins>", "changed list item receives inline detail");
+
+// 23) inline Markdown elsewhere in a paragraph must not promote a tiny change
+// to a whole-paragraph replacement. This is the real Forks regression.
+const forksOld = "**User's view.** You join “photos”, but two relays host it — `wss://relay.a` and `wss://relay.b` — set up independently.";
+const forksNew = "You join “photos”, but two relays host it — `wss://relay.a` and `wss://relay.b` — set up independently.";
+const forks = renderWordDiff(forksOld, forksNew, marked.parse);
+count(forks, '<div class="wb-mod">', 1, "localized Forks edit stays in one paragraph");
+includes(forks, "<del><strong>User&#39;s view.</strong></del> You join", "removed bold label alone is marked");
+count(forks, '<code>wss://relay.', 2, "unchanged code spans retain their formatting");
+excludes(forks, '<div class="wb-del">', "localized Forks edit has no whole old paragraph");
+excludes(forks, '<div class="wb-ins">', "localized Forks edit has no whole new paragraph");
+
+// 24) character references are complete source atoms, not word fragments.
+const entities = renderWordDiff("A &amp; B remains.", "A &copy; B remains.", marked.parse, { detail: "more-detail" });
+includes(entities, "<del>&amp;</del><ins>&copy;</ins>", "named entities are replaced atomically");
+excludes(entities, "<del>amp</del>", "diff tags never enter an entity reference");
+const numericEntities = renderWordDiff("A &#123; remains.", "A &#x7B; remains.", passthrough, { detail: "more-detail" });
+includes(numericEntities, "<del>&#123;</del><ins>&#x7B;</ins>", "decimal and hexadecimal references stay atomic");
+const uppercaseEntities = renderWordDiff("A &#X7B; remains.", "A &#X7C; remains.", passthrough, { detail: "more-detail" });
+includes(uppercaseEntities, "<del>&#X7B;</del><ins>&#X7C;</ins>", "uppercase hexadecimal references stay atomic");
+
+// 25) a rewritten sentence inside a stable paragraph uses sentence-level
+// before/after in Adaptive, while More detail still offers the raw word view.
+const storyOld = "You've been in photos for a long time. Then Alice and Bob fall out and each spins up their own relay — `wss://bob.relay.com` and `wss://alice.relay.com`. NIP-29 now sees two independent groups.";
+const storyNew = "You've been in photos for a long time. Then Alice and Bob have a fight, so Alice forks off into a new relay — Bob keeps `wss://bob.relay.com`, Alice opens `wss://alice.relay.com`. NIP-29 now sees two independent groups.";
+const calmStory = renderWordDiff(storyOld, storyNew, marked.parse);
+count(calmStory, '<div class="wb-del">', 1, "rewritten sentence has one calm before block");
+count(calmStory, '<div class="wb-ins">', 1, "rewritten sentence has one calm after block");
+excludes(calmStory, "<del>", "Adaptive avoids word-level confetti inside a rewrite");
+includes(calmStory, "You&#39;ve been in photos for a long time", "unchanged leading sentence remains context");
+includes(calmStory, "NIP-29 now sees two independent groups", "unchanged trailing sentence remains context");
+const detailedStory = renderWordDiff(storyOld, storyNew, marked.parse, { detail: "more-detail" });
+includes(detailedStory, '<div class="wb-mod">', "More detail retains explicit word-level rewrite view");
+includes(detailedStory, "<del>", "More detail exposes inner deletions on demand");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

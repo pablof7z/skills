@@ -15,6 +15,8 @@
 // tags we inject into the markdown source pass through marked and survive
 // sanitization.
 
+import { hasMarkdownSyntax, mergeInlineSource } from "./inlinediff.mjs";
+
 function lineLcsOps(A, B) {
   const n = A.length, m = B.length;
   const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
@@ -57,133 +59,19 @@ function markdownUnits(text, lexer) {
   return units;
 }
 
-const WORD_SEGMENTER = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
-  ? new Intl.Segmenter(undefined, { granularity: "word" })
+const SENTENCE_SEGMENTER = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+  ? new Intl.Segmenter(undefined, { granularity: "sentence" })
   : null;
 
-// Split plain prose into locale-aware words, punctuation and grapheme-like
-// units, keeping whitespace runs so rendering preserves the source spacing.
-// Intl.Segmenter makes CJK and emoji edits useful; the Unicode-regex fallback
-// still keeps punctuation independent from neighboring words.
-function tokenize(line) {
-  if (WORD_SEGMENTER) {
-    return [...WORD_SEGMENTER.segment(line)].map(({ segment }) => ({
-      text: segment, ws: /^\s+$/u.test(segment),
-    }));
-  }
-  const out = [];
-  const re = /(\s+|[\p{L}\p{N}\p{M}_]+|[^\s])/gu;
-  let m;
-  while ((m = re.exec(line)) !== null) out.push({ text: m[0], ws: /^\s+$/.test(m[0]) });
-  return out;
-}
-
-function wordLcsOps(a, b) {
-  const n = a.length, m = b.length;
-  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--)
-      dp[i][j] = a[i].text === b[j].text ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const ops = [];
-  let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (a[i].text === b[j].text) { ops.push({ t: "eq", tok: a[i] }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: "del", tok: a[i] }); i++; }
-    else { ops.push({ t: "ins", tok: b[j] }); j++; }
-  }
-  while (i < n) { ops.push({ t: "del", tok: a[i] }); i++; }
-  while (j < m) { ops.push({ t: "ins", tok: b[j] }); j++; }
-  return ops;
-}
-
-// Decide whether a paired line is still recognizably the same text. Small,
-// localized edits read well inline; rewritten or fragmented lines are clearer as
-// one deleted line followed by one inserted line.
-function isInlineEdit(ops, detail) {
-  if (detail === "before-after") return false;
-  const words = ops.filter((op) => !op.tok.ws);
-  const chars = (type) => words
-    .filter((op) => op.t === type)
-    .reduce((sum, op) => sum + [...op.tok.text].length, 0);
-  const equal = chars("eq"), deleted = chars("del"), inserted = chars("ins");
-  if (detail === "more-detail") return equal > 0;
-  const changed = deleted + inserted;
-  const similarity = (2 * equal) / Math.max(1, (2 * equal) + changed);
-  let islands = 0, changing = false;
-  for (const op of words) {
-    if (op.t === "eq") { changing = false; continue; }
-    if (!changing) { islands++; changing = true; }
-  }
-  const localizedReplacement = islands === 1 && equal >= 4 &&
-    (changed <= 24 || similarity >= 0.45 || equal >= 18);
-  const limitedRewrite = similarity >= 0.6 && islands <= 4;
-  return localizedReplacement || limitedRewrite;
-}
-
-// An unchanged structural prefix is a safe container for an inline prose diff.
-// Delimiters inside the body still require before/after rendering until changes
-// are applied to parsed Markdown tokens or rendered text nodes.
-function splitStructuralPrefix(line) {
-  const m = String(line).match(/^(\s{0,3}(?:#{1,6}\s+|> ?|(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?))(.*)$/u);
-  return m ? { prefix: m[1], body: m[2] } : { prefix: "", body: String(line) };
-}
-
-function hasUnsafeMarkdown(text) {
-  const block = /^(?: {4}|\t|\s{0,3}(?:```|~~~|\|))/m;
-  const inline = /(?:[\\*~`]|!?\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])?|<[^>]+>|(?:^|[^\p{L}\p{N}])_{1,3}(?=\S)|(?<=\S)_{1,3}(?![\p{L}\p{N}]))/u;
-  const nestedStructure = String(text).split("\n").some((line) => !!splitStructuralPrefix(line).prefix);
-  return block.test(text) || inline.test(text) || nestedStructure;
-}
-
-function hasMarkdownSyntax(text) {
-  return String(text).split("\n").some((line) => {
-    const part = splitStructuralPrefix(line);
-    return !!part.prefix || hasUnsafeMarkdown(part.body);
-  });
-}
-
-// Merge one safe prose unit into Markdown source containing inline diff tags.
-// Whitespace between tokens of the same run stays inside that run.
-function mergeInlineSource(delLine, insLine, detail) {
-  const oldPart = splitStructuralPrefix(delLine);
-  const newPart = splitStructuralPrefix(insLine);
-  const safeContainer = oldPart.prefix === newPart.prefix &&
-    !hasUnsafeMarkdown(oldPart.body) && !hasUnsafeMarkdown(newPart.body);
-  const ops = wordLcsOps(tokenize(oldPart.body), tokenize(newPart.body));
-  if (!safeContainer || !isInlineEdit(ops, detail)) return null;
-  let src = "";
-  let run = null; // { tag: "del"|"ins", text }
-  const flush = () => { if (run) { src += `<${run.tag}>${run.text}</${run.tag}>`; run = null; } };
-  // nextNonWs: the op after index i that is not whitespace, or null
-  const nextNonWs = (i) => {
-    for (let k = i + 1; k < ops.length; k++) if (!ops[k].tok.ws) return ops[k];
-    return null;
-  };
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
-    const tok = op.tok;
-    if (tok.ws) {
-      if (run) {
-        const nxt = nextNonWs(i);
-        if (nxt && (nxt.t === "del" || nxt.t === "ins") && (nxt.t === "del" ? "del" : "ins") === run.tag) run.text += tok.text;
-        else { flush(); src += tok.text; }
-      } else src += tok.text;
-      continue;
-    }
-    if (op.t === "eq") { flush(); src += tok.text; }
-    else {
-      const tag = op.t === "del" ? "del" : "ins";
-      if (run && run.tag === tag) run.text += tok.text;
-      else { flush(); run = { tag, text: tok.text }; }
-    }
-  }
-  flush();
-  return oldPart.prefix + src;
+function sentenceUnits(text) {
+  if (!SENTENCE_SEGMENTER) return [];
+  return [...SENTENCE_SEGMENTER.segment(String(text).trim())]
+    .map(({ segment }) => ({ raw: segment, key: segment.trim() }));
 }
 
 // A flat list remains one Markdown list while individual item bodies receive
 // inline detail. Complex/nested items deliberately fall back as one unit.
-function mergeFlatListSource(oldText, newText, detail) {
+function mergeFlatListSource(oldText, newText, detail, inlineLexer) {
   const oldLines = oldText.trimEnd().split("\n"), newLines = newText.trimEnd().split("\n");
   const item = /^\s{0,3}(?:[-+*]|\d+[.)])\s+/;
   if (oldLines.length < 2 || oldLines.length !== newLines.length ||
@@ -192,7 +80,7 @@ function mergeFlatListSource(oldText, newText, detail) {
   for (let i = 0; i < oldLines.length; i++) {
     if (oldLines[i] === newLines[i]) merged.push(newLines[i]);
     else {
-      const source = mergeInlineSource(oldLines[i], newLines[i], detail);
+      const source = mergeInlineSource(oldLines[i], newLines[i], detail, inlineLexer);
       if (source === null) return null;
       merged.push(source);
     }
@@ -201,14 +89,17 @@ function mergeFlatListSource(oldText, newText, detail) {
 }
 
 // Render one paired deleted/inserted Markdown unit at useful granularity.
-function renderPair(delLine, insLine, renderMd, detail) {
+function renderPair(delLine, insLine, renderMd, detail, inlineLexer) {
   if (!delLine.trim() && !insLine.trim()) return "";
   if (!delLine.trim()) return `<div class="wb-ins">${renderMd(insLine)}</div>`;
   if (!insLine.trim()) return `<div class="wb-del">${renderMd(delLine)}</div>`;
-  const source = mergeFlatListSource(delLine, insLine, detail) ??
-    mergeInlineSource(delLine, insLine, detail);
-  if (source === null)
+  const source = mergeFlatListSource(delLine, insLine, detail, inlineLexer) ??
+    mergeInlineSource(delLine, insLine, detail, inlineLexer);
+  if (source === null) {
+    const sentences = renderSentenceDiff(delLine, insLine, renderMd, detail, inlineLexer);
+    if (sentences !== null) return sentences;
     return `<div class="wb-del">${renderMd(delLine)}</div><div class="wb-ins">${renderMd(insLine)}</div>`;
+  }
   return `<div class="wb-mod">${renderMd(source)}</div>`;
 }
 
@@ -217,13 +108,59 @@ function renderChangedLines(lines, cls, renderMd) {
   return `<div class="${cls}">${renderMd(lines.join(""))}</div>`;
 }
 
+function renderSentencePair(oldSentence, newSentence, renderMd, detail, inlineLexer) {
+  const source = mergeInlineSource(oldSentence, newSentence, detail, inlineLexer);
+  if (source !== null) return `<div class="wb-mod">${renderMd(source)}</div>`;
+  return `<div class="wb-del">${renderMd(oldSentence)}</div>` +
+    `<div class="wb-ins">${renderMd(newSentence)}</div>`;
+}
+
+// When a paragraph contains one rewritten sentence, keep exact surrounding
+// sentences as context and stack only the rewrite. This prevents word-level
+// "confetti" without promoting the entire paragraph to before/after blocks.
+function renderSentenceDiff(oldText, newText, renderMd, detail, inlineLexer) {
+  const block = /^(?: {4}|\t|\s{0,3}(?:#{1,6}\s|> ?|[-+*]\s|\d+[.)]\s|```|~~~|\|))/m;
+  if (block.test(oldText) || block.test(newText)) return null;
+  const oldUnits = sentenceUnits(oldText), newUnits = sentenceUnits(newText);
+  if (Math.max(oldUnits.length, newUnits.length) < 2) return null;
+  const ops = lineLcsOps(oldUnits, newUnits);
+  if (!ops.some((op) => op.t === "eq")) return null;
+  const out = [];
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i].t === "eq") {
+      const same = [];
+      while (i < ops.length && ops[i].t === "eq") same.push(ops[i++].line);
+      out.push(renderMd(same.join("")));
+      continue;
+    }
+    const first = ops[i].t, firstLines = [];
+    while (i < ops.length && ops[i].t === first) firstLines.push(ops[i++].line);
+    const secondLines = [];
+    if (i < ops.length && ops[i].t !== "eq" && ops[i].t !== first) {
+      const second = ops[i].t;
+      while (i < ops.length && ops[i].t === second) secondLines.push(ops[i++].line);
+    }
+    const dels = first === "del" ? firstLines : secondLines;
+    const inss = first === "ins" ? firstLines : secondLines;
+    const pairs = Math.min(dels.length, inss.length);
+    for (let k = 0; k < pairs; k++)
+      out.push(renderSentencePair(dels[k], inss[k], renderMd, detail, inlineLexer));
+    const removed = renderChangedLines(dels.slice(pairs), "wb-del", renderMd);
+    const added = renderChangedLines(inss.slice(pairs), "wb-ins", renderMd);
+    if (removed) out.push(removed);
+    if (added) out.push(added);
+  }
+  return out.join("");
+}
+
 // Emit a modification region (a deleted run directly followed by an inserted
 // run, or vice versa): pair the lines word-by-word, then handle any leftover
 // purely-inserted or purely-deleted lines.
-function emitMod(dels, inss, renderMd, out, detail) {
+function emitMod(dels, inss, renderMd, out, detail, inlineLexer) {
   const pairs = Math.min(dels.length, inss.length);
   for (let k = 0; k < pairs; k++)
-    out.push(renderPair(dels[k], inss[k], renderMd, detail));
+    out.push(renderPair(dels[k], inss[k], renderMd, detail, inlineLexer));
   const removed = renderChangedLines(dels.slice(pairs), "wb-del", renderMd);
   const added = renderChangedLines(inss.slice(pairs), "wb-ins", renderMd);
   if (removed) out.push(removed);
@@ -233,6 +170,7 @@ function emitMod(dels, inss, renderMd, out, detail) {
 export function renderWordDiff(oldContent, newContent, renderMd, {
   detail = "adaptive",
   markdownLexer = globalThis.marked?.lexer?.bind(globalThis.marked),
+  inlineLexer = globalThis.marked?.Lexer?.lexInline?.bind(globalThis.marked.Lexer),
 } = {}) {
   const oldText = String(oldContent ?? ""), newText = String(newContent ?? "");
   const sameProse = !hasMarkdownSyntax(oldText) && !hasMarkdownSyntax(newText) &&
@@ -257,7 +195,7 @@ export function renderWordDiff(oldContent, newContent, renderMd, {
       while (i < ops.length && ops[i].t === "del") dels.push(ops[i].line), i++;
       const inss = [];
       while (i < ops.length && ops[i].t === "ins") inss.push(ops[i].line), i++;
-      if (inss.length) emitMod(dels, inss, renderMd, out, detail);
+      if (inss.length) emitMod(dels, inss, renderMd, out, detail, inlineLexer);
       else {
         const removed = renderChangedLines(dels, "wb-del", renderMd);
         if (removed) out.push(removed);
@@ -270,7 +208,7 @@ export function renderWordDiff(oldContent, newContent, renderMd, {
     while (i < ops.length && ops[i].t === "ins") inss.push(ops[i].line), i++;
     const dels = [];
     while (i < ops.length && ops[i].t === "del") dels.push(ops[i].line), i++;
-    if (dels.length) emitMod(dels, inss, renderMd, out, detail);
+    if (dels.length) emitMod(dels, inss, renderMd, out, detail, inlineLexer);
     else {
       const added = renderChangedLines(inss, "wb-ins", renderMd);
       if (added) out.push(added);
