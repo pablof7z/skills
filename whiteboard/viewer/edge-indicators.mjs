@@ -2,7 +2,7 @@
 // element is scrolled out of the doc viewport, a small pill count appears at
 // the top/bottom edge; click jumps to the nearest one. Shared by blockview.mjs
 // for two indicators: agent annotations the user hasn't addressed, and (in
-// diff mode) changed blocks scrolled out of view.
+// revision review) changed blocks scrolled out of view.
 
 // Pure partition: given bounding rects (vs the viewport height vh), split
 // into above/below groups, each sorted nearest-to-viewport first. A rect

@@ -119,8 +119,9 @@
 .comments-drawer .thread .row .send { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 11px; cursor: pointer; }
 .comments-drawer .thread .row .send:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* flow the attention badges too */
-.comments-drawer .wb-att-badge {
+/* flow annotation markers too */
+.comments-drawer .wb-att-badge,
+.comments-drawer .wb-tag {
   position: static;
   left: auto; right: auto; top: auto;
   margin: 0 0 10px;

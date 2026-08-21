@@ -43,7 +43,7 @@
 .doc-wrap.narrow-comments ~ * .await-edge,
 html.narrow-comments .await-edge { display: none; }
 
-/* the diff-mode change-edge pill: mirrors .await-edge's shape/positioning but
+/* the revision-review change-edge pill mirrors .await-edge's shape/positioning but
    in a diff-appropriate green so it reads as "change" rather than "needs
    attention" */
 .change-edge {

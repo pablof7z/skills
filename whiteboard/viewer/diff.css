@@ -16,7 +16,7 @@
   padding: 0 1px;
 }
 
-/* diff-mode chrome for the block viewer topbar + diff bar. */
+/* revision-review chrome for the block viewer topbar + diff bar. */
 .diff-toggle {
   font: inherit;
   line-height: 1;
@@ -64,17 +64,15 @@
   cursor: pointer;
 }
 .diff-markread:hover { border-color: var(--ink); }
+.diff-error-inline { color: var(--danger); font-size: 12px; }
 
-/* hide the comment rail while diff mode is on */
-.doc-wrap.diff-on .margin-rail { display: none; }
-
-/* added/removed block headers in diff mode */
+/* added/removed block headers in revision review */
 .block.wb-added .block-head .diff-block-sign { color: var(--agent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-right: 4px; }
 .block.wb-removed .block-head .diff-block-sign { color: var(--danger); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-right: 4px; }
 .block.wb-added .block-head .block-name { color: var(--agent); }
 .block.wb-removed .block-head .block-name { color: var(--danger); }
 
-/* diff-mode error notice */
+/* revision-review error notice */
 .diff-error {
   padding: 16px;
   color: var(--danger);

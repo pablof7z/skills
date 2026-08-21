@@ -28,19 +28,33 @@ export function initChat(container, API) {
   ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
 
   function render() {
+    const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 48;
     if (messages.length === 0) {
-      listEl.innerHTML = `<div class="empty">Chat with the agent. Your message is queued for the agent; replies appear here.</div>`;
+      let empty = listEl.querySelector(":scope > .empty");
+      if (!empty) { empty = document.createElement("div"); empty.className = "empty"; }
+      empty.textContent = "Chat with the agent. Your message is queued for the agent; replies appear here.";
+      listEl.replaceChildren(empty);
       return;
     }
-    listEl.innerHTML = "";
-    for (const m of messages) {
-      const div = document.createElement("div");
+    listEl.querySelector(":scope > .empty")?.remove();
+    const existing = new Map([...listEl.querySelectorAll(":scope > .chat-msg[data-message-id]")]
+      .map((node) => [node.dataset.messageId, node]));
+    const desired = [];
+    for (const [index, m] of messages.entries()) {
+      const key = String(m.id || `${m.created}\u0000${m.role}\u0000${index}`);
+      const div = existing.get(key) || document.createElement("div");
       div.className = `chat-msg ${m.role}`;
-      const when = (m.created || "").replace("T", " ").slice(0, 16);
-      div.innerHTML = `<span class="who ${m.role}">${esc(m.role)}</span><span class="when">${esc(when)}</span><div class="body">${renderBody(m.text)}</div>`;
-      listEl.appendChild(div);
+      div.dataset.messageId = key;
+      const signature = JSON.stringify([m.role, m.created, m.text]);
+      if (div.dataset.signature !== signature) {
+        const when = (m.created || "").replace("T", " ").slice(0, 16);
+        div.innerHTML = `<span class="who ${m.role}">${esc(m.role)}</span><span class="when">${esc(when)}</span><div class="body">${renderBody(m.text)}</div>`;
+        div.dataset.signature = signature;
+      }
+      desired.push(div); listEl.appendChild(div);
     }
-    listEl.scrollTop = listEl.scrollHeight;
+    for (const node of existing.values()) if (!desired.includes(node)) node.remove();
+    if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
   }
 
   async function refresh() {

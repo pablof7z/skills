@@ -67,7 +67,7 @@ export function writeChatMessage(sessionDir, msg) {
   fs.writeFileSync(path.join(dir, `${ts}-${rand}.json`), JSON.stringify(msg, null, 2) + "\n", "utf8");
 }
 
-// viewedVersion: the rev the human last actively reviewed (the diff "Done"
+// viewedVersion: the rev the human last actively reviewed (the inline revision "Done"
 // button posts the current rev). Used by the block viewer to show what changed
 // since the last review.
 export function readViewed(sessionDir) {

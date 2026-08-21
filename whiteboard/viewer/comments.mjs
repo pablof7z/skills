@@ -49,7 +49,9 @@ export function quoteIndex(hay, exact, prefix, suffix) {
   return r ? r.start : -1;
 }
 
-const ANCHOR_IGNORE = "[data-wb-anchor-ignore]";
+// Revision deletions are review metadata, not part of the canonical current
+// text. Keep ordinary Markdown <del> content anchorable outside a diff.
+const ANCHOR_IGNORE = "[data-wb-anchor-ignore], .wb-diff del, .wb-diff .wb-del, .wb-removed";
 
 // Text used by quote selectors is document content, not controls injected by
 // the viewer. Both selector creation and replay use this same projection.

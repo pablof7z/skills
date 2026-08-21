@@ -1,6 +1,6 @@
 # Whiteboard Viewer
 
-A localhost web viewer for all whiteboard sessions under a root directory (default `~/whiteboard`). It serves an **explorer** (projects → sessions with unread badges) and a per-session view that renders the **block document** (the fold over `changes/<rev>.json`) and lets the human add comments anchored to a block (optionally to an in-block span). The viewer watches the filesystem and re-renders live.
+A localhost web viewer for all whiteboard sessions under a root directory (default `~/whiteboard`). It serves an **explorer** (projects → sessions with unread badges) and a per-session view that renders the **block document** (the fold over `changes/<rev>.json`) and lets the human add comments anchored to a block (optionally to an in-block span). The viewer watches the filesystem and reconciles changed blocks, threads, and messages into the current page without replacing the working view.
 
 The companion agent detects new comments/chat via `wb listen` (run as a background monitor; see `../cli/main.mjs`) and replies through `wb change`, which appends a change file the viewer picks up live.
 
@@ -13,7 +13,10 @@ viewer/
 ├── lib/blockdoc.mjs      # block-document API: fold read, comment/reply/resolve append-change
 ├── main.mjs              # client router (explorer vs session view)
 ├── explorer.mjs          # explorer client: sessions list with unread badges
-├── blockview.mjs         # session client: block render, margin comments, diff, TOC, chat, SSE
+├── blockview.mjs         # session client: live document surface, TOC, chat, SSE
+├── liveblocks.mjs        # keyed block reconciliation + inline revision rendering
+├── annotationview.mjs    # keyed thread/tag reconciliation that preserves drafts and focus
+├── continuity.mjs        # semantic viewport and selection preservation
 ├── comments.mjs          # shared quote-matching helpers (quoteMatch / quoteIndex)
 ├── index.html            # shell
 ├── styles.css
@@ -48,7 +51,7 @@ node server.mjs [<root-dir>] [--port 4318] [--open]
 | `/api/session/<p>/<s>/comments` | GET | `{ comments: […] }` |
 | `/api/session/<p>/<s>/comments` | POST | create a comment (`{block,text,selector,creator}`) or reply (`{replyTo,text,creator}`) — appends a change |
 | `/api/session/<p>/<s>/resolved` | GET / POST | read/toggle the resolved map |
-| `/api/session/<p>/<s>/viewed` | GET / POST | read/mark the reviewed rev (diff "Done" button) |
+| `/api/session/<p>/<s>/viewed` | GET / POST | read/mark the reviewed rev (inline revision "Done" button) |
 | `/api/session/<p>/<s>/chat` | GET / POST | file-queue chat (human posts; agent writes reply files) |
 | `/api/session/<p>/<s>/manifest` | PATCH | update manifest fields (e.g. status) |
 | `/api/session/<p>/<s>/events` | GET | per-session SSE (`refresh` events) |

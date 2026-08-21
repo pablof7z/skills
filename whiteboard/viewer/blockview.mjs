@@ -10,82 +10,29 @@ import { onRefresh, onStatus } from "./main.mjs";
 import { initCodeBlocks } from "./codeblocks.mjs";
 import { initTocRail } from "./toc-rail.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
-import { initDiffMode, ago } from "./blockdiff.mjs";
+import { initRevisionReview, reviewBaseline } from "./blockdiff.mjs";
 import { initEdgeIndicator } from "./edge-indicators.mjs";
 import { initChat } from "./chat.mjs";
-import { anchorText, anchorTextNodes, normalizeAnchorSelector, quoteMatch, relativeTop } from "./comments.mjs";
 import { styleOf } from "./annotations.mjs";
+import { createAnnotationView } from "./annotationview.mjs";
+import { createBlockReconciler } from "./liveblocks.mjs";
+import { highlightCurrent, highlightDeletion, highlightsMatchSelector, selectorSignature, unwrapHighlight } from "./highlights.mjs";
+import { blockKey, captureSelection, captureViewport, DEFAULT_PATH, restoreSelection, restoreViewport } from "./continuity.mjs";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
-
-const DEFAULT_PATH = "default.md";
-const blockKey = (b) => `${b.path || DEFAULT_PATH}\u0000${b.name}`;
 
 const SANITIZE_OPTS = {
   USE_PROFILES: { html: true },
   ADD_ATTR: ["data-footnote-ref", "data-footnote-backref", "data-footnotes", "aria-describedby", "aria-label"],
 };
 
-// Colored chip for a kind, used in thread cards and tag chips.
-function kindBadge(kind) { const s = styleOf(kind); return `<span class="kind-badge ${s.cls}" title="${esc(s.label)}">${s.icon}</span>`; }
-
 function renderMarkdown(md) {
   const raw = window.marked ? window.marked.parse(md || "") : esc(md || "");
   return window.DOMPurify ? window.DOMPurify.sanitize(raw, SANITIZE_OPTS) : raw;
 }
 function renderBody(text) { return renderMarkdown(text); }
-
-// Wrap the first occurrence of selector.exact (whitespace-flexibly, verified
-// by prefix/suffix) in a <mark> within a block's rendered DOM. Returns true if
-// highlighted. Reuses the quote matcher from comments.mjs so a quote that
-// crosses a rendered block/line boundary (textContent has a newline where the
-// stored exact has a space) still anchors, and the highlight span uses the real
-// match end instead of exact.length (which can cut the mark short when the
-// rendered text has more whitespace chars than the stored exact).
-function highlightIn(blockMd, selector, id, kindCls) {
-  if (!selector || !selector.exact) return false;
-  const canonical = normalizeAnchorSelector(blockMd, selector);
-  const r = quoteMatch(anchorText(blockMd), canonical.exact, canonical.prefix, canonical.suffix);
-  if (!r) return false;
-  return wrapRange(blockMd, r.start, r.end, id, kindCls);
-}
-
-// Walk text nodes, split, and wrap [start,end) in a <mark class="wb-anno <kindCls>" data-anno-id=id>.
-function wrapRange(root, start, end, id, kindCls) {
-  const map = [];
-  let n, cum = 0;
-  for (n of anchorTextNodes(root)) map.push({ node: n, start: cum, end: (cum += n.nodeValue.length) });
-  const si = map.findIndex((m) => start >= m.start && start < m.end);
-  const ei = map.findIndex((m) => end > m.start && end <= m.end);
-  if (si === -1 || ei === -1) return false;
-  const sn = map[si].node, relS = start - map[si].start;
-  if (relS > 0) sn.splitText(relS);
-  const startTail = relS > 0 ? sn.nextSibling : sn;
-  const map2 = [];
-  let nn, c = 0;
-  for (nn of anchorTextNodes(root)) map2.push({ node: nn, start: c, end: (c += nn.nodeValue.length) });
-  const ee = map2.find((m) => end > m.start && end <= m.end);
-  if (!ee) return false;
-  const relE = end - ee.start;
-  if (relE > 0 && relE < ee.node.nodeValue.length) ee.node.splitText(relE);
-  const wrapped2 = [];
-  let tn, on = false;
-  for (tn of anchorTextNodes(root)) {
-    if (tn === startTail) on = true;
-    if (on) { wrapped2.push(tn); if (tn === ee.node) break; }
-  }
-  for (const t of wrapped2) {
-    if (!t.parentNode) continue;
-    const mark = document.createElement("mark");
-    mark.className = "wb-anno" + (kindCls ? " " + kindCls : "");
-    if (id) mark.dataset.annoId = id;
-    t.parentNode.insertBefore(mark, t);
-    mark.appendChild(t);
-  }
-  return true;
-}
 
 export function initBlockViewer(rootEl, project, slug) {
   const API = `/api/session/${encodeURIComponent(project)}/${encodeURIComponent(slug)}`;
@@ -143,10 +90,11 @@ export function initBlockViewer(rootEl, project, slug) {
   const drawerScrollEl = document.getElementById("drawer-scroll");
   const docWrapEl = document.getElementById("doc-wrap");
   const codeblocks = initCodeBlocks();
-  const state = { doc: null, name: "", notes: "", view: "document", activePath: null, resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
-    diffMode: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, diffBeforeDoc: null, diffAfterDoc: null, narrow: false };
+  const state = { doc: null, displayDoc: null, displayBlocks: [], name: "", notes: "", view: "document", activePath: null, resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
+    reviewingChanges: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, suppressedBlockRev: 0, diffBeforeDoc: null, diffAfterDoc: null, narrow: false };
+  const blockView = createBlockReconciler({ docEl, codeblocks, renderMarkdown });
   // Off-screen indicators: agent annotations the user hasn't addressed, and
-  // (in diff mode) changed blocks — shown at the top/bottom doc-viewport edge
+  // changed blocks under review — shown at the top/bottom doc-viewport edge
   // when scrolled out of view; click jumps to the nearest one.
   const awaitEdge = initEdgeIndicator(docScrollEl, {
     className: "await-edge", scrollEls: [docScrollEl],
@@ -156,7 +104,7 @@ export function initBlockViewer(rootEl, project, slug) {
   const changeEdge = initEdgeIndicator(docScrollEl, {
     className: "change-edge", flagIcon: "✎", scrollEls: [docScrollEl],
     getItems: () => docEl.querySelectorAll(".block.wb-changed, .block.wb-added, .block.wb-removed"),
-    isActive: () => state.diffMode && !state.narrow && state.view === "document",
+    isActive: () => state.reviewingChanges && !state.narrow && state.view === "document",
   });
   const updateEdges = () => { awaitEdge.update(); changeEdge.update(); };
 
@@ -169,9 +117,7 @@ export function initBlockViewer(rootEl, project, slug) {
     },
   });
 
-  const whoClass = (n) => (String(n || "").toLowerCase() === "agent" ? "agent" : "user");
-
-  function annotationsOn(b) { return (state.doc?.annotations || []).filter((a) => a.block === b.name && (a.path || DEFAULT_PATH) === (b.path || DEFAULT_PATH)); }
+  function annotationsOn(b) { return (state.displayDoc?.annotations || []).filter((a) => a.block === b.name && (a.path || DEFAULT_PATH) === (b.path || DEFAULT_PATH)); }
   // Distinct file paths in first-appearance order; the blocks of the active
   // file only (what the main column renders); switch the active file (used by
   // the TOC file-tree headers in multi-file sessions).
@@ -180,238 +126,71 @@ export function initBlockViewer(rootEl, project, slug) {
     for (const b of state.doc?.blocks || []) { const p = b.path || DEFAULT_PATH; if (!seen.has(p)) { seen.add(p); out.push(p); } }
     return out;
   }
-  function visibleBlocks() { return (state.doc?.blocks || []).filter((b) => (b.path || DEFAULT_PATH) === state.activePath); }
+  function visibleBlocks() { return state.displayBlocks; }
   async function switchFile(p) {
     state.activePath = p;
-    if (state.diffMode) {
-      await diff.render();   // re-render the diff for the newly-active file
-    } else {
-      await renderBlocks();
-      renderComments();
-    }
-    renderTOC();
+    if (state.reviewingChanges) await revisions.render();
+    else await renderSurface({ beforeDoc: null, afterDoc: state.doc });
     if (distinctPaths().length > 1) titleEl.textContent = `${state.name} · ${p}`;
     docScrollEl.scrollTop = 0;
   }
 
-  // An annotation "awaits the user" when the agent has spoken (or flagged) and
-  // the user hasn't replied or dismissed it — it still needs the human's eyes.
-  // Tags are attention markers (needs-attention / unverified) the agent set and
-  // the user hasn't cleared. Threads await when the agent has voice and no user
-  // reply has followed. Resolved threads don't await anyone.
-  function hasAgentVoice(a) { return a.author === "agent" || (Array.isArray(a.replies) && a.replies.some((r) => r.author === "agent")); }
-  function hasUserReply(a) { return Array.isArray(a.replies) && a.replies.some((r) => r.author === "user"); }
-  function awaitsUser(a) {
-    if (a.isTag) return a.state === "active" && (a.kind === "needs-attention" || a.kind === "unverified");
-    if (state.resolved.has(a.id)) return false;
-    return hasAgentVoice(a) && !hasUserReply(a);
-  }
-
-  async function renderBlocks() {
-    docEl.innerHTML = "";
-    state.anchored = {};
-    const rendered = [];
-    for (const b of visibleBlocks()) {
-      const sec = document.createElement("section");
-      sec.className = "block";
-      sec.dataset.blockId = b.name;
-      sec.dataset.blockPath = b.path || DEFAULT_PATH;
-      sec.dataset.blockIdx = String(docEl.children.length);
-      sec.innerHTML = '<div class="block-md">' + renderMarkdown(b.md) + '</div>';
-      docEl.appendChild(sec);
-      rendered.push({ b, sec });
+  function syncHighlights(changedKeys) {
+    const active = new Map();
+    for (const block of visibleBlocks()) for (const annotation of annotationsOn(block)) {
+      if (!annotation.selector?.exact) continue;
+      if (!annotation.isTag && state.resolved.has(annotation.id)) continue;
+      if (annotation.isTag && annotation.state !== "active") continue;
+      active.set(annotation.id, { block, annotation });
     }
-    await codeblocks.enhance(docEl);
-    for (const { b, sec } of rendered) {
-      // Highlight the anchor span of every open thread and active tag, colored
-      // by kind. state.anchored[id] === true  -> highlighted (card omits the quote);
-      // false -> anchor no longer matches (stale, shown in the card); undefined ->
-      // resolved thread (not highlighted this pass, shown).
-      for (const a of annotationsOn(b)) {
-        if (!a.isTag && state.resolved.has(a.id)) continue; // resolved threads: no highlight
-        if (a.isTag && a.state !== "active") continue; // cleared tags: no highlight
-        state.anchored[a.id] = highlightIn(sec.querySelector(".block-md"), a.selector, a.id, styleOf(a.kind).cls);
-      }
+    for (const mark of docEl.querySelectorAll("mark.wb-anno[data-anno-id]")) {
+      if (!active.has(mark.dataset.annoId)) unwrapHighlight(mark);
+    }
+    for (const id of Object.keys(state.anchored)) if (!active.has(id)) delete state.anchored[id];
+    for (const [id, { block, annotation }] of active) {
+      const section = [...docEl.querySelectorAll(":scope > section[data-block-key]")]
+        .find((node) => node.dataset.blockKey === blockKey(block));
+      if (!section) { state.anchored[id] = false; continue; }
+      const kindClass = styleOf(annotation.kind).cls;
+      const signature = selectorSignature(annotation.selector, kindClass);
+      const marks = [...section.querySelectorAll("mark.wb-anno")].filter((mark) => mark.dataset.annoId === id);
+      const current = highlightsMatchSelector(marks, signature);
+      if (current && !changedKeys.has(blockKey(block))) { state.anchored[id] = true; continue; }
+      for (const mark of marks) unwrapHighlight(mark);
+      const body = section.querySelector(".block-md");
+      state.anchored[id] = highlightCurrent(body, annotation.selector, id, kindClass) ||
+        (state.reviewingChanges && highlightDeletion(body, annotation.selector, id, kindClass));
     }
   }
 
-  // Render one comment as a margin card. The resolve button lives in the reply
-  // row footer (pushed left by its margin-right:auto), NOT in the excerpt. The
-  // excerpt shows the anchored selected text (if any) plus a relative time.
-  // isResolved controls the toggle label; resolved cards are NOT faded (they
-  // only differ by label).
-  function buildCardEl(b, c, isResolved) {
-    const card = document.createElement("div");
-    card.className = "thread " + styleOf(c.kind).cls + (isResolved ? " is-resolved" : "") + (state.activeId === c.id ? " active" : "") + (state.collapsed[c.id] ? " collapsed" : "") + ((!isResolved && awaitsUser(c)) ? " awaits-user" : "");
-    card.dataset.annoId = c.id;
-    // Show the anchored text inside the card ONLY when it is NOT highlighted in the
-    // document. When the anchor still matches, the highlight in the main text is the
-    // indicator and the card omits the quote. A stale anchor (highlight attempted
-    // but failed) gets a .stale marker + title; resolved comments show the quote
-    // without the stale marker.
-    const hasSel = !!(c.selector && c.selector.exact);
-    const showQuote = hasSel && !state.anchored[c.id];
-    const stale = hasSel && state.anchored[c.id] === false;
-    const staleTitle = stale ? ` title="Unanchored: the saved context no longer matches this block"` : "";
-    const quote = showQuote ? `<span class="excerpt-quote${stale ? " stale" : ""}"${staleTitle}>${stale ? "Unanchored: " : ""}“${esc(c.selector.exact)}”</span>` : "";
-    let replies = "";
-    for (const r of c.replies || []) {
-      replies += `<div class="msg"><span class="who ${whoClass(r.author)}">${esc(r.author)}</span><span class="when" data-at="${esc(r.at)}">${ago(r.at)}</span><div class="body">${renderBody(r.body)}</div></div>`;
+  const annotationView = createAnnotationView({
+    API, state, railEl, drawerScrollEl, commentsToggleEl, countEl: ctCountEl, docEl,
+    renderBody, refresh: () => runRefresh(), updateEdges,
+  });
+
+  const captureContext = () => ({
+    viewport: captureViewport(docScrollEl, docEl),
+    selection: captureSelection(docEl),
+  });
+
+  async function renderSurface({ beforeDoc = null, afterDoc = state.doc, detail = "adaptive", error = null, context = null } = {}) {
+    let errorEl = diffBarEl.querySelector(".diff-error-inline");
+    if (error) {
+      if (!errorEl) { errorEl = document.createElement("span"); errorEl.className = "diff-error-inline"; diffBarEl.appendChild(errorEl); }
+      errorEl.textContent = error; return;
     }
-    card.innerHTML = `<div class="excerpt"><button class="collapse-btn" type="button" title="${state.collapsed[c.id] ? "Expand" : "Collapse"}">${state.collapsed[c.id] ? "▸" : "▾"}</button>${kindBadge(c.kind)}${quote}<span class="where" data-at="${esc(c.at)}">${ago(c.at)}</span></div><div class="msg"><span class="who ${whoClass(c.author)}">${esc(c.author)}</span><div class="body">${renderBody(c.body)}</div></div>${replies}<div class="reply-box"><textarea placeholder="Reply…"></textarea><div class="row"><button class="resolve-btn" type="button" title="${isResolved ? "Unresolve" : "Resolve"}">${isResolved ? "↺ resolved" : "✓ resolve"}</button><button class="cancel">cancel</button><button class="send" disabled>Reply</button></div></div>`;
-    const ta = card.querySelector("textarea");
-    const send = card.querySelector(".send");
-    ta.addEventListener("input", () => { send.disabled = ta.value.trim().length === 0; });
-    ta.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send.click(); } });
-    send.addEventListener("click", async () => {
-      const text = ta.value.trim(); if (!text) return;
-      send.disabled = true;
-      await fetch(`${API}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ block: b.name, text, creator: "user", replyTo: c.id }) });
-      await runRefresh();
-    });
-    card.querySelector(".cancel").addEventListener("click", () => { ta.value = ""; send.disabled = true; });
-    card.querySelector(".resolve-btn").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await fetch(`${API}/resolved`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: c.id, resolved: !isResolved, by: "user" }) });
-      await runRefresh();
-    });
-    card.querySelector(".collapse-btn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      state.collapsed[c.id] = !state.collapsed[c.id];
-      renderComments();
-    });
-    card.addEventListener("click", (e) => { if (e.target.closest(".reply-box")) return; state.activeId = c.id; (state.narrow ? drawerScrollEl : railEl).querySelectorAll(".thread").forEach((t) => t.classList.toggle("active", t === card)); });
-    return card;
-  }
-
-  // Rail mode: dock the card in the margin rail at its anchor Y.
-  function renderCard(b, c, anchorY, lastBottom, isResolved) {
-    const card = buildCardEl(b, c, isResolved);
-    railEl.appendChild(card);
-    const top = Math.max(anchorY, lastBottom + 8);
-    card.style.top = `${top}px`;
-    return top + card.offsetHeight;
-  }
-
-  // A tag renders as a small colored chip in the margin rail at its anchor Y —
-// colored by kind, non-replyable (tags are set/cleared by the agent, not
-// resolved by the human). Shows the kind label + optional short body.
-  function buildTagEl(b, a) {
-    const s = styleOf(a.kind);
-    const card = document.createElement("div");
-    card.className = "wb-tag " + s.cls + (awaitsUser(a) ? " awaits-user" : "");
-    card.dataset.annoId = a.id;
-    card.title = esc(a.body ? `${s.label} — ${a.body}` : s.label);
-    card.innerHTML = `<span class="tag-icon">${s.icon}</span><span class="tag-label">${esc(s.label)}</span>${a.body ? `<span class="tag-body">${esc(a.body)}</span>` : ""}`;
-    return card;
-  }
-
-  // Rail mode: dock the tag chip in the margin rail at its anchor Y.
-  function renderTag(b, a, anchorY, lastBottom) {
-    const card = buildTagEl(b, a);
-    railEl.appendChild(card);
-    const top = Math.max(anchorY, lastBottom + 8);
-    card.style.top = `${top}px`;
-    return top + card.offsetHeight;
-  }
-
-  // A comment's card is Y-positioned to its own anchor <mark> when the quote
-  // is still highlighted in the block (so the card sits next to the text it
-  // refers to, not at the top of a possibly-long block); falls back to the
-  // block's top when unanchored/resolved (no mark to measure from).
-  function anchorYFor(sec, c) {
-    if (state.anchored[c.id]) {
-      const mark = sec.querySelector(`mark.wb-anno[data-anno-id="${cssEscape(c.id)}"]`);
-      if (mark) return relativeTop(mark, railEl);
-    }
-    return relativeTop(sec, railEl);
-  }
-
-  function renderComments() {
-    if (state.narrow) renderCommentsDrawer();
-    else renderCommentsRail();
-  }
-
-  // Wide mode: margin-rail cards absolutely positioned by anchor Y.
-  function renderCommentsRail() {
-    railEl.innerHTML = "";
-    drawerScrollEl.innerHTML = "";
-    commentsToggleEl.hidden = true;
-    let lastBottom = -8;
-    let i = -1;
-    for (const b of visibleBlocks()) {
-      i++;
-      const sec = docEl.querySelector(`section[data-block-idx="${i}"]`);
-      if (!sec) continue;
-      const blockTop = relativeTop(sec, railEl);
-      const all = annotationsOn(b);
-      const tags = all.filter((a) => a.isTag);          // active tags (cleared ones are folded out)
-      const threads = all.filter((a) => !a.isTag);
-      const open = threads.filter((a) => !state.resolved.has(a.id));
-      const resolved = threads.filter((a) => state.resolved.has(a.id));
-      for (const a of tags) lastBottom = renderTag(b, a, blockTop, lastBottom);
-      for (const a of open) lastBottom = renderCard(b, a, anchorYFor(sec, a), lastBottom, false);
-      if (resolved.length > 0) {
-        const key = blockKey(b);
-        const expanded = !!state.showResolved[key];
-        const pill = document.createElement("div");
-        pill.className = "resolved-pill" + (expanded ? " expanded" : "");
-        pill.textContent = `${resolved.length} resolved ${expanded ? "▾" : "▸"}`;
-        pill.title = expanded ? "Hide resolved" : "Show resolved";
-        pill.addEventListener("click", () => { state.showResolved[key] = !expanded; renderComments(); });
-        railEl.appendChild(pill);
-        const top = Math.max(blockTop, lastBottom + 8);
-        pill.style.top = `${top}px`;
-        lastBottom = top + pill.offsetHeight;
-        if (expanded) for (const a of resolved) lastBottom = renderCard(b, a, blockTop, lastBottom, true);
-      }
-    }
+    errorEl?.remove();
+    const { viewport, selection } = context || captureContext();
+    state.displayDoc = afterDoc;
+    const result = await blockView.reconcile({ beforeDoc, afterDoc, activePath: state.activePath, detail });
+    state.displayBlocks = result.plan.map((entry) => entry.block);
+    syncHighlights(result.changedKeys);
+    annotationView.render();
+    renderTOC();
     updateEdges();
+    restoreViewport(docScrollEl, docEl, viewport);
+    restoreSelection(docEl, selection);
   }
-
-  // Narrow mode: comments flow inside the right-side drawer; the doc gets full
-  // width and a count indicator stands in for the margin rail. Threads are
-  // grouped by block so context is preserved without the Y-anchoring.
-  function renderCommentsDrawer() {
-    railEl.innerHTML = "";
-    drawerScrollEl.innerHTML = "";
-    let count = 0;
-    let any = false;
-    let i = -1;
-    for (const b of visibleBlocks()) {
-      i++;
-      const all = annotationsOn(b);
-      if (!all.length) continue;
-      const tags = all.filter((a) => a.isTag);
-      const threads = all.filter((a) => !a.isTag);
-      const open = threads.filter((a) => !state.resolved.has(a.id));
-      const resolved = threads.filter((a) => state.resolved.has(a.id));
-      if (!tags.length && !open.length && !resolved.length) continue;
-      any = true;
-      const head = document.createElement("div");
-      head.className = "drawer-block-head";
-      head.textContent = b.name;
-      drawerScrollEl.appendChild(head);
-      for (const a of tags) { drawerScrollEl.appendChild(buildTagEl(b, a)); }
-      for (const a of open) { drawerScrollEl.appendChild(buildCardEl(b, a, false)); count++; }
-      if (resolved.length) {
-        const key = blockKey(b);
-        const expanded = !!state.showResolved[key];
-        const pill = document.createElement("div");
-        pill.className = "resolved-pill" + (expanded ? " expanded" : "");
-        pill.textContent = `${resolved.length} resolved ${expanded ? "▾" : "▸"}`;
-        pill.title = expanded ? "Hide resolved" : "Show resolved";
-        pill.addEventListener("click", () => { state.showResolved[key] = !expanded; renderComments(); });
-        drawerScrollEl.appendChild(pill);
-        if (expanded) for (const a of resolved) { drawerScrollEl.appendChild(buildCardEl(b, a, true)); count++; }
-      }
-    }
-    if (!any) drawerScrollEl.innerHTML = '<div class="drawer-empty">No annotations.</div>';
-    ctCountEl.textContent = String(count);
-    commentsToggleEl.hidden = false;
-    updateEdges(); // narrow mode: drawer holds the threads; no doc-edge indicators
-  }
-
   // TOC lists the rendered headings (h1/h2/h3) inside each block — the actual
   // titles/subtitles — instead of the block name slugs. A block with no heading
   // falls back to its name so it stays navigable. Indentation reuses the
@@ -443,12 +222,12 @@ export function initBlockViewer(rootEl, project, slug) {
       return;
     }
     // Multi-file: one switchable header per file. Only the active file's blocks
-    // are listed (others collapse to their header). In diff mode each header
+    // are listed (others collapse to their header). During revision review each header
     // carries a dot when that file has changes in the before→after range, so
     // you can see that a non-selected file changed too. Clicking a header
-    // switches the active file (re-rendering the diff for it in diff mode).
+    // switches the active file while keeping the review on the same surface.
     const changedPaths = new Set();
-    if (state.diffMode && state.diffBeforeDoc && state.diffAfterDoc) {
+    if (state.reviewingChanges && state.diffBeforeDoc && state.diffAfterDoc) {
       const bmap = new Map();
       for (const b of state.diffBeforeDoc.blocks || []) bmap.set((b.path || DEFAULT_PATH) + "\u0000" + b.name, b.md || "");
       for (const b of state.diffAfterDoc.blocks || []) {
@@ -475,14 +254,19 @@ export function initBlockViewer(rootEl, project, slug) {
     }
   }
 
-  async function runRefresh({ auto = false } = {}) {
+  async function runRefresh() {
     const [s, d, n, rev] = await Promise.all([
       fetch(`${API}/session`).then((r) => r.json()),
       fetch(`${API}/document`).then((r) => r.json()),
       fetch(`${API}/notes`).then((r) => r.json()),
       fetch(`${API}/revisions`).then((r) => r.json()).catch(() => ({ revisions: [] })),
     ]);
-    state.doc = d; state.notes = n.content || "";
+    state.doc = d;
+    const nextNotes = n.content || "";
+    if (state.notes !== nextNotes) {
+      state.notes = nextNotes;
+      notesViewEl.innerHTML = nextNotes ? renderMarkdown(nextNotes) : "<p class=\"empty-notes\">No notes yet.</p>";
+    }
     state.name = s.name || "Whiteboard";
     const paths = distinctPaths();
     if (!paths.includes(state.activePath)) state.activePath = paths[0] || DEFAULT_PATH;
@@ -492,28 +276,22 @@ export function initBlockViewer(rootEl, project, slug) {
     titleEl.textContent = paths.length > 1 ? `${state.name} · ${state.activePath}` : state.name;
     statusEl.textContent = s.status || "exploring";
     document.title = `${s.name || "Whiteboard"} — Whiteboard`;
-    notesViewEl.innerHTML = n.content ? renderMarkdown(n.content) : "<p class=\"empty-notes\">No notes yet.</p>";
-    await renderBlocks();
-    renderComments();
-    renderTOC();
-    chat.refresh();
-    if (state.diffMode) { await diff.render(); renderTOC(); return; }
-    // There are block changes the user hasn't reviewed yet (viewedRev < current):
-    // jump into the diff comparing last-viewed → current. Fires both on a live
-    // (SSE) refresh and on a manual reload, so reopening the page after edits
-    // lands on the diff rather than silently showing the new version.
-    if (state.viewedRev < (d.rev ?? 0) && (d.rev ?? 0) > 1 &&
-        state.revisions.some((r) => r.rev > state.viewedRev && r.rev <= (d.rev ?? 0) && r.blocks > 0)) {
-      await diff.enter();
-      setView("document");
-    }
+    // Detection and rendering share one baseline. For a never-reviewed session,
+    // compare from the oldest available snapshot so a coalesced annotation
+    // refresh cannot mask the document edit immediately before it.
+    const baseline = Math.max(reviewBaseline(state.revisions, d.rev ?? 0, state.viewedRev), state.suppressedBlockRev);
+    const pendingBlocks = baseline < (d.rev ?? 0) &&
+      state.revisions.some((revision) => revision.rev > baseline && revision.rev <= (d.rev ?? 0) && revision.blocks > 0);
+    if (state.reviewingChanges) await revisions.render();
+    else if (pendingBlocks) await revisions.show({ baseline });
+    else await renderSurface({ afterDoc: state.doc });
+    setView(state.view);
+    await chat.refresh();
   }
 
-  const diff = initDiffMode({
-    API, state, docEl, codeblocks, renderMarkdown,
-    diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, renderTOC,
-    updateChangeEdge: () => changeEdge.update(),
-    onExit: async () => { await renderBlocks(); renderComments(); renderTOC(); },
+  const revisions = initRevisionReview({
+    API, state, diffBarEl, diffBeforeEl, diffAfterEl,
+    captureContext, onRender: renderSurface,
   });
   const chat = initChat(chatMountEl, API);
 
@@ -523,14 +301,14 @@ export function initBlockViewer(rootEl, project, slug) {
     docScrollEl.hidden = (v !== "document");
     notesViewEl.hidden = (v !== "notes");
     tocRailEl.hidden = (v !== "document");
-    diffBarEl.hidden = (v !== "document") || !state.diffMode;
+    diffBarEl.hidden = (v !== "document") || !state.reviewingChanges;
     updateEdges();
   }
   viewTabsEl.addEventListener("click", (e) => { const tab = e.target.closest(".view-tab"); if (tab) setView(tab.dataset.view); });
-  diffToggleEl.addEventListener("click", () => state.diffMode ? diff.exit() : diff.enter());
-  diffBeforeEl.addEventListener("change", () => { state.beforeRev = diffBeforeEl.value === "current" ? "current" : Number(diffBeforeEl.value); diff.render(); });
-  diffAfterEl.addEventListener("change", () => { state.afterRev = diffAfterEl.value === "current" ? "current" : Number(diffAfterEl.value); diff.render(); });
-  diffMarkReadEl.addEventListener("click", diff.markRead);
+  diffToggleEl.addEventListener("click", () => state.reviewingChanges ? revisions.hide() : revisions.show());
+  diffBeforeEl.addEventListener("change", () => { state.beforeRev = diffBeforeEl.value === "current" ? "current" : Number(diffBeforeEl.value); revisions.render(); });
+  diffAfterEl.addEventListener("change", () => { state.afterRev = diffAfterEl.value === "current" ? "current" : Number(diffAfterEl.value); revisions.render(); });
+  diffMarkReadEl.addEventListener("click", revisions.markRead);
   const openChat = () => { chatSideEl.hidden = false; chatToggleEl.classList.add("active"); chat.refresh().then(() => chat.focus && chat.focus()); };
   const closeChat = () => { chatSideEl.hidden = true; chatToggleEl.classList.remove("active"); };
   chatToggleEl.addEventListener("click", () => chatSideEl.hidden ? openChat() : closeChat());
@@ -546,16 +324,16 @@ export function initBlockViewer(rootEl, project, slug) {
     state.narrow = narrow;
     docWrapEl.classList.toggle("narrow-comments", narrow);
     if (!narrow) closeComments();
-    renderComments();
+    annotationView.render();
   };
   const narrowMq = window.matchMedia("(max-width: 920px)");
   applyNarrow(narrowMq.matches);
   narrowMq.addEventListener("change", (e) => applyNarrow(e.matches));
-  // Coalesce the noisy burst of refresh events (fs.watch fires several per write) into one re-render.
+  // Coalesce the noisy burst of refresh events into one snapshot reconciliation.
   let refreshTimer = null;
   const offRefresh = onRefresh(() => {
     if (refreshTimer) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { refreshTimer = null; runRefresh({ auto: true }).catch((e) => console.error("wb refresh", e)); }, 80);
+    refreshTimer = setTimeout(() => { refreshTimer = null; runRefresh().catch((e) => console.error("wb refresh", e)); }, 80);
   });
   const offStatus = onStatus((s) => {
     connEl.textContent = s === "live" ? "live" : "reconnecting…";
@@ -563,13 +341,8 @@ export function initBlockViewer(rootEl, project, slug) {
   });
   runRefresh().catch((e) => console.error("wb init", e));
 
-  // Auto-refresh relative time labels every 30s without a full re-render (which would wipe in-progress replies).
-  const timer = setInterval(() => { (state.narrow ? drawerScrollEl : railEl).querySelectorAll("[data-at]").forEach((el) => { el.textContent = ago(el.dataset.at); }); }, 30000);
+  const timer = setInterval(annotationView.updateTimes, 30000);
 
   // Tear down our stream registrations + timers on re-route; main.mjs owns the shared EventSource.
   return { destroy() { offRefresh(); offStatus(); if (refreshTimer) clearTimeout(refreshTimer); clearInterval(timer); } };
-}
-
-function cssEscape(s) {
-  return String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
 }
