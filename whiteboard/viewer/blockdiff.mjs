@@ -90,40 +90,45 @@ function mountRevPicker(container, options, value, onJump) {
   return { setOptions(opts, val) { cur = opts; container.value = val; renderBtn(); } };
 }
 
-// Render a whole document as a diff between beforeDoc and afterDoc. For each
-// block name in (before ∪ after), matched by name:
-//  - in both  -> <section> whose .block-md is renderWordDiff(before, after)
-//  - only after -> <section> with "+ <name>" header, .block-md = green wb-ins
-//  - only before -> <section> with "− <name>" header, .block-md = red wb-del
-// Sections are ordered by afterDoc; removed-only-before blocks are appended.
-// renderMarkdown: (md) -> sanitized HTML. Pure string output.
 const DP = "default.md";
 const bkey = (b) => `${b.path || DP}\u0000${b.name}`;
 
-// Render the diff of a block document for changed blocks only. Block identity is
+// Render the diff of a block document as the full current (after) file, in
+// order, with unchanged blocks shown as plain context (not skipped) so a
+// change reads in place instead of as an isolated hunk. Block identity is
 // (path, name). Edited blocks retain their unchanged context and mark only the
 // removed and inserted words or lines. Added blocks: green "+ name"; removed
-// blocks: red "− name".
+// blocks: red "− name". Unchanged blocks: plain, marked .wb-same so the
+// change-edge indicator can ignore them. If nothing changed/added/removed,
+// returns the empty-diff message instead of the (in that case
+// identical-looking) full file.
 export function renderBlockDiff({ beforeDoc, afterDoc, renderMarkdown, detail = "adaptive" }) {
   const before = new Map((beforeDoc?.blocks || []).map((b) => [bkey(b), b]));
   const after = afterDoc?.blocks || [];
   const afterKeys = new Set(after.map(bkey));
   const parts = [];
+  let changed = 0;
   for (const b of after) {
     const old = before.get(bkey(b));
     if (old) {
-      if ((old.md || "") === (b.md || "")) continue; // unchanged — skip
-      parts.push(diffBlock(b.name, old.md || "", b.md || "", renderMarkdown, blockFlags(b), detail));
+      if ((old.md || "") === (b.md || "")) {
+        parts.push(section(b.name, `<div class="block-md">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-same"));
+      } else {
+        changed++;
+        parts.push(diffBlock(b.name, old.md || "", b.md || "", renderMarkdown, blockFlags(b), detail));
+      }
     } else {
+      changed++;
       parts.push(section(`+ ${b.name}`, `<div class="block-md wb-ins">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-added"));
     }
   }
   for (const b of beforeDoc?.blocks || []) {
     if (!afterKeys.has(bkey(b))) {
+      changed++;
       parts.push(section(`− ${b.name}`, `<div class="block-md wb-del">${renderMarkdown(b.md || "")}</div>`, blockFlags(b), "wb-removed"));
     }
   }
-  return parts.length ? parts.join("") : emptyDiff(beforeDoc, afterDoc);
+  return changed ? parts.join("") : emptyDiff(beforeDoc, afterDoc);
 }
 
 function emptyDiff(beforeDoc, afterDoc) {
@@ -167,7 +172,7 @@ function section(name, mdHtml, flags, extraCls = "") {
 // the viewer wires to buttons/selects and the refresh hook.
 export function initDiffMode({
   API, state, docEl, codeblocks, renderMarkdown,
-  diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit, renderTOC,
+  diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, onExit, renderTOC, updateChangeEdge,
 }) {
   let beforePicker = null, afterPicker = null;
   const detailControl = mountDiffDetail(diffBarEl, () => {
@@ -199,6 +204,7 @@ export function initDiffMode({
     } catch { beforeDoc = null; }
     if (!beforeDoc || !afterDoc) {
       docEl.innerHTML = `<div class="diff-error">Could not load revisions ${esc(state.beforeRev)} → ${esc(state.afterRev)}.</div>`;
+      updateChangeEdge?.();
       return;
     }
     state.diffBeforeDoc = beforeDoc; state.diffAfterDoc = afterDoc;
@@ -212,6 +218,7 @@ export function initDiffMode({
     });
     await codeblocks.enhance(docEl);
     renderTOC?.();
+    updateChangeEdge?.();
   }
 
   async function enter() {
@@ -231,6 +238,7 @@ export function initDiffMode({
     state.diffMode = false;
     diffBarEl.hidden = true;
     docWrapEl.classList.remove("diff-on");
+    updateChangeEdge?.();
     onExit?.();
   }
 

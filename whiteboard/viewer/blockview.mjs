@@ -11,6 +11,7 @@ import { initCodeBlocks } from "./codeblocks.mjs";
 import { initTocRail } from "./toc-rail.mjs";
 import { initBlockComposer } from "./blockcomposer.mjs";
 import { initDiffMode, ago } from "./blockdiff.mjs";
+import { initEdgeIndicator } from "./edge-indicators.mjs";
 import { initChat } from "./chat.mjs";
 import { quoteMatch } from "./comments.mjs";
 import { styleOf } from "./annotations.mjs";
@@ -143,18 +144,23 @@ export function initBlockViewer(rootEl, project, slug) {
   const drawerCloseEl = document.getElementById("drawer-close");
   const drawerScrollEl = document.getElementById("drawer-scroll");
   const docWrapEl = document.getElementById("doc-wrap");
-  // Off-screen indicators for agent annotations the user hasn't addressed.
-  // Shown at the top/bottom edge of the doc viewport when such a card is
-  // scrolled out of view; click to jump to the nearest one.
-  const awaitAboveEl = Object.assign(document.createElement("div"), { className: "await-edge above", hidden: true });
-  awaitAboveEl.innerHTML = `<span class="await-edge-flag">●</span><span class="await-edge-count">0</span><span class="await-edge-arrow">↑</span>`;
-  const awaitBelowEl = Object.assign(document.createElement("div"), { className: "await-edge below", hidden: true });
-  awaitBelowEl.innerHTML = `<span class="await-edge-flag">●</span><span class="await-edge-count">0</span><span class="await-edge-arrow">↓</span>`;
-  docScrollEl.appendChild(awaitAboveEl);
-  docScrollEl.appendChild(awaitBelowEl);
   const codeblocks = initCodeBlocks();
   const state = { doc: null, name: "", notes: "", view: "document", activePath: null, resolved: new Set(), activeId: null, showResolved: {}, collapsed: {}, anchored: {},
     diffMode: false, revisions: [], beforeRev: null, afterRev: "current", viewedRev: 0, diffBeforeDoc: null, diffAfterDoc: null, narrow: false };
+  // Off-screen indicators: agent annotations the user hasn't addressed, and
+  // (in diff mode) changed blocks — shown at the top/bottom doc-viewport edge
+  // when scrolled out of view; click jumps to the nearest one.
+  const awaitEdge = initEdgeIndicator(docScrollEl, {
+    className: "await-edge", scrollEls: [docScrollEl],
+    getItems: () => railEl.querySelectorAll(".awaits-user"),
+    isActive: () => !state.narrow && state.view === "document",
+  });
+  const changeEdge = initEdgeIndicator(docScrollEl, {
+    className: "change-edge", flagIcon: "✎", scrollEls: [docScrollEl],
+    getItems: () => docEl.querySelectorAll(".block.wb-changed, .block.wb-added, .block.wb-removed"),
+    isActive: () => state.diffMode && !state.narrow && state.view === "document",
+  });
+  const updateEdges = () => { awaitEdge.update(); changeEdge.update(); };
 
   const composer = initBlockComposer({
     docEl,
@@ -358,7 +364,7 @@ export function initBlockViewer(rootEl, project, slug) {
         if (expanded) for (const a of resolved) lastBottom = renderCard(b, a, blockTop, lastBottom, true);
       }
     }
-    updateAwaitingIndicators();
+    updateEdges();
   }
 
   // Narrow mode: comments flow inside the right-side drawer; the doc gets full
@@ -401,41 +407,8 @@ export function initBlockViewer(rootEl, project, slug) {
     if (!any) drawerScrollEl.innerHTML = '<div class="drawer-empty">No annotations.</div>';
     ctCountEl.textContent = String(count);
     commentsToggleEl.hidden = false;
-    awaitAboveEl.hidden = true;
-    awaitBelowEl.hidden = true; // narrow mode: drawer holds the threads; no doc-edge indicators
+    updateEdges(); // narrow mode: drawer holds the threads; no doc-edge indicators
   }
-
-  // Off-screen agent-annotation indicators: when a card the user still needs to
-  // address is scrolled out of the viewport, surface a small count at the
-  // top/bottom edge so it can't be missed. Click jumps to the nearest one.
-  // The scroller is the window (#doc-scroll doesn't constrain its height, so the
-  // body scrolls), so we measure against window.innerHeight and listen to window
-  // scroll — not #doc-scroll.
-  function updateAwaitingIndicators() {
-    if (state.narrow || state.view !== "document") { awaitAboveEl.hidden = awaitBelowEl.hidden = true; return; }
-    const vh = window.innerHeight;
-    const above = [], below = [];
-    for (const card of railEl.querySelectorAll(".awaits-user")) {
-      const r = card.getBoundingClientRect();
-      if (r.height === 0) continue;
-      if (r.bottom <= 2) above.push({ card, y: r.top });
-      else if (r.top >= vh - 2) below.push({ card, y: r.top });
-    }
-    if (above.length) { above.sort((a, b) => b.y - a.y); showAwaitEdge(awaitAboveEl, above.length, above[0].card); } else awaitAboveEl.hidden = true;
-    if (below.length) { below.sort((a, b) => a.y - b.y); showAwaitEdge(awaitBelowEl, below.length, below[0].card); } else awaitBelowEl.hidden = true;
-  }
-  function showAwaitEdge(el, count, target) {
-    el.hidden = false;
-    el.querySelector(".await-edge-count").textContent = count;
-    el._target = target;
-    el.style.left = (window.innerWidth / 2) + "px";
-    el.style.top = el.classList.contains("above") ? "8px" : (window.innerHeight - el.offsetHeight - 8) + "px";
-  }
-  awaitAboveEl.addEventListener("click", () => awaitAboveEl._target && awaitAboveEl._target.scrollIntoView({ behavior: "smooth", block: "center" }));
-  awaitBelowEl.addEventListener("click", () => awaitBelowEl._target && awaitBelowEl._target.scrollIntoView({ behavior: "smooth", block: "center" }));
-  docScrollEl.addEventListener("scroll", () => requestAnimationFrame(updateAwaitingIndicators));
-  window.addEventListener("scroll", () => requestAnimationFrame(updateAwaitingIndicators), { passive: true });
-  window.addEventListener("resize", () => requestAnimationFrame(updateAwaitingIndicators));
 
   // TOC lists the rendered headings (h1/h2/h3) inside each block — the actual
   // titles/subtitles — instead of the block name slugs. A block with no heading
@@ -538,6 +511,7 @@ export function initBlockViewer(rootEl, project, slug) {
   const diff = initDiffMode({
     API, state, docEl, codeblocks, renderMarkdown,
     diffBarEl, docWrapEl, diffBeforeEl, diffAfterEl, renderTOC,
+    updateChangeEdge: () => changeEdge.update(),
     onExit: () => { renderBlocks(); renderComments(); renderTOC(); },
   });
   const chat = initChat(chatMountEl, API);
@@ -549,7 +523,7 @@ export function initBlockViewer(rootEl, project, slug) {
     notesViewEl.hidden = (v !== "notes");
     tocRailEl.hidden = (v !== "document");
     diffBarEl.hidden = (v !== "document") || !state.diffMode;
-    updateAwaitingIndicators();
+    updateEdges();
   }
   viewTabsEl.addEventListener("click", (e) => { const tab = e.target.closest(".view-tab"); if (tab) setView(tab.dataset.view); });
   diffToggleEl.addEventListener("click", () => state.diffMode ? diff.exit() : diff.enter());

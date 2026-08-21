@@ -42,3 +42,35 @@
    the doc-edge indicators (they're already hidden by JS, this is a guard) */
 .doc-wrap.narrow-comments ~ * .await-edge,
 html.narrow-comments .await-edge { display: none; }
+
+/* the diff-mode change-edge pill: mirrors .await-edge's shape/positioning but
+   in a diff-appropriate green so it reads as "change" rather than "needs
+   attention" */
+.change-edge {
+  position: fixed;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--agent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  user-select: none;
+  transition: filter 0.12s;
+}
+.change-edge[hidden] { display: none; }
+.change-edge:hover { filter: brightness(1.07); }
+.change-edge .change-edge-flag { line-height: 1; font-size: 9px; opacity: 0.9; }
+.change-edge .change-edge-count { min-width: 10px; text-align: center; }
+.change-edge .change-edge-arrow { line-height: 1; }
+
+:root[data-theme="dark"] .change-edge { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); }
+
+.doc-wrap.narrow-comments ~ * .change-edge,
+html.narrow-comments .change-edge { display: none; }
