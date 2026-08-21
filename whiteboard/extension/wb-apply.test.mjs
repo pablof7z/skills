@@ -84,6 +84,49 @@ ok(r.isError, "5 rejected (malformed diff): " + JSON.stringify(r.content?.[0]?.t
 ok(loadDoc(DIR).rev === revBefore5, "5 rev unchanged");
 ok(loadDoc(DIR).blocks.find((b) => b.name === "intro").md.includes("edited"), "5 intro content unchanged");
 
+// 6) an edit whose text introduces drift (a word moved) reports 2 hunks — the
+// drift signal for a retyped full-text edit.
+appendChange(DIR, { id: "seed-drift", title: "seed-drift", ops: [{ op: "add", name: "drift", md: "some body has real prose", path: "default.md" }] });
+r = await apply({ title: "drifted edit", ops: [
+  { op: "edit", block: "drift", text: "some real body has prose" },
+] });
+ok(!r.isError, "6 success: " + JSON.stringify(r.content?.[0]?.text));
+{
+  const text = r.content?.[0]?.text || "";
+  const m = text.match(/applied 1 op\(s\) as one atomic change: (\{.*\})/);
+  ok(m, "6 result text carries the JSON result");
+  const parsed = m ? JSON.parse(m[1]) : null;
+  ok(parsed && Array.isArray(parsed.deltas) && parsed.deltas.length === 1, "6 deltas array has one entry");
+  ok(parsed && /2 hunks/.test(parsed.deltas[0]), "6 delta reports 2 hunks (drift signal): " + (parsed && parsed.deltas[0]));
+}
+
+// 7) a clean single-word edit reports 1 hunk
+appendChange(DIR, { id: "seed-clean", title: "seed-clean", ops: [{ op: "add", name: "clean", md: "the quick fox", path: "default.md" }] });
+r = await apply({ title: "clean edit", ops: [
+  { op: "edit", block: "clean", text: "the slow fox" },
+] });
+ok(!r.isError, "7 success: " + JSON.stringify(r.content?.[0]?.text));
+{
+  const text = r.content?.[0]?.text || "";
+  const m = text.match(/applied 1 op\(s\) as one atomic change: (\{.*\})/);
+  const parsed = m ? JSON.parse(m[1]) : null;
+  ok(parsed && /1 hunk,/.test(parsed.deltas[0]), "7 delta reports 1 hunk: " + (parsed && parsed.deltas[0]));
+}
+
+// 8) dryRun does NOT bump the revision and returns dryRun:true with deltas
+const revBefore8 = loadDoc(DIR).rev;
+r = await apply({ title: "preview only", dryRun: true, ops: [
+  { op: "edit", block: "clean", text: "the fast fox" },
+] });
+ok(!r.isError, "8 success (dry-run, no error): " + JSON.stringify(r.content?.[0]?.text));
+ok(loadDoc(DIR).rev === revBefore8, "8 rev unchanged after dry-run (" + loadDoc(DIR).rev + " vs " + revBefore8 + ")");
+{
+  const text = r.content?.[0]?.text || "";
+  ok(/dry-run/.test(text), "8 result text says dry-run: " + text);
+  ok(/nothing committed/.test(text), "8 result text says nothing committed: " + text);
+}
+ok(!loadDoc(DIR).blocks.find((b) => b.name === "clean").md.includes("fast"), "8 doc content unchanged by dry-run");
+
 console.log(`\n${pass} passed, ${fail} failed`);
 fs.rmSync(ROOT, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

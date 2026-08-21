@@ -98,6 +98,7 @@ export function registerWhiteboardToolDefinitions(pi, Type, {
       title: Type.String(),
       ops: Type.Array(operation, { description: "block ops to apply as one all-or-nothing change" }),
       summary: opt(Type.String()), by: opt(Type.String()),
+      dryRun: opt(Type.Boolean({ description: "compute + return per-op content deltas without writing anything" })),
     }),
     execute: withViewer(h.wb_apply),
   });
