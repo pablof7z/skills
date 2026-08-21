@@ -85,7 +85,15 @@ could write through `rm`, `sed`, Python, an indirect shell, or another tool; tha
 is intentionally outside this accident-prevention boundary.
 
 Repository discovery is live through Git. Main worktrees are guarded by
-default; no explicit repository registration exists.
+default; no explicit repository registration exists. A per-repo guard mode,
+keyed by the repo's resolved base checkout path and stored in
+`repo_modes` in state.json, may relax that default: `full` (default) blocks
+both the six Git commands and native file writes; `files-only` disables only
+the Git-command block while still blocking native file writes; `off`
+disables both for that repo's base checkout. Linked worktrees are always
+unrestricted regardless of mode. The CLI must support inspecting and
+changing it with `wtg config repo <path> [full|files-only|off]`. Modes are
+config, not a security boundary, exactly like the rest of this policy.
 
 ## Local override
 
