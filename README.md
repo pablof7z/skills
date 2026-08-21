@@ -106,6 +106,16 @@ In a Cashu wallet, the hard part is not drawing a balance. It is keeping proofs,
 
 [See the wallet model, flows, and safety boundary →](nip60/README.md)
 
+### [Delegate Minimal: State the Goal, Then Stop](delegate-minimal/SKILL.md)
+
+When delegating work to another agent, the temptation is to also describe the
+process. That overfits the delegate to the delegator's guess of the problem and
+has a non-expert prescribing steps to an expert in their own vertical.
+`delegate-minimal` keeps handoffs to the outcome, the constraints that matter,
+and the context the delegate lacks — and withholds the how.
+
+[See the delegation guardrail and self-test →](delegate-minimal/SKILL.md)
+
 ## Also Included
 
 The repository includes a WorktreeGuard plugin for keeping agent mutations out of protected Git base worktrees and steering implementation into isolated worktrees.
