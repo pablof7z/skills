@@ -11,7 +11,7 @@ Brief how-to for using whiteboard inside a pi harness with the **agentnotes pi e
 
 ## The agentnotes tools (preferred over the CLI)
 
-Twelve tools, exposed via pi's **lazy/active** pattern. A fresh agent sees only the two **loaders**; calling either unlocks the rest (pi surfaces the newly-available tool names on the tool result, so they appear on the next request). Owning agents — a session owned by this pi session — get the full set at `session_start`, so an attributed wake can be answered immediately without listing first.
+Thirteen tools, exposed via pi's **lazy/active** pattern. A fresh agent sees only the two **loaders**; calling either unlocks the rest (pi surfaces the newly-available tool names on the tool result, so they appear on the next request). Owning agents — a session owned by this pi session — get the full set at `session_start`, so an attributed wake can be answered immediately without listing first.
 
 - **Loaders (always active for a fresh agent):**
   - `agentnotes_new { slug }` — create a session; unlocks the doc + mutation tools.
@@ -20,7 +20,9 @@ Twelve tools, exposed via pi's **lazy/active** pattern. A fresh agent sees only 
   - `agentnotes_use { slug }` — switch to (claim) an existing session.
   - `agentnotes_read { format?: "md"|"json", path?, block? }` — project the doc. `md` (default) = block bodies + an action-section (`## Open threads` — unresolved `id · path · block · kind · author` + replies; `## Tags` — active status tags; `## Meta` — rev/updatedAt). With no `path` and multiple files, emits a `## 📄 <path>` header per file (the file tree). `json` = full structured doc (blocks + annotations + attachments + rev/hash). `path` scopes to one file; `block` (with `path`) to one block.
   - `agentnotes_diff { before, after, path? }` — return the unified artifact diff between two revisions. Each revision is `0`, an existing number, or `"current"`; `path` limits a multi-file document. This is read-only and excludes attachments/tags.
-  - `agentnotes_note { text, by? }` — append a timestamped line to `notes.md`.
+  - `meta_notes_add { text, by? }` — append a terse, timestamped line to your **private** meta-notes log (never `agentnotes_read` — a separate log from the artifact). Write the fact, not the narration: no "we explored…", no hedging, no intensifiers. Returns a non-blocking warning (not an error) if the line runs long or reads like prose — the note is written either way; heed the warning on the next one.
+  - `meta_notes_read {}` — read back the full meta-notes log for the current session.
+  - If you send several `agentnotes_change_finish`/`agentnotes_apply` mutations with no `meta_notes_add` between them, the change/apply result carries a reminder once the count hits 3 — that means the trail is going cold; log why before moving on.
   - **Artifact mutation — the `agentnotes_change_` family (start → ops → finish).** `agentnotes_change` is for **block edits only** (the artifact). Annotations are NOT staged.
     - `agentnotes_change_start { title, summary?, by? }` — open a staging transaction (one at a time).
     - `agentnotes_change_block { op, path?, … }` — stage a block-level op. `op` ∈ `add|edit|move|rename|remove`. `path` is the file the block belongs to (default `default.md`); block names are unique **within a path**.

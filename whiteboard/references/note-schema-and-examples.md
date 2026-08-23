@@ -1,103 +1,40 @@
-# Notes Log Schema And Examples
+# Meta-Notes Log
 
-Read this file when creating or refreshing a session's `notes.md`, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
+Read this file when writing to a session's meta-notes log, checking trigger boundaries, or promoting a converged exploration into a durable project artifact.
 
-The session workspace holds the block document and `notes.md` with different disciplines (see `SKILL.md` → Session Workspace):
+The session workspace holds two things with different disciplines (see `SKILL.md` → Session Workspace):
 
-- **Block document** — the outward document. A sequence of named markdown blocks mutated only through `agentnotes` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `agentnotes read --md`).
-- **`notes.md`** — the append-only log. This file. Captures the trail that produced the block document.
+- **Block document** — the outward artifact. A sequence of named markdown blocks mutated only through `agentnotes` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `agentnotes read --md`). This is where the structured summary lives — goal, constraints, current model, decisions, open questions — not `notes.md`.
+- **Meta-notes (`notes.md`)** — your own private, append-only scratchpad: why the document is changing, what you tried, what you ruled out. Written with `meta_notes_add` (pi/MCP) or `agentnotes note <text>` (CLI); read back with `meta_notes_read` / `agentnotes notes`. Never read or write the raw file path directly — go through those, so the path stays an implementation detail.
 
-## notes.md Structure
+Session status (`exploring`/`converging`/`decided`/`archived`) lives in the session's `manifest.json`, not in `notes.md` — there is no state block to keep in sync.
 
-`notes.md` has two parts: a structured **state block** at the top that you edit in place, and an **append-only log** below it that you only ever append to.
+## Writing discipline: terse, or don't write it
 
-```markdown
-# <Session name> — notes log
+A meta-note is a fact for future-you, not prose for a reader. Every entry:
 
-Date: <YYYY-MM-DD>
-Project/context: <repo, module, product, or conversation context>
-Status: exploring
+- States the fact directly. No narration ("we explored…", "the question is whether…"), no throat-clearing ("it's worth noting that…"), no hedging ("this may potentially…"), no intensifiers (very/really/extremely/significantly), no empty adjectives (robust/seamless/comprehensive/pivotal/holistic).
+- Compresses a subagent's finding to its verdict and citation, not its paragraph — `finding + file:line`, not a restated report.
+- Skips whatever is already obvious from the block document. If it belongs in the artifact, it doesn't belong here too.
+- Fits on one line where the fact allows it. `agentnotes` warns (non-blocking) past ~40 words or on a filler-word hit — heed it, don't write around it.
 
-## Core Question
+Bad: "It's worth noting that after exploring this in some depth, we found that the viewer's notes rendering is really quite undercooked and could benefit from a more comprehensive treatment."
+Good: "notes-view: flat markdown dump, no entry differentiation (viewer/blockview.mjs:31-34). Confirmed, not user unfamiliarity."
 
-- <What the user is trying to understand or decide>
+## When To Write One
 
-## Current Working Model
+- A user statement that changes the model: a new constraint, a correction, a decision.
+- A subagent's finding, compressed to verdict + citation.
+- A correction: `Correction (HH:MM): <what changed, in one line>`.
+- Around a block-document mutation (`agentnotes change send` / `agentnotes apply`) whenever the *why* isn't obvious from the diff alone. Several mutations with nothing logged between them will trip `agentnotes`'s own reminder (surfaced on the next change/apply call) — that means the trail is going cold, not that the tool is nagging for its own sake. Log the reason and move on.
 
-- <Best current explanation or proposed model>
+## Example Entries
 
-## Observations
-
-- <Concrete user statements, source facts, runtime behavior, logs, or other checked facts>
-
-## Constraints And Invariants
-
-- <Non-negotiables, ownership boundaries, compatibility needs, protocol constraints, or integration limits>
-
-## Preferences
-
-- <User or project preference; do not treat as a decision unless agreed>
-
-## Assumptions
-
-- <Unverified context or likely convention; include how to verify it>
-
-## Open Questions
-
-- <Question that could change the direction>
-
-## Hypotheses
-
-- <Tentative idea, explicitly marked as unproven>
-
-## Risks
-
-- <Failure mode, cost of being wrong, migration risk, security/privacy risk, operational risk, or reversibility concern>
-
-## Evidence Gathered
-
-- <Source, runtime behavior, issue, log, ADR, user statement, or code path>
-
-## Alternatives Considered
-
-- <Alternative>: <why it helps, why it may fail>
-
-## Rejected Options
-
-- <Rejected option>: <reason, evidence, or decision signal>
-
-## Decisions Or Emerging Direction
-
-- <Only record decisions when explicit or strongly implied>
-
-## Follow-Up Artifacts
-
-- <ADR, issue, spec, roadmap entry, PR, or planning note after promotion>
-
----
-
-## Log
-
-### <YYYY-MM-DD>
-
-- <HH:MM> <Entry: user statement, subagent finding (compact, with source), adjacent check, or correction.>
-- <HH:MM> Correction: <what the user corrected and the corrected model.>
-- Adjacent check: <question>
-  Finding: <1-3 sentence synthesis>
-  Implication: <how this affects the current design>
-  Confidence: <low/medium/high>
+```text
+- (2026-08-23 07:26) notes-view: flat markdown dump, no entry differentiation (viewer/blockview.mjs:31-34). Confirmed, not user unfamiliarity.
+- (2026-08-23 07:27) Correction (07:27): user meant the block-doc storage, not notes.md — notes.md is already plain markdown.
+- (2026-08-23 07:31) Decided: meta-notes stays free text, no schema. Block doc keeps the structured summary.
 ```
-
-The state block is edited in place as the model evolves (replace stale entries). The log below the `---` is append-only: add timestamped entries, never rewrite them. When a correction changes the model, update the state block above **and** append a `Correction:` entry below.
-
-Status values:
-
-- `exploring`: active uncertainty; alternatives and tradeoffs are still open.
-- `converging`: one direction is strongest, but assumptions or risks remain.
-- `decided`: a clear direction exists and the user has chosen or strongly implied it.
-- `archived`: the result has been promoted or no longer needs active tracking.
-
-Do not promote a hypothesis, preference, or repeated suggestion into a decision unless the user explicitly agrees or the conversation clearly converges.
 
 ## Block Document Shape
 
@@ -152,27 +89,17 @@ If a simple question becomes iterative across turns with alternatives, objection
 
 ## Update Discipline
 
-Keep both artifacts compact. Prefer bullets with concrete nouns, paths, issue numbers, command names, logs, and direct user decisions. Do not copy long subagent reports into either; summarize key facts, conflicts, risks, and implications in `notes.md`, and only the decision-relevant synthesis in the block document.
+Keep the block document compact and current: the decision-relevant synthesis, not a dump of every subagent report. Keep meta-notes terser still — one line per fact, per the writing discipline above.
 
-Keep these categories separate (in the `notes.md` state block):
+These categories are useful for *thinking about* the state of an exploration, even with no dedicated section for each: observations (checked facts), assumptions (unverified context), hypotheses (tentative models), constraints, preferences, decisions, rejected options, risks, open questions. Mark them directly on the block document's relevant span with `agentnotes tag` (`unverified`/`needs-attention`/`decided`) and `agentnotes attach` (`question`/`warning`/`objection`) rather than maintaining a parallel categorized list in `notes.md`.
 
-- observations: checked facts and direct user statements
-- assumptions: unverified context or likely conventions
-- hypotheses: tentative models being tested
-- constraints: limits the design must respect
-- preferences: desired direction without decision force
-- decisions: explicit or clearly converged choices
-- rejected options: alternatives ruled out or deferred
-- risks: ways the direction could fail or be expensive to reverse
-- open questions: uncertainty that could change the direction
-
-When exploration contradicts the working model, update the state block's `Current Working Model` and `Observations` in place, record the contradiction under `Evidence Gathered`, and append a log entry. Update the block document to match via `agentnotes change`. Do not leave stale claims standing in the block document while a correction sits only in the log.
+When exploration contradicts the working model, update the block document's current-model block via `agentnotes change`, and log a `Correction:` entry in `notes.md` so the trail shows what changed and when. Do not leave stale claims standing in the block document while a correction sits only in the log.
 
 ## Adjacent Check Examples
 
 Good adjacent checks include prior art or prior ADRs/issues/PRs, existing ownership boundaries, hidden protocol/dependency/platform constraints, terminology pressure, comparable systems, failure modes and cost of being wrong, security/privacy implications, operational complexity, reversibility, and runtime evidence that can confirm or falsify the working model.
 
-Prefer one high-leverage adjacent check at a time. Use the compact `Finding / Implication / Confidence` form, recorded in the log.
+Prefer one high-leverage adjacent check at a time. A subagent may report back in a `Finding / Implication / Confidence` shape — that's fine for what it hands *you*. What you then write to `notes.md` is the terse compression of that: verdict + citation on one line (e.g. `"notes-view: no schema parsing (blockview.mjs:31-34), high confidence"`), not the three-field report restated.
 
 ## Promotion Checklist
 
@@ -181,8 +108,8 @@ Before promoting to a durable artifact, confirm the session has:
 - a chosen or strongly implied direction
 - at least one alternative considered and rejected or deferred
 - evidence supporting the direction
-- observations, assumptions, hypotheses, constraints, preferences, risks, and open questions separated clearly in `notes.md`
+- observations, assumptions, hypotheses, constraints, preferences, risks, and open questions clearly reflected in the block document (via its own blocks, plus `agentnotes tag`/`agentnotes attach`)
 - known unresolved risks or a statement that none are material
 - the target artifact type that matches project convention
 
-Shape the durable artifact from the block document (`agentnotes read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and `notes.md`, and set `manifest.json` status to `decided` (then `archived`).
+Shape the durable artifact from the block document (`agentnotes read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and log it with `meta_notes_add`/`agentnotes note`, and set `manifest.json` status to `decided` (then `archived`).

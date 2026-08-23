@@ -2,10 +2,11 @@
 
 Brief how-to for the `agentnotes` CLI — the portable way to drive a whiteboard session from any harness. Run `agentnotes help` for the full reference. Install it from [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) (`git clone`, `npm install --workspaces`, `npm link`); it then lives on PATH as `agentnotes`.
 
-Two mutation surfaces, kept deliberately apart:
+Three surfaces, kept deliberately apart:
 
 - **`agentnotes change` — the artifact.** Block edits, staged into one atomic revision. Annotations are *not* staged here.
-- **`agentnotes attach` / `agentnotes tag` — annotations.** Meta-discussion about the document (questions/warnings/objections/notes + status tags), written directly, one command each, like `agentnotes note`.
+- **`agentnotes attach` / `agentnotes tag` — annotations.** Meta-discussion about the document (questions/warnings/objections/notes + status tags), written directly, one command each.
+- **`agentnotes note` / `agentnotes notes` — your private meta-notes log.** Free text, append-only, no schema — not part of the artifact.
 
 Every annotation is **anchored** to a text span (`--on` required). There are no block-level annotations — if you mean a whole block, anchor to its heading.
 
@@ -94,12 +95,17 @@ agentnotes change send
 agentnotes attach goal --on "Resolve how NMP relay identity is modeled." --kind question --content "Per-key or per-session identity?" --by user
 ```
 
-## Notes
+## Meta-Notes
+
+A private, append-only, free-text log — never touch the raw file path, only these two commands (pi/MCP: `meta_notes_add`/`meta_notes_read`). Write terse: the fact, no narration, no filler — a non-blocking warning comes back if an entry runs long or reads like prose (see references/note-schema-and-examples.md).
 
 ```bash
-agentnotes note "trail entry"             # append to notes.md (append-only; do not rewrite)
+agentnotes note "trail entry"             # append (append-only; do not rewrite)
 agentnotes note --file f                  # append from a file
+agentnotes notes                          # print the full meta-notes log
 ```
+
+If several `agentnotes change send`/`agentnotes apply` calls land with no `agentnotes note` between them, the 3rd (and every one after, until you log one) prints a reminder — the trail is going cold, log why.
 
 ## Detect new annotations/chat (portable)
 

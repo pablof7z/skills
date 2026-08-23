@@ -39,20 +39,20 @@ This puts `agentnotes` on PATH and (under pi) makes the pi extension available b
 
 The skill body below is process. Learn the tool from the reference files, then use it — don't carry command syntax here.
 
-- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `agentnotes` CLI: sessions, read, the staging transaction (artifact ops), annotation ops (`agentnotes attach`/`agentnotes tag`), notes, and `agentnotes listen` for detecting new annotations/chat.
-- **Under pi with the agentnotes pi extension**, also read [references/pi.md](references/pi.md) — the `agentnotes_*` tools (lazy/active: `agentnotes_new`/`agentnotes_list` load, then unlock the rest), attributed `[agentnotes]` wake messages, the auto-managed viewer, and `/agentnotes`. Under pi you don't run `agentnotes listen` or launch the viewer yourself.
-- For the `notes.md` shape and promotion checklist, see [references/note-schema-and-examples.md](references/note-schema-and-examples.md).
+- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `agentnotes` CLI: sessions, read, the staging transaction (artifact ops), annotation ops (`agentnotes attach`/`agentnotes tag`), meta-notes (`agentnotes note`/`agentnotes notes`), and `agentnotes listen` for detecting new annotations/chat.
+- **Under pi with the agentnotes pi extension**, also read [references/pi.md](references/pi.md) — the `agentnotes_*` tools plus `meta_notes_add`/`meta_notes_read` (lazy/active: `agentnotes_new`/`agentnotes_list` load, then unlock the rest), attributed `[agentnotes]` wake messages, the auto-managed viewer, and `/agentnotes`. Under pi you don't run `agentnotes listen` or launch the viewer yourself.
+- For the meta-notes writing discipline and promotion checklist, see [references/note-schema-and-examples.md](references/note-schema-and-examples.md).
 
 ## Start the Session
 
 1. Assign a concise human-readable session name from the main object plus uncertainty, e.g. `NMP relay identity model exploration`.
 2. Create or select a session with `agentnotes new <slug>` (or `agentnotes use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
-3. Seed the document with the initial context and current working model as the artifact's content (a `goal` block, a `constraints` block, and whatever body blocks the artifact shape calls for). Surface the highest-value open questions as `agentnotes attach` (a `question` on the relevant span) or `agentnotes tag` (`needs-attention`), or in `notes.md` — not as block content.
+3. Seed the document with the initial context and current working model as the artifact's content (a `goal` block, a `constraints` block, and whatever body blocks the artifact shape calls for). Surface the highest-value open questions as `agentnotes attach` (a `question` on the relevant span) or `agentnotes tag` (`needs-attention`), or as a terse meta-note (`agentnotes note`/`meta_notes_add`) — not as block content.
 4. Keep exploring until clarity emerges. Prefer source inspection, runtime evidence, focused questions, and tradeoff analysis over premature edits.
 
-## Block Document, Annotations, and Notes
+## Block Document, Annotations, and Meta-Notes
 
-The workspace holds three layers with different disciplines: the **block document** (the artifact), **annotations** (meta-discussion about the document), and `notes.md` (the internal trail).
+The workspace holds three layers with different disciplines: the **block document** (the artifact), **annotations** (meta-discussion about the document), and **meta-notes** (your own private, append-only trail — `notes.md`, never touched by path; read/write only via `meta_notes_read`/`meta_notes_add` or `agentnotes notes`/`agentnotes note`).
 
 **Block document — the artifact itself.** A sequence of **named markdown blocks** holding the content of the artifact you are converging toward — the spec, plan, proposal, design memo, or brief. Write it as if it were the finished artifact, kept at the best version you can produce right now. Mutate it retroactively: rewrite, reorganize, and replace freely as the working model evolves. It is not append-only, and it is not a record of how you got there.
 
@@ -62,7 +62,7 @@ Block content is the artifact's content, **not commentary about producing it.** 
 - The artifact's goal, current working model, and settled direction, stated as the artifact would state them.
 - Material risks the artifact itself must carry (a spec names its risks; that is content, not process).
 
-Keep it skimmable — for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in `notes.md`. Start each block with an `# H1` title (the viewer's TOC lists headings, not block names). The viewer renders markdown with syntax highlighting, Mermaid, and footnotes.
+Keep it skimmable — for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in meta-notes. Start each block with an `# H1` title (the viewer's TOC lists headings, not block names). The viewer renders markdown with syntax highlighting, Mermaid, and footnotes.
 
 **Annotations — meta-discussion about the document.** Two verbs, both direct writes (not staged), both anchored to a span of a block (`--on` required — there are no block-level annotations; if you mean a whole block, anchor to its heading):
 
@@ -71,11 +71,11 @@ Keep it skimmable — for the human to steer, not a dump of every subagent repor
 
 Color is the only signal — the viewer renders each kind in its own color (a loud kind like amber `warning` or red `objection` is the “look at this” affordance; there is no separate attention/amber-card concept). Resolve threads (`agentnotes attach resolve`) as the document absorbs their answer; clear tags when the status no longer holds. Don't leave resolved discussion dangling.
 
-**notes.md — the internal trail.** Append, do not rewrite (`agentnotes note "entry"`). Capture the trail: things the user made explicit, compact subagent findings with source, corrections (`Correction (HH:MM): …`), and adjacent-check results in `Finding / Implication / Confidence` form. Use the template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) for the first `notes.md`.
+**Meta-notes — your private trail.** Append-only, free text, no schema (`agentnotes note "entry"` / `meta_notes_add`). Capture: things the user made explicit, a subagent finding compressed to verdict + citation, corrections (`Correction (HH:MM): …`), why a block-document mutation happened. **Write terse — one line, the fact, no narration or filler; `agentnotes` warns (non-blocking) when an entry runs long or reads like prose.** Full discipline and examples in [references/note-schema-and-examples.md](references/note-schema-and-examples.md). If you keep sending block changes with nothing logged between them, `agentnotes` will remind you (surfaced on the next `change send`/`apply`) — that means the trail is going cold; log the reason.
 
 ## Exploration Loop
 
-At each turn: mutate the block document (retroactively, as the live truth) and append to `notes.md` (as the trail) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis when a real decision is open.
+At each turn: mutate the block document (retroactively, as the live truth) and log a terse meta-note (`meta_notes_add`/`agentnotes note`) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis when a real decision is open.
 
 **Always explore via subagent.** Dispatch a subagent to research the user's question and to open the adjacent field. The main thread frames the question, dispatches one or more subagents with a bounded prompt, collects their results, updates the note, and synthesizes — it does not perform source inspection, runtime checks, doc/issue/ADR reads, or adjacent exploration directly in the main thread. This keeps the main thread honest: synthesis from verified subagent findings, not from priors. If no subagent tooling is available, say so explicitly, record the limitation, and do not substitute speculation.
 
@@ -103,23 +103,23 @@ Confidence: [low/medium/high]
 Suggested note update: [optional]
 ```
 
-Summarize the result into `notes.md`. Bring only the relevant conclusion back to the user, framed with context. If the result contradicts the current model, surface that clearly and update the block document.
+That structured shape is for the subagent's report back to you. Compress it to one terse meta-note line — verdict + citation, not the report restated (see references/note-schema-and-examples.md). Bring only the relevant conclusion back to the user, framed with context. If the result contradicts the current model, surface that clearly and update the block document.
 
 ## User Overrides
 
 Obey direct user override commands immediately:
 
-- `show notes` / `show document`: show the `notes.md` trail / the block document.
+- `show notes` / `show document`: show the meta-notes trail (`meta_notes_read`/`agentnotes notes`) / the block document.
 - `open viewer`: (re)launch the live viewer for the current session (under pi it's auto-managed).
 - `rename this session`: rename the relevant blocks to match (`agentnotes change rename …`).
-- `stop tracking this`: stop updating the session; log it via `agentnotes note`.
-- `forget that`: remove or revise the affected block; log the removal via `agentnotes note`.
+- `stop tracking this`: stop updating the session; log it as a meta-note.
+- `forget that`: remove or revise the affected block; log the removal as a meta-note.
 - `that was not a decision`: move the item out of decisions into hypothesis/preference/rejected/open-question; log it.
-- `mark this as decided`: record the decision in the block document (a `decisions` block) and `notes.md`; treat further options as closed. Optionally tag the settled span `agentnotes tag --kind decided`.
+- `mark this as decided`: record the decision in the block document (a `decisions` block) and log it as a meta-note; treat further options as closed. Optionally tag the settled span `agentnotes tag --kind decided`.
 - `save this now`: commit any open staging (`agentnotes change send`).
 - `do not run background agents here`: stop proactive adjacent exploration unless the user re-enables it.
 
-When the user corrects an interpretation, update the block document retroactively so it reflects the corrected model, and append the correction to `notes.md`. Do not leave stale claims standing in the document.
+When the user corrects an interpretation, update the block document retroactively so it reflects the corrected model, and log a terse `Correction:` meta-note. Do not leave stale claims standing in the document.
 
 ## Session Boundaries
 
@@ -127,12 +127,12 @@ Pause, close, or split the session when the user changes topics, moves into exec
 
 ## Convergence and Promotion
 
-Treat the session as `converging` when one direction is becoming stronger but important assumptions or risks remain open; treat it as `decided` only on a clear decision signal (the user explicitly choosing, asking to write it up, asking to implement, or repeatedly treating one direction as agreed after alternatives were considered). Record these state changes in the block document and `notes.md`.
+Treat the session as `converging` when one direction is becoming stronger but important assumptions or risks remain open; treat it as `decided` only on a clear decision signal (the user explicitly choosing, asking to write it up, asking to implement, or repeatedly treating one direction as agreed after alternatives were considered). Record these state changes in the block document and as a terse meta-note.
 
-Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document (`agentnotes read --md` to export), carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep `notes.md` as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, record the follow-up artifact path in the document and `notes.md`.
+Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document (`agentnotes read --md` to export), carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep meta-notes as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, record the follow-up artifact path in the document and as a meta-note.
 
 ## Reference
 
 - [references/cli-ops.md](references/cli-ops.md) — the `agentnotes` CLI (load this).
 - [references/pi.md](references/pi.md) — whiteboard under pi with the agentnotes pi extension (load this if applicable).
-- [references/note-schema-and-examples.md](references/note-schema-and-examples.md) — `notes.md` schema and promotion checklist.
+- [references/note-schema-and-examples.md](references/note-schema-and-examples.md) — meta-notes writing discipline and promotion checklist.
