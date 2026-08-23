@@ -4,8 +4,8 @@ Read this file when writing to a session's meta-notes log, checking trigger boun
 
 The session workspace holds two things with different disciplines (see `SKILL.md` → Session Workspace):
 
-- **Block document** — the outward artifact. A sequence of named markdown blocks mutated only through `agentnotes` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `agentnotes read --md`). This is where the structured summary lives — goal, constraints, current model, decisions, open questions — not `notes.md`.
-- **Meta-notes (`notes.md`)** — your own private, append-only scratchpad: why the document is changing, what you tried, what you ruled out. Written with `meta_notes_add` (pi/MCP) or `agentnotes note <text>` (CLI); read back with `meta_notes_read` / `agentnotes notes`. Never read or write the raw file path directly — go through those, so the path stays an implementation detail.
+- **Block document** — the outward artifact. A sequence of named markdown blocks mutated only through `pad` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `pad read --md`). This is where the structured summary lives — goal, constraints, current model, decisions, open questions — not `notes.md`.
+- **Meta-notes (`notes.md`)** — your own private, append-only scratchpad: why the document is changing, what you tried, what you ruled out. Written with `pad_meta_notes_add` (pi/MCP) or `pad note <text>` (CLI); read back with `pad_meta_notes_view` / `pad notes`. Never read or write the raw file path directly — go through those, so the path stays an implementation detail.
 
 Session status (`exploring`/`converging`/`decided`/`archived`) lives in the session's `manifest.json`, not in `notes.md` — there is no state block to keep in sync.
 
@@ -16,7 +16,7 @@ A meta-note is a fact for future-you, not prose for a reader. Every entry:
 - States the fact directly. No narration ("we explored…", "the question is whether…"), no throat-clearing ("it's worth noting that…"), no hedging ("this may potentially…"), no intensifiers (very/really/extremely/significantly), no empty adjectives (robust/seamless/comprehensive/pivotal/holistic).
 - Compresses a subagent's finding to its verdict and citation, not its paragraph — `finding + file:line`, not a restated report.
 - Skips whatever is already obvious from the block document. If it belongs in the artifact, it doesn't belong here too.
-- Fits on one line where the fact allows it. `agentnotes` warns (non-blocking) past ~40 words or on a filler-word hit — heed it, don't write around it.
+- Fits on one line where the fact allows it. `pad` warns (non-blocking) past ~40 words or on a filler-word hit — heed it, don't write around it.
 
 Bad: "It's worth noting that after exploring this in some depth, we found that the viewer's notes rendering is really quite undercooked and could benefit from a more comprehensive treatment."
 Good: "notes-view: flat markdown dump, no entry differentiation (viewer/blockview.mjs:31-34). Confirmed, not user unfamiliarity."
@@ -26,7 +26,7 @@ Good: "notes-view: flat markdown dump, no entry differentiation (viewer/blockvie
 - A user statement that changes the model: a new constraint, a correction, a decision.
 - A subagent's finding, compressed to verdict + citation.
 - A correction: `Correction (HH:MM): <what changed, in one line>`.
-- Around a block-document mutation (`agentnotes change send` / `agentnotes apply`) whenever the *why* isn't obvious from the diff alone. Several mutations with nothing logged between them will trip `agentnotes`'s own reminder (surfaced on the next change/apply call) — that means the trail is going cold, not that the tool is nagging for its own sake. Log the reason and move on.
+- Around a block-document mutation (`pad change send` / `pad apply`) whenever the *why* isn't obvious from the diff alone. Several mutations with nothing logged between them will trip `pad`'s own reminder (surfaced on the next change/apply call) — that means the trail is going cold, not that the tool is nagging for its own sake. Log the reason and move on.
 
 ## Example Entries
 
@@ -45,7 +45,7 @@ The block document has no fixed template — shape it to the session (plan, prop
 - The viable options and the emerging direction, with the decision frontier visible.
 - Open questions and material risks.
 
-Keep it skimmable for the human; summarize verified findings here, keep the raw trail in `notes.md`. Mutate it only through `agentnotes change` (retroactively — rewrite and reorganize freely as the working model evolves).
+Keep it skimmable for the human; summarize verified findings here, keep the raw trail in `notes.md`. Mutate it only through `pad change` (retroactively — rewrite and reorganize freely as the working model evolves).
 
 ## Naming
 
@@ -60,7 +60,7 @@ Session names should be short, searchable, and specific:
 Session directory slugs are lowercase hyphen-case, with a year-month date prefix:
 
 ```text
-~/agentnotes/nmp/2026-07-nmp-relay-identity-model/
+~/pad/nmp/2026-07-nmp-relay-identity-model/
 ```
 
 ## Trigger Examples
@@ -91,9 +91,9 @@ If a simple question becomes iterative across turns with alternatives, objection
 
 Keep the block document compact and current: the decision-relevant synthesis, not a dump of every subagent report. Keep meta-notes terser still — one line per fact, per the writing discipline above.
 
-These categories are useful for *thinking about* the state of an exploration, even with no dedicated section for each: observations (checked facts), assumptions (unverified context), hypotheses (tentative models), constraints, preferences, decisions, rejected options, risks, open questions. Mark them directly on the block document's relevant span with `agentnotes tag` (`unverified`/`needs-attention`/`decided`) and `agentnotes attach` (`question`/`warning`/`objection`) rather than maintaining a parallel categorized list in `notes.md`.
+These categories are useful for *thinking about* the state of an exploration, even with no dedicated section for each: observations (checked facts), assumptions (unverified context), hypotheses (tentative models), constraints, preferences, decisions, rejected options, risks, open questions. Mark them directly on the block document's relevant span with `pad tag` (`unverified`/`needs-attention`/`decided`) and `pad attach` (`question`/`warning`/`objection`) rather than maintaining a parallel categorized list in `notes.md`.
 
-When exploration contradicts the working model, update the block document's current-model block via `agentnotes change`, and log a `Correction:` entry in `notes.md` so the trail shows what changed and when. Do not leave stale claims standing in the block document while a correction sits only in the log.
+When exploration contradicts the working model, update the block document's current-model block via `pad change`, and log a `Correction:` entry in `notes.md` so the trail shows what changed and when. Do not leave stale claims standing in the block document while a correction sits only in the log.
 
 ## Adjacent Check Examples
 
@@ -108,8 +108,8 @@ Before promoting to a durable artifact, confirm the session has:
 - a chosen or strongly implied direction
 - at least one alternative considered and rejected or deferred
 - evidence supporting the direction
-- observations, assumptions, hypotheses, constraints, preferences, risks, and open questions clearly reflected in the block document (via its own blocks, plus `agentnotes tag`/`agentnotes attach`)
+- observations, assumptions, hypotheses, constraints, preferences, risks, and open questions clearly reflected in the block document (via its own blocks, plus `pad tag`/`pad attach`)
 - known unresolved risks or a statement that none are material
 - the target artifact type that matches project convention
 
-Shape the durable artifact from the block document (`agentnotes read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and log it with `meta_notes_add`/`agentnotes note`, and set `manifest.json` status to `decided` (then `archived`).
+Shape the durable artifact from the block document (`pad read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and log it with `pad_meta_notes_add`/`pad note`, and set `manifest.json` status to `decided` (then `archived`).
