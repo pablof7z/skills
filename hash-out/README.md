@@ -1,10 +1,10 @@
-# Whiteboard
+# Hash Out
 
 ## Preserve the path to a decision, not just the final sentence
 
 Complex exploratory work rarely moves in a straight line. A promising model reveals a hidden constraint. An objection changes the ownership boundary. A rejected option becomes useful under a different assumption. Weeks later, the final decision looks obvious only because the difficult path that produced it has disappeared.
 
-`whiteboard` gives that path a durable shape while the thinking is still alive.
+`hash-out` gives that path a durable shape while the thinking is still alive.
 
 It does not force an uncertain conversation into a premature specification. It keeps observations, assumptions, hypotheses, preferences, risks, alternatives, and actual decisions separate, so the team can change its mind without rewriting history.
 
@@ -25,7 +25,7 @@ The skill is pure methodology — it drives [`agentnotes`](https://github.com/pa
 Invoke it in the language of the unresolved question:
 
 ```text
-$whiteboard help me work through whether query ownership belongs in the engine or the app shell.
+$hash-out help me work through whether query ownership belongs in the engine or the app shell.
 ```
 
 Useful follow-ups are direct:

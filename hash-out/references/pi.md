@@ -1,6 +1,6 @@
-# Whiteboard under pi (pad pi extension)
+# Hash Out under pi (pad pi extension)
 
-Brief how-to for using whiteboard inside a pi harness with the **pad pi extension** loaded (from [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes), `extension/`). If the extension isn't loaded, use the portable CLI instead — see [cli-ops.md](cli-ops.md).
+Brief how-to for using hash-out inside a pi harness with the **pad pi extension** loaded (from [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes), `extension/`). If the extension isn't loaded, use the portable CLI instead — see [cli-ops.md](cli-ops.md).
 
 ## What the extension does for you
 

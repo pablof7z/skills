@@ -1,9 +1,9 @@
 ---
-name: whiteboard
+name: hash-out
 description: "Exploration that always opens the research field beyond what the user asked. Proactively load for any non-trivial question, design, or system discussion — including factual and probing questions, architecture, systems, agents, workflows, products, protocols, skills, prompts, and implementation strategy. Research the literal question with verified facts, then proactively bring in adjacent and relevant context the user may not have thought to ask about, surfaced with context. Do not load for pure execution tasks (direct implementation or edit, code review, CI fix, release, direct GitHub/PR work), simple prompt rewrite, or one-shot prompt optimization."
 ---
 
-# Whiteboard
+# Hash Out
 
 ## Operating Principle
 
@@ -17,7 +17,7 @@ User feedback often points at a symptom, not the fix. Don't apply it as a litera
 
 ## Epistemic Discipline
 
-Whiteboard is exploration, not a license to speculate. The user is depending on you to know what is actually true before the design conversation can move. Research first; assert only what you have verified.
+Hash Out is exploration, not a license to speculate. The user is depending on you to know what is actually true before the design conversation can move. Research first; assert only what you have verified.
 
 - Research before you assert. Before stating how something works, what exists, how many parts it has, or what a name refers to, inspect the source, docs, logs, runtime, or prior art that would settle it. If you cannot verify it now, go verify it or explicitly mark it as a guess. Never present a guess as fact.
 - Separate fact from speculation. Researched facts get stated plainly with their source; unverified claims get tagged hypothesis, assumption, or "not yet checked". If a claim is anywhere near material to the design, settle it with a source/runtime check before you rely on it — a guess that stays a guess near a decision is a latent defect.
@@ -28,7 +28,7 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 
 ## The Tool
 
-Whiteboard is a methodology, not a tool implementation. It drives [`@pablof7z/agentpad`](https://www.npmjs.com/package/@pablof7z/agentpad) (source: [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) — repo name not yet renamed to match) — a standalone CLI, pi extension, MCP server, and web viewer — as an external dependency. Install it once per machine:
+Hash Out is a methodology, not a tool implementation. It drives [`@pablof7z/agentpad`](https://www.npmjs.com/package/@pablof7z/agentpad) (source: [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) — repo name not yet renamed to match) — a standalone CLI, pi extension, MCP server, and web viewer — as an external dependency. Install it once per machine:
 
 ```bash
 npm install -g @pablof7z/agentpad
@@ -139,5 +139,5 @@ Promote to a durable project artifact only after `decided`: shape the final ADR,
 ## Reference
 
 - [references/cli-ops.md](references/cli-ops.md) — the `pad` CLI (load this).
-- [references/pi.md](references/pi.md) — whiteboard under pi with the pad pi extension (load this if applicable).
+- [references/pi.md](references/pi.md) — hash-out under pi with the pad pi extension (load this if applicable).
 - [references/note-schema-and-examples.md](references/note-schema-and-examples.md) — meta-notes writing discipline and promotion checklist.

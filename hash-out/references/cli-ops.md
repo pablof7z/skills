@@ -1,6 +1,6 @@
 # Agent Notes CLI operations (`pad`)
 
-Brief how-to for the `pad` CLI — the portable way to drive a whiteboard session from any harness. Run `pad help` for the full reference. Install it from [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) (`git clone`, `npm install --workspaces`, `npm link`); it then lives on PATH as `pad`.
+Brief how-to for the `pad` CLI — the portable way to drive a hash-out session from any harness. Run `pad help` for the full reference. Install it from [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) (`git clone`, `npm install --workspaces`, `npm link`); it then lives on PATH as `pad`.
 
 Three surfaces, kept deliberately apart:
 
