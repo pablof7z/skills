@@ -28,14 +28,19 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 
 ## The Tool
 
-Whiteboard is a methodology, not a tool implementation. It drives [`agentnotes`](https://github.com/pablof7z/agentnotes) — a standalone CLI, pi extension, MCP server, and web viewer — as an external dependency. Install it once per machine:
+Whiteboard is a methodology, not a tool implementation. It drives [`@pablof7z/agentpad`](https://www.npmjs.com/package/@pablof7z/agentpad) (source: [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) — repo name not yet renamed to match) — a standalone CLI, pi extension, MCP server, and web viewer — as an external dependency. Install it once per machine:
 
 ```bash
-git clone https://github.com/pablof7z/agentnotes.git
-cd agentnotes && npm install --workspaces && npm link
+npm install -g @pablof7z/agentpad
 ```
 
-This puts `pad` on PATH and (under pi) makes the pi extension available by symlinking `extension/` into `~/.pi/agent/extensions/pad`. See the [agentnotes README](https://github.com/pablof7z/agentnotes#readme) for details.
+This puts `pad` on PATH. Under pi, also symlink the extension in (the npm install doesn't do this for you):
+
+```bash
+ln -s "$(npm root -g)/@pablof7z/agentpad/extension" ~/.pi/agent/extensions/pad
+```
+
+For local development instead, `git clone https://github.com/pablof7z/agentnotes.git && cd agentnotes && npm install --workspaces && npm link` — same `pad` on PATH, symlink `extension/` from the clone instead. See the [agentnotes README](https://github.com/pablof7z/agentnotes#readme) for details.
 
 The skill body below is process. Learn the tool from the reference files, then use it — don't carry command syntax here.
 
