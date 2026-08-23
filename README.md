@@ -63,7 +63,7 @@ Skills rarely fail in clean, repeatable ways. An instruction is ambiguous, a tri
 
 The hardest exploratory discussions do not fail from a lack of ideas. They fail when assumptions quietly become decisions, rejected options return without context, or implementation begins before the important uncertainty is gone.
 
-`whiteboard` keeps the exploration alive without letting it become vague: evidence, tensions, risks, alternatives, and decision signals stay distinct until the direction actually converges.
+`whiteboard` keeps the exploration alive without letting it become vague: evidence, tensions, risks, alternatives, and decision signals stay distinct until the direction actually converges. It's pure methodology — the CLI, pi extension, MCP server, and web viewer behind it live in the standalone [`agentnotes`](https://github.com/pablof7z/agentnotes) repo.
 
 [See how an open question becomes a defensible decision →](whiteboard/README.md)
 
@@ -129,7 +129,7 @@ Most skill folders contain instructions and reference material only. The excepti
   delete remote data or publish profile and discovery metadata unless the user
   explicitly requests those separate operations.
 - `meta-feedback` writes or appends Markdown issues under the target skill's `meta-feedback/` directory. It does not edit the target skill, change issue status, or publish feedback to GitHub.
-- `whiteboard` writes exploration notes only under the agent private home (`~/.agents/home/{identifier}/whiteboard/`).
+- `whiteboard` drives the external [`agentnotes`](https://github.com/pablof7z/agentnotes) tool, which writes exploration notes only under its own data root (`~/agentnotes` by default, override via `AGENTNOTES_ROOT`).
 - `agent-home` creates the selected private agent directory under `~/.agents/home`; its resolver does not read or publish the directory's contents.
 - `nip60` is implementation guidance for software that can touch keys, signed events, relays, mints, and token state. It is not custody software or a security audit.
 - `prime-context` reads and writes research notes only under the calling agent's own `~/.agents/home/{identifier}/research` directory, resolved via `agent-home`. It does not write to a shared location or another agent's home.

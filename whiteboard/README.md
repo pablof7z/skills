@@ -18,6 +18,8 @@ It does not force an uncertain conversation into a premature specification. It k
 
 The skill names the exploration, keeps concise notes without interrupting to ask permission, and updates the record as evidence or objections change the model. When a direction becomes real, it can be promoted into the repository's existing durable format: an issue, ADR, plan, or specification.
 
+The skill is pure methodology — it drives [`agentnotes`](https://github.com/pablof7z/agentnotes), a standalone CLI, pi extension, MCP server, and web viewer, as an external dependency. See [SKILL.md](SKILL.md#the-tool) for install instructions.
+
 ## Start an exploration
 
 Invoke it in the language of the unresolved question:
