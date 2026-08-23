@@ -79,10 +79,12 @@ pad attach list [--block X] [--path P] [--open]
 **`pad tag` — short status tags** (kinds: `unverified` | `superseded` | `needs-attention` | `decided`):
 
 ```bash
-pad tag <block> --on "quote" --kind <tag-kind> [--content T] [--by who] [--path P]   # set (idempotent)
+pad tag <block> --on "quote" --kind <tag-kind> [--content T] [--color C] [--by who] [--path P]   # set
 pad tag <block> --on "quote" --kind <tag-kind> --clear [--by who] [--path P]         # clear
 pad tag list [--block X] [--path P]
 ```
+
+`kind` is the behavioral bucket (idempotent, never wakes anyone) — unchanged. `--content` (≤50 chars) becomes the badge's visible label in the viewer instead of the fixed kind word; `--color` is a bare CSS color name or hex code (`orange`, `#f59e0b` — anything else is rejected) rendered as a small dot on the badge. Re-setting the same kind on the same span with the same content+color is a no-op; a different content/color updates the tag in place instead of duplicating it.
 
 A typical first seed:
 

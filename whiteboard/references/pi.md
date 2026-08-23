@@ -46,11 +46,11 @@ Thirteen tools, exposed via pi's **lazy/active** pattern. A fresh agent sees onl
       | `resolve` / `reopen` | `id` |
       | `list` | `block?`, `path?`, `open?` |
 
-    - `pad_tag { op, … }` — short status tags anchored to a span. `op` ∈ `set|clear|list`. `on` required for `set`/`clear`. `kind` ∈ `unverified|superseded|needs-attention|decided`. `set` is idempotent (a second `set` of the same tag on the same span is a no-op).
+    - `pad_tag { op, … }` — short status tags anchored to a span. `op` ∈ `set|clear|list`. `on` required for `set`/`clear`. `kind` ∈ `unverified|superseded|needs-attention|decided` — the behavioral bucket, unrelated to appearance. `content` (≤50 chars) becomes the badge's visible label in the viewer instead of the fixed kind word; `color` is a bare CSS color name or hex code (`"orange"`, `"#f59e0b"` — anything else is rejected) rendered as a small dot on the badge. `set` with the same content+color on an already-tagged span is a no-op; a different content/color updates it in place rather than duplicating it.
 
       | op | params |
       | --- | --- |
-      | `set` | `block`, `on`, `kind`, `content?`, `by?`, `path?` |
+      | `set` | `block`, `on`, `kind`, `content?`, `color?`, `by?`, `path?` |
       | `clear` | `block`, `on`, `kind`, `by?`, `path?` |
       | `list` | `block?`, `path?` |
 
