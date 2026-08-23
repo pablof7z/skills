@@ -4,7 +4,7 @@ Read this file when creating or refreshing a session's `notes.md`, checking trig
 
 The session workspace holds the block document and `notes.md` with different disciplines (see `SKILL.md` → Session Workspace):
 
-- **Block document** — the outward document. A sequence of named markdown blocks mutated only through `wb` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `wb read --md`).
+- **Block document** — the outward document. A sequence of named markdown blocks mutated only through `agentnotes` (the fold over `changes/<rev>.json`). Rewritten retroactively as the live truth. Becomes the durable artifact on promotion (export with `agentnotes read --md`).
 - **`notes.md`** — the append-only log. This file. Captures the trail that produced the block document.
 
 ## notes.md Structure
@@ -108,7 +108,7 @@ The block document has no fixed template — shape it to the session (plan, prop
 - The viable options and the emerging direction, with the decision frontier visible.
 - Open questions and material risks.
 
-Keep it skimmable for the human; summarize verified findings here, keep the raw trail in `notes.md`. Mutate it only through `wb change` (retroactively — rewrite and reorganize freely as the working model evolves).
+Keep it skimmable for the human; summarize verified findings here, keep the raw trail in `notes.md`. Mutate it only through `agentnotes change` (retroactively — rewrite and reorganize freely as the working model evolves).
 
 ## Naming
 
@@ -123,7 +123,7 @@ Session names should be short, searchable, and specific:
 Session directory slugs are lowercase hyphen-case, with a year-month date prefix:
 
 ```text
-~/whiteboard/nmp/2026-07-nmp-relay-identity-model/
+~/agentnotes/nmp/2026-07-nmp-relay-identity-model/
 ```
 
 ## Trigger Examples
@@ -166,7 +166,7 @@ Keep these categories separate (in the `notes.md` state block):
 - risks: ways the direction could fail or be expensive to reverse
 - open questions: uncertainty that could change the direction
 
-When exploration contradicts the working model, update the state block's `Current Working Model` and `Observations` in place, record the contradiction under `Evidence Gathered`, and append a log entry. Update the block document to match via `wb change`. Do not leave stale claims standing in the block document while a correction sits only in the log.
+When exploration contradicts the working model, update the state block's `Current Working Model` and `Observations` in place, record the contradiction under `Evidence Gathered`, and append a log entry. Update the block document to match via `agentnotes change`. Do not leave stale claims standing in the block document while a correction sits only in the log.
 
 ## Adjacent Check Examples
 
@@ -185,4 +185,4 @@ Before promoting to a durable artifact, confirm the session has:
 - known unresolved risks or a statement that none are material
 - the target artifact type that matches project convention
 
-Shape the durable artifact from the block document (`wb read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and `notes.md`, and set `manifest.json` status to `decided` (then `archived`).
+Shape the durable artifact from the block document (`agentnotes read --md` to export), carrying its requirements/constraints block over verbatim. Prefer updating existing ADRs, specs, planning notes, roadmap entries, or issues; create a new one only when no suitable existing artifact exists. After promotion, record the follow-up artifact path in the block document and `notes.md`, and set `manifest.json` status to `decided` (then `archived`).

@@ -26,19 +26,28 @@ Whiteboard is exploration, not a license to speculate. The user is depending on 
 - Verify once, not incrementally. If a claim you stated is challenged or you realize you never verified it, stop, recheck the source fully, and replace it. One clean correction beats a walk-back chain.
 - "I don't know yet" is acceptable and expected.
 
-## How To Drive The Tool
+## The Tool
 
-The skill body is process. Learn the tool from the reference files, then use it — don't carry command syntax here.
+Whiteboard is a methodology, not a tool implementation. It drives [`agentnotes`](https://github.com/pablof7z/agentnotes) — a standalone CLI, pi extension, MCP server, and web viewer — as an external dependency. Install it once per machine:
 
-- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `wb` CLI: sessions, read, the staging transaction (artifact ops), annotation ops (`wb attach`/`wb tag`), notes, and `wb listen` for detecting new annotations/chat.
-- **Under pi with the pi-whiteboard extension**, also read [references/pi.md](references/pi.md) — the `wb_*` tools (lazy/active: `wb_new`/`wb_list` load, then unlock the rest), attributed `[whiteboard]` wake messages, the auto-managed viewer, and `/wb`. Under pi you don't run `wb listen` or launch the viewer yourself.
+```bash
+git clone https://github.com/pablof7z/agentnotes.git
+cd agentnotes && npm install --workspaces && npm link
+```
+
+This puts `agentnotes` on PATH and (under pi) makes the pi extension available by symlinking `extension/` into `~/.pi/agent/extensions/agentnotes`. See the [agentnotes README](https://github.com/pablof7z/agentnotes#readme) for details.
+
+The skill body below is process. Learn the tool from the reference files, then use it — don't carry command syntax here.
+
+- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `agentnotes` CLI: sessions, read, the staging transaction (artifact ops), annotation ops (`agentnotes attach`/`agentnotes tag`), notes, and `agentnotes listen` for detecting new annotations/chat.
+- **Under pi with the agentnotes pi extension**, also read [references/pi.md](references/pi.md) — the `agentnotes_*` tools (lazy/active: `agentnotes_new`/`agentnotes_list` load, then unlock the rest), attributed `[agentnotes]` wake messages, the auto-managed viewer, and `/agentnotes`. Under pi you don't run `agentnotes listen` or launch the viewer yourself.
 - For the `notes.md` shape and promotion checklist, see [references/note-schema-and-examples.md](references/note-schema-and-examples.md).
 
 ## Start the Session
 
 1. Assign a concise human-readable session name from the main object plus uncertainty, e.g. `NMP relay identity model exploration`.
-2. Create or select a session with `wb new <slug>` (or `wb use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
-3. Seed the document with the initial context and current working model as the artifact's content (a `goal` block, a `constraints` block, and whatever body blocks the artifact shape calls for). Surface the highest-value open questions as `wb attach` (a `question` on the relevant span) or `wb tag` (`needs-attention`), or in `notes.md` — not as block content.
+2. Create or select a session with `agentnotes new <slug>` (or `agentnotes use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
+3. Seed the document with the initial context and current working model as the artifact's content (a `goal` block, a `constraints` block, and whatever body blocks the artifact shape calls for). Surface the highest-value open questions as `agentnotes attach` (a `question` on the relevant span) or `agentnotes tag` (`needs-attention`), or in `notes.md` — not as block content.
 4. Keep exploring until clarity emerges. Prefer source inspection, runtime evidence, focused questions, and tradeoff analysis over premature edits.
 
 ## Block Document, Annotations, and Notes
@@ -57,12 +66,12 @@ Keep it skimmable — for the human to steer, not a dump of every subagent repor
 
 **Annotations — meta-discussion about the document.** Two verbs, both direct writes (not staged), both anchored to a span of a block (`--on` required — there are no block-level annotations; if you mean a whole block, anchor to its heading):
 
-- **`wb attach`** — replyable threads. Kinds: `question`, `warning`, `objection`, `note`. Use these for things *about* the document that are not part of the artifact: open questions, objections, choices that need the human, things to verify or sign off on. A `note` is a non-action side comment (it does not wake the agent); `question`/`warning`/`objection` from a human with no agent reply are actionable.
-- **`wb tag`** — short status tags. Kinds: `unverified`, `superseded`, `needs-attention`, `decided`. Idempotent set/clear; not replyable. Mark a span as needing the human with `needs-attention`, or as settled with `decided`.
+- **`agentnotes attach`** — replyable threads. Kinds: `question`, `warning`, `objection`, `note`. Use these for things *about* the document that are not part of the artifact: open questions, objections, choices that need the human, things to verify or sign off on. A `note` is a non-action side comment (it does not wake the agent); `question`/`warning`/`objection` from a human with no agent reply are actionable.
+- **`agentnotes tag`** — short status tags. Kinds: `unverified`, `superseded`, `needs-attention`, `decided`. Idempotent set/clear; not replyable. Mark a span as needing the human with `needs-attention`, or as settled with `decided`.
 
-Color is the only signal — the viewer renders each kind in its own color (a loud kind like amber `warning` or red `objection` is the “look at this” affordance; there is no separate attention/amber-card concept). Resolve threads (`wb attach resolve`) as the document absorbs their answer; clear tags when the status no longer holds. Don't leave resolved discussion dangling.
+Color is the only signal — the viewer renders each kind in its own color (a loud kind like amber `warning` or red `objection` is the “look at this” affordance; there is no separate attention/amber-card concept). Resolve threads (`agentnotes attach resolve`) as the document absorbs their answer; clear tags when the status no longer holds. Don't leave resolved discussion dangling.
 
-**notes.md — the internal trail.** Append, do not rewrite (`wb note "entry"`). Capture the trail: things the user made explicit, compact subagent findings with source, corrections (`Correction (HH:MM): …`), and adjacent-check results in `Finding / Implication / Confidence` form. Use the template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) for the first `notes.md`.
+**notes.md — the internal trail.** Append, do not rewrite (`agentnotes note "entry"`). Capture the trail: things the user made explicit, compact subagent findings with source, corrections (`Correction (HH:MM): …`), and adjacent-check results in `Finding / Implication / Confidence` form. Use the template in [references/note-schema-and-examples.md](references/note-schema-and-examples.md) for the first `notes.md`.
 
 ## Exploration Loop
 
@@ -102,12 +111,12 @@ Obey direct user override commands immediately:
 
 - `show notes` / `show document`: show the `notes.md` trail / the block document.
 - `open viewer`: (re)launch the live viewer for the current session (under pi it's auto-managed).
-- `rename this session`: rename the relevant blocks to match (`wb change rename …`).
-- `stop tracking this`: stop updating the session; log it via `wb note`.
-- `forget that`: remove or revise the affected block; log the removal via `wb note`.
+- `rename this session`: rename the relevant blocks to match (`agentnotes change rename …`).
+- `stop tracking this`: stop updating the session; log it via `agentnotes note`.
+- `forget that`: remove or revise the affected block; log the removal via `agentnotes note`.
 - `that was not a decision`: move the item out of decisions into hypothesis/preference/rejected/open-question; log it.
-- `mark this as decided`: record the decision in the block document (a `decisions` block) and `notes.md`; treat further options as closed. Optionally tag the settled span `wb tag --kind decided`.
-- `save this now`: commit any open staging (`wb change send`).
+- `mark this as decided`: record the decision in the block document (a `decisions` block) and `notes.md`; treat further options as closed. Optionally tag the settled span `agentnotes tag --kind decided`.
+- `save this now`: commit any open staging (`agentnotes change send`).
 - `do not run background agents here`: stop proactive adjacent exploration unless the user re-enables it.
 
 When the user corrects an interpretation, update the block document retroactively so it reflects the corrected model, and append the correction to `notes.md`. Do not leave stale claims standing in the document.
@@ -120,10 +129,10 @@ Pause, close, or split the session when the user changes topics, moves into exec
 
 Treat the session as `converging` when one direction is becoming stronger but important assumptions or risks remain open; treat it as `decided` only on a clear decision signal (the user explicitly choosing, asking to write it up, asking to implement, or repeatedly treating one direction as agreed after alternatives were considered). Record these state changes in the block document and `notes.md`.
 
-Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document (`wb read --md` to export), carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep `notes.md` as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, record the follow-up artifact path in the document and `notes.md`.
+Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document (`agentnotes read --md` to export), carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep `notes.md` as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, record the follow-up artifact path in the document and `notes.md`.
 
 ## Reference
 
-- [references/cli-ops.md](references/cli-ops.md) — the `wb` CLI (load this).
-- [references/pi.md](references/pi.md) — whiteboard under pi with the pi-whiteboard extension (load this if applicable).
+- [references/cli-ops.md](references/cli-ops.md) — the `agentnotes` CLI (load this).
+- [references/pi.md](references/pi.md) — whiteboard under pi with the agentnotes pi extension (load this if applicable).
 - [references/note-schema-and-examples.md](references/note-schema-and-examples.md) — `notes.md` schema and promotion checklist.
