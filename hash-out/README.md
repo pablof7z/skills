@@ -18,7 +18,7 @@ It does not force an uncertain conversation into a premature specification. It k
 
 The skill names the exploration, keeps concise notes without interrupting to ask permission, and updates the record as evidence or objections change the model. When a direction becomes real, it can be promoted into the repository's existing durable format: an issue, ADR, plan, or specification.
 
-The skill is pure methodology — it drives [`agentnotes`](https://github.com/pablof7z/agentnotes), a standalone CLI, pi extension, MCP server, and web viewer, as an external dependency. See [SKILL.md](SKILL.md#the-tool) for install instructions.
+The skill is pure methodology. Its working record uses [`agentnotes`](https://github.com/pablof7z/agentnotes), a standalone CLI, pi extension, MCP server, and web viewer. Agent Notes owns its setup and mechanics; start from [its README](https://github.com/pablof7z/agentnotes#readme).
 
 ## Start an exploration
 
@@ -39,4 +39,4 @@ mark this as decided
 
 The output is not a ceremonial document. It is a reliable memory of what is known, what remains uncertain, and which evidence would change the direction.
 
-Read [SKILL.md](SKILL.md) for the lifecycle and [the note schema](references/note-schema-and-examples.md) for the exact record it maintains.
+Read [SKILL.md](SKILL.md) for the exploration lifecycle. For pad mechanics, use the [Agent Notes documentation](https://github.com/pablof7z/agentnotes#readme).

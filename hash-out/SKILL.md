@@ -26,40 +26,26 @@ Hash Out is exploration, not a license to speculate. The user is depending on yo
 - Verify once, not incrementally. If a claim you stated is challenged or you realize you never verified it, stop, recheck the source fully, and replace it. One clean correction beats a walk-back chain.
 - "I don't know yet" is acceptable and expected.
 
-## The Tool
+## Working Record
 
-Hash Out is a methodology, not a tool implementation. It drives [`@pablof7z/agentpad`](https://www.npmjs.com/package/@pablof7z/agentpad) (source: [pablof7z/agentnotes](https://github.com/pablof7z/agentnotes) — repo name not yet renamed to match) — a standalone CLI, pi extension, MCP server, and web viewer — as an external dependency. Install it once per machine:
+Hash Out is methodology, not a tool implementation. It uses the standalone [`agentnotes`](https://github.com/pablof7z/agentnotes) pad as its working record. Pad owns all setup and mechanics, including the CLI, pi extension, MCP server, web viewer, annotations, and meta-notes. Consult the [Agent Notes README](https://github.com/pablof7z/agentnotes#readme) and its linked guides whenever mechanics are needed.
 
-```bash
-npm install -g @pablof7z/agentpad
-```
-
-This puts `pad` on PATH. Under pi, also symlink the extension in (the npm install doesn't do this for you):
-
-```bash
-ln -s "$(npm root -g)/@pablof7z/agentpad/extension" ~/.pi/agent/extensions/pad
-```
-
-For local development instead, `git clone https://github.com/pablof7z/agentnotes.git && cd agentnotes && npm install --workspaces && npm link` — same `pad` on PATH, symlink `extension/` from the clone instead. See the [agentnotes README](https://github.com/pablof7z/agentnotes#readme) for details.
-
-The skill body below is process. Learn the tool from the reference files, then use it — don't carry command syntax here.
-
-- **Always load [references/cli-ops.md](references/cli-ops.md)** — the `pad` CLI: sessions, read, the staging transaction (artifact ops), annotation ops (`pad attach`/`pad tag`), meta-notes (`pad note`/`pad notes`), and `pad listen` for detecting new annotations/chat.
-- **Under pi with the pad pi extension**, also read [references/pi.md](references/pi.md) — the `pad_*` tools plus `pad_meta_notes_add`/`pad_meta_notes_view` (lazy/active: `pad_new`/`pad_list` load, then unlock the rest), attributed `[pad]` wake messages, the auto-managed viewer, and `/pad`. Under pi you don't run `pad listen` or launch the viewer yourself.
-- For the meta-notes writing discipline and promotion checklist, see [references/note-schema-and-examples.md](references/note-schema-and-examples.md).
+The process below is about how to explore, what to keep current, and when to converge. It deliberately does not define tool syntax or implementation details.
 
 ## Start the Session
 
 1. Assign a concise human-readable session name from the main object plus uncertainty, e.g. `NMP relay identity model exploration`.
-2. Create or select a session with `pad new <slug>` (or `pad use <slug>` to reuse). Do not ask permission; do not interrupt the discussion.
-3. Seed the document with the initial context and current working model as the artifact's content (a `goal` block, a `constraints` block, and whatever body blocks the artifact shape calls for). Surface the highest-value open questions as `pad attach` (a `question` on the relevant span) or `pad tag` (`needs-attention`), or as a terse meta-note (`pad note`/`pad_meta_notes_add`) — not as block content.
+2. Create or select the working session. Do not ask permission; do not interrupt the discussion.
+3. Seed the document with the initial context and current working model as the artifact's content (a goal block, a constraints block, and whatever body blocks the artifact shape calls for). Put the highest-value open questions in an annotation or a terse meta-note — not in block content.
 4. Keep exploring until clarity emerges. Prefer source inspection, runtime evidence, focused questions, and tradeoff analysis over premature edits.
+
+Use the skill for iterative questions with alternatives, objections, or a changing direction: comparing ownership designs before implementation, assessing competing migration paths, or reopening a model whose failure recovery crosses a boundary. Handle direct implementation, code review, CI repair, one-shot rewrites, and simple factual definitions directly. If a simple question becomes iterative across turns, start the working record then and seed it with the earlier context.
 
 ## Block Document, Annotations, and Meta-Notes
 
-The workspace holds three layers with different disciplines: the **block document** (the artifact), **annotations** (meta-discussion about the document), and **meta-notes** (your own private, append-only trail — `notes.md`, never touched by path; read/write only via `pad_meta_notes_view`/`pad_meta_notes_add` or `pad notes`/`pad note`).
+The workspace holds three layers with different disciplines: the **block document** (the artifact), **annotations** (meta-discussion about the document), and **meta-notes** (an append-only log that captures the evolution of the pad).
 
-**Block document — the artifact itself.** A sequence of **named markdown blocks** holding the content of the artifact you are converging toward — the spec, plan, proposal, design memo, or brief. Write it as if it were the finished artifact, kept at the best version you can produce right now. Mutate it retroactively: rewrite, reorganize, and replace freely as the working model evolves. It is not append-only, and it is not a record of how you got there.
+**Block document — the artifact itself.** It holds the content of the artifact you are converging toward — the spec, plan, proposal, design memo, or brief. Write it as if it were the finished artifact, kept at the best version you can produce right now. Mutate it retroactively: rewrite, reorganize, and replace freely as the working model evolves. It is not append-only, and it is not a record of how you got there.
 
 Block content is the artifact's content, **not commentary about producing it.** No narration ("we explored…", "the question is whether…"), no changelog ("we decided X", "previously we assumed Y"), no "options considered" lists, no open questions. If a line would not appear in the finished artifact, it does not belong in a block. Rewrite the block to state the current best answer directly — a block that says "we are considering A vs B" should instead state A (or B) as the working model, with the unresolved choice pushed to an annotation or a note. What belongs on the blocks:
 
@@ -67,20 +53,15 @@ Block content is the artifact's content, **not commentary about producing it.** 
 - The artifact's goal, current working model, and settled direction, stated as the artifact would state them.
 - Material risks the artifact itself must carry (a spec names its risks; that is content, not process).
 
-Keep it skimmable — for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in meta-notes. Start each block with an `# H1` title (the viewer's TOC lists headings, not block names). The viewer renders markdown with syntax highlighting, Mermaid, and footnotes.
+Keep it skimmable — for the human to steer, not a dump of every subagent report. Summarize verified findings here; keep the raw trail in meta-notes.
 
-**Annotations — meta-discussion about the document.** Two verbs, both direct writes (not staged), both anchored to a span of a block (`--on` required — there are no block-level annotations; if you mean a whole block, anchor to its heading):
+**Annotations — meta-discussion about the document.** Use them for things *about* the document that are not part of the artifact: open questions, objections, choices that need the human, things to verify or sign off on. Keep each annotation anchored to the claim it qualifies. Resolve or clear it as the document absorbs the answer; do not leave settled discussion dangling.
 
-- **`pad attach`** — replyable threads. Kinds: `question`, `warning`, `objection`, `note`. Use these for things *about* the document that are not part of the artifact: open questions, objections, choices that need the human, things to verify or sign off on. A `note` is a non-action side comment (it does not wake the agent); `question`/`warning`/`objection` from a human with no agent reply are actionable.
-- **`pad tag`** — short status tags. Kinds: `unverified`, `superseded`, `needs-attention`, `decided`. Idempotent set/clear; not replyable. Mark a span as needing the human with `needs-attention`, or as settled with `decided`.
-
-Color is the only signal — the viewer renders each kind in its own color (a loud kind like amber `warning` or red `objection` is the “look at this” affordance; there is no separate attention/amber-card concept). Resolve threads (`pad attach resolve`) as the document absorbs their answer; clear tags when the status no longer holds. Don't leave resolved discussion dangling.
-
-**Meta-notes — your private trail.** Append-only, free text, no schema (`pad note "entry"` / `pad_meta_notes_add`). Capture: things the user made explicit, a subagent finding compressed to verdict + citation, corrections (`Correction (HH:MM): …`), why a block-document mutation happened. **Write terse — one line, the fact, no narration or filler; `pad` warns (non-blocking) when an entry runs long or reads like prose.** Full discipline and examples in [references/note-schema-and-examples.md](references/note-schema-and-examples.md). If you keep sending block changes with nothing logged between them, `pad` will remind you (surfaced on the next `change send`/`apply`) — that means the trail is going cold; log the reason.
+**Meta-notes — the evolution trail.** Capture things the user made explicit, a subagent finding compressed to verdict + citation, corrections, and why a block-document mutation happened. Write one terse line: the fact, no narration or filler. The full writing discipline and examples are pad mechanics; use the [Agent Notes meta-notes guide](https://github.com/pablof7z/agentnotes/blob/main/docs/meta-notes.md).
 
 ## Exploration Loop
 
-At each turn: mutate the block document (retroactively, as the live truth) and log a terse meta-note (`pad_meta_notes_add`/`pad note`) with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis when a real decision is open.
+At each turn: mutate the block document (retroactively, as the live truth) and log a terse meta-note with any new model, evidence, objection, alternative, correction, or decision signal. Then respond in the main thread with the smallest useful accurate answer — researched facts for a factual question, or the decision-frontier synthesis when a real decision is open.
 
 **Always explore via subagent.** Dispatch a subagent to research the user's question and to open the adjacent field. The main thread frames the question, dispatches one or more subagents with a bounded prompt, collects their results, updates the note, and synthesizes — it does not perform source inspection, runtime checks, doc/issue/ADR reads, or adjacent exploration directly in the main thread. This keeps the main thread honest: synthesis from verified subagent findings, not from priors. If no subagent tooling is available, say so explicitly, record the limitation, and do not substitute speculation.
 
@@ -108,20 +89,20 @@ Confidence: [low/medium/high]
 Suggested note update: [optional]
 ```
 
-That structured shape is for the subagent's report back to you. Compress it to one terse meta-note line — verdict + citation, not the report restated (see references/note-schema-and-examples.md). Bring only the relevant conclusion back to the user, framed with context. If the result contradicts the current model, surface that clearly and update the block document.
+That structured shape is for the subagent's report back to you. Compress it to one terse meta-note line — verdict + citation, not the report restated. Bring only the relevant conclusion back to the user, framed with context. If the result contradicts the current model, surface that clearly and update the block document.
 
 ## User Overrides
 
 Obey direct user override commands immediately:
 
-- `show notes` / `show document`: show the meta-notes trail (`pad_meta_notes_view`/`pad notes`) / the block document.
-- `open viewer`: (re)launch the live viewer for the current session (under pi it's auto-managed).
-- `rename this session`: rename the relevant blocks to match (`pad change rename …`).
+- `show notes` / `show document`: show the meta-notes trail / the block document.
+- `open viewer`: open the live viewer for the current session.
+- `rename this session`: rename the relevant blocks to match.
 - `stop tracking this`: stop updating the session; log it as a meta-note.
 - `forget that`: remove or revise the affected block; log the removal as a meta-note.
 - `that was not a decision`: move the item out of decisions into hypothesis/preference/rejected/open-question; log it.
-- `mark this as decided`: record the decision in the block document (a `decisions` block) and log it as a meta-note; treat further options as closed. Optionally tag the settled span `pad tag --kind decided`.
-- `save this now`: commit any open staging (`pad change send`).
+- `mark this as decided`: record the decision in the block document (a `decisions` block) and log it as a meta-note; treat further options as closed. Mark the settled span as decided.
+- `save this now`: commit any open document change.
 - `do not run background agents here`: stop proactive adjacent exploration unless the user re-enables it.
 
 When the user corrects an interpretation, update the block document retroactively so it reflects the corrected model, and log a terse `Correction:` meta-note. Do not leave stale claims standing in the document.
@@ -134,10 +115,10 @@ Pause, close, or split the session when the user changes topics, moves into exec
 
 Treat the session as `converging` when one direction is becoming stronger but important assumptions or risks remain open; treat it as `decided` only on a clear decision signal (the user explicitly choosing, asking to write it up, asking to implement, or repeatedly treating one direction as agreed after alternatives were considered). Record these state changes in the block document and as a terse meta-note.
 
-Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document (`pad read --md` to export), carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep meta-notes as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, record the follow-up artifact path in the document and as a meta-note.
+Promote to a durable project artifact only after `decided`: shape the final ADR, issue, planning note, spec, or roadmap entry from the block document, carrying over the requirements/constraints block verbatim. Prefer updating an existing artifact over creating a new one. Keep meta-notes as the trail. Do not open issues, create PRs, write ADRs, modify canonical docs, or change implementation files before convergence. After promotion, record the follow-up artifact path in the document and as a meta-note.
 
-## Reference
+Before promotion, confirm that the record contains a chosen or strongly implied direction; an alternative that was rejected or deferred; evidence for the direction; the relevant observations, assumptions, hypotheses, constraints, preferences, risks, and open questions; unresolved risks or a determination that none are material; and the artifact type that matches project convention.
 
-- [references/cli-ops.md](references/cli-ops.md) — the `pad` CLI (load this).
-- [references/pi.md](references/pi.md) — hash-out under pi with the pad pi extension (load this if applicable).
-- [references/note-schema-and-examples.md](references/note-schema-and-examples.md) — meta-notes writing discipline and promotion checklist.
+## Pad mechanics
+
+For pad installation, CLI operations, the pi extension, MCP tools, viewer behavior, and meta-notes mechanics, use the [Agent Notes README](https://github.com/pablof7z/agentnotes#readme). It is the canonical source for the mechanism.
