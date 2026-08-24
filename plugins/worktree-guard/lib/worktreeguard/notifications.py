@@ -11,12 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def notify_auto_grant(base_path: Path, *, reason: str, session_id: str) -> None:
+def notify_auto_grant(base_path: Path, *, reason: str, session_id: str, group: str) -> None:
     message = (
         "An agent requested and was auto-granted temporary permission to mutate the "
-        f"base checkout {base_path}. Reason: {reason}. "
-        "Require approval with: wtg config --repo "
-        f"{base_path} set allowBypass false."
+        f"base checkout {base_path} (group: {group}). Reason: {reason}. "
+        "Require manual approval for this group with: wtg config --repo "
+        f"{base_path} set {group}.bypass manual."
     )
     test_log = os.environ.get("WTG_NOTIFICATION_LOG_FILE")
     if test_log:

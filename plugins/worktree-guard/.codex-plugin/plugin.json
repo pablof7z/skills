@@ -1,6 +1,6 @@
 {
   "name": "worktree-guard",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Configurable Git and native-edit awareness for base checkouts.",
   "author": {
     "name": "Pablo Fernandez",
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "WorktreeGuard",
     "shortDescription": "Control and surface base-checkout mutations.",
-    "longDescription": "A lightweight accident-prevention hook that blocks six risky Git commands and harness-native file writes in Git base checkouts until an agent explicitly requests access. Per-repo behavior is configured by a local .wtg.json (enabled, writes=block/off/warn, allowBypass).",
+    "longDescription": "A lightweight accident-prevention hook that governs seven risky Git commands and harness-native file writes in Git base checkouts, in four independent groups (writes, branchChanges, discard, stash) until an agent explicitly requests access. Per-repo behavior is configured by a local .wtg.json: enabled, plus a disposition (allow/warn/block) and bypass (auto/manual/none) per group.",
     "developerName": "Pablo Fernandez",
     "category": "Productivity",
     "capabilities": [

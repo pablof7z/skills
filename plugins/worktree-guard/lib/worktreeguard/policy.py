@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
-from .core import BLOCKED_GIT_COMMANDS, Repo, resolve_path
+from .core import BLOCKED_GIT_COMMANDS, GIT_COMMAND_GROUPS, Repo, resolve_path
 from .git import is_main_worktree, is_ref
 from .operations import native_write_targets, operation_is_native_write, operation_is_shell
-from .storage import repo_config
+from .storage import GroupPolicy, repo_config
 
 
 CONTROL_TOKENS = {"&&", "||", ";", "|", "&"}
@@ -25,6 +25,7 @@ class BlockedGitOperation:
     cwd: Path
     base_path: Path
     branch_change: bool
+    group: str
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class BlockedFileOperation:
     cwd: Path
     base_path: Path
     target: Path | None
+    group: str = "writes"
 
 
 BlockedOperation = Union[BlockedGitOperation, BlockedFileOperation]
@@ -47,72 +49,58 @@ def blocked_operation(operation: dict[str, object], cwd: Path) -> BlockedOperati
     return None
 
 
-def blocked_file_operation(
-    operation: dict[str, object], cwd: Path
+def warned_operation(operation: dict[str, object], cwd: Path) -> BlockedOperation | None:
+    """Return a non-blocking warning for an operation whose group disposition is 'warn'."""
+    if operation_is_native_write(operation):
+        return warned_file_operation(operation, cwd)
+    if operation_is_shell(operation):
+        return warned_git_operation(str(operation.get("command") or ""), cwd)
+    return None
+
+
+def blocked_file_operation(operation: dict[str, object], cwd: Path) -> BlockedFileOperation | None:
+    """Block native edit/write targets in a base checkout when writes.disposition=block."""
+    return _file_operation_for_disposition(operation, cwd, "block")
+
+
+def warned_file_operation(operation: dict[str, object], cwd: Path) -> BlockedFileOperation | None:
+    """Surface a non-blocking warning for native writes when writes.disposition=warn."""
+    return _file_operation_for_disposition(operation, cwd, "warn")
+
+
+def _file_operation_for_disposition(
+    operation: dict[str, object], cwd: Path, disposition: str
 ) -> BlockedFileOperation | None:
-    """Block native edit/write targets in a base checkout when writes=block."""
     resolved_cwd = resolve_path(cwd)
     targets = native_write_targets(operation, resolved_cwd)
     for target in targets:
         repo = base_repo_containing(target)
-        if repo is not None and _writes_blocked(repo.base_path):
+        if repo is not None and _group_disposition(repo.base_path, "writes") == disposition:
             return BlockedFileOperation(
-                str(operation.get("tool_name") or "file write"),
-                resolved_cwd,
-                repo.base_path,
-                target,
+                str(operation.get("tool_name") or "file write"), resolved_cwd, repo.base_path, target,
             )
 
     if targets:
         return None
     is_base, repo = is_main_worktree(resolved_cwd)
-    if is_base and repo is not None and _writes_blocked(repo.base_path):
+    if is_base and repo is not None and _group_disposition(repo.base_path, "writes") == disposition:
         return BlockedFileOperation(
-            str(operation.get("tool_name") or "file write"),
-            resolved_cwd,
-            repo.base_path,
-            None,
+            str(operation.get("tool_name") or "file write"), resolved_cwd, repo.base_path, None,
         )
     return None
 
 
-def warned_file_operation(
-    operation: dict[str, object], cwd: Path
-) -> BlockedFileOperation | None:
-    """Surface a non-blocking warning for native writes when writes=warn."""
-    resolved_cwd = resolve_path(cwd)
-    targets = native_write_targets(operation, resolved_cwd)
-    for target in targets:
-        repo = base_repo_containing(target)
-        if repo is not None and _writes_warned(repo.base_path):
-            return BlockedFileOperation(
-                str(operation.get("tool_name") or "file write"),
-                resolved_cwd,
-                repo.base_path,
-                target,
-            )
-
-    if targets:
+def _group_disposition(base_path: Path, group: str) -> str | None:
+    """The group's configured disposition, or ``None`` if the guard is disabled."""
+    config = repo_config(base_path)
+    if not config.enabled:
         return None
-    is_base, repo = is_main_worktree(resolved_cwd)
-    if is_base and repo is not None and _writes_warned(repo.base_path):
-        return BlockedFileOperation(
-            str(operation.get("tool_name") or "file write"),
-            resolved_cwd,
-            repo.base_path,
-            None,
-        )
-    return None
+    return config.policy(group).disposition
 
 
-def _writes_blocked(base_path: Path) -> bool:
-    config = repo_config(base_path)
-    return config.enabled and config.writes == "block"
-
-
-def _writes_warned(base_path: Path) -> bool:
-    config = repo_config(base_path)
-    return config.enabled and config.writes == "warn"
+def group_policy(base_path: Path, group: str) -> GroupPolicy:
+    """The group's full policy (disposition + bypass), regardless of ``enabled``."""
+    return repo_config(base_path).policy(group)
 
 
 def base_repo_containing(target: Path) -> Repo | None:
@@ -135,7 +123,18 @@ def existing_context_dir(path: Path) -> Path:
 
 
 def blocked_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None:
-    """Return the first explicitly blocked Git invocation in a protected base."""
+    """Return the first blocked Git invocation (group disposition=block) in a protected base."""
+    return _git_operation_for_disposition(command, cwd, "block")
+
+
+def warned_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None:
+    """Return the first warned Git invocation (group disposition=warn) in a protected base."""
+    return _git_operation_for_disposition(command, cwd, "warn")
+
+
+def _git_operation_for_disposition(
+    command: str, cwd: Path, disposition: str
+) -> BlockedGitOperation | None:
     segments = shell_segments(command)
     if not segments:
         return None
@@ -150,9 +149,12 @@ def blocked_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None
         if subcommand not in BLOCKED_GIT_COMMANDS:
             continue
         is_base, repo = is_main_worktree(git_cwd)
-        if is_base and repo is not None and repo_config(repo.base_path).enabled:
-            branch_change = is_branch_change(subcommand, rest, git_cwd)
-            return BlockedGitOperation(subcommand, command, git_cwd, repo.base_path, branch_change)
+        if not is_base or repo is None:
+            continue
+        branch_change = is_branch_change(subcommand, rest, git_cwd)
+        group = "branchChanges" if branch_change else GIT_COMMAND_GROUPS.get(subcommand, "discard")
+        if _group_disposition(repo.base_path, group) == disposition:
+            return BlockedGitOperation(subcommand, command, git_cwd, repo.base_path, branch_change, group)
     return None
 
 

@@ -1,4 +1,4 @@
-"""Tests for branch-change detection and the branchChanges approval policy."""
+"""Tests for branch-change detection and the branchChanges group's policy."""
 
 from __future__ import annotations
 
@@ -40,31 +40,37 @@ class BranchChangeDetectionTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def detected(self, command: str) -> bool | None:
+    def group(self, command: str) -> str | None:
         op = blocked_git_operation(command, self.base)
-        if op is None:
-            return None
-        return op.branch_change
+        return None if op is None else op.group
 
-    def test_switch_always_branch_change(self) -> None:
-        self.assertTrue(self.detected("git switch main"))
-        self.assertTrue(self.detected("git switch -c new"))
+    def test_switch_is_branch_changes_group(self) -> None:
+        self.assertEqual(self.group("git switch main"), "branchChanges")
+        self.assertEqual(self.group("git switch -c new"), "branchChanges")
 
-    def test_checkout_new_branch_is_branch_change(self) -> None:
-        self.assertTrue(self.detected("git checkout -b feature"))
-        self.assertTrue(self.detected("git checkout -B feature"))
+    def test_checkout_new_branch_is_branch_changes_group(self) -> None:
+        self.assertEqual(self.group("git checkout -b feature"), "branchChanges")
+        self.assertEqual(self.group("git checkout -B feature"), "branchChanges")
 
-    def test_checkout_existing_branch_is_branch_change(self) -> None:
-        self.assertTrue(self.detected("git checkout main"))
+    def test_checkout_existing_branch_is_branch_changes_group(self) -> None:
+        self.assertEqual(self.group("git checkout main"), "branchChanges")
 
-    def test_path_restore_is_not_branch_change(self) -> None:
-        self.assertFalse(self.detected("git checkout -- tracked.txt"))
-        self.assertFalse(self.detected("git checkout tracked.txt"))
-        self.assertFalse(self.detected("git checkout main -- tracked.txt"))
+    def test_path_restore_is_discard_group_not_branch_changes(self) -> None:
+        self.assertEqual(self.group("git checkout -- tracked.txt"), "discard")
+        self.assertEqual(self.group("git checkout tracked.txt"), "discard")
+        self.assertEqual(self.group("git checkout main -- tracked.txt"), "discard")
 
-    def test_non_checkout_commands_are_not_branch_change(self) -> None:
-        self.assertFalse(self.detected("git reset --hard"))
-        self.assertFalse(self.detected("git clean -fd"))
+    def test_reset_clean_rebase_restore_are_discard_group(self) -> None:
+        self.assertEqual(self.group("git reset --hard"), "discard")
+        self.assertEqual(self.group("git clean -fd"), "discard")
+        self.assertEqual(self.group("git rebase main"), "discard")
+        self.assertEqual(self.group("git restore tracked.txt"), "discard")
+
+    def test_stash_is_its_own_group_not_discard(self) -> None:
+        # Deliberately not folded into "discard": silently displacing an agent's own
+        # uncommitted work without it knowing is a distinct risk, not a lesser one.
+        self.assertEqual(self.group("git stash"), "stash")
+        self.assertEqual(self.group("git stash pop"), "stash")
 
 
 class BranchPolicyHookTests(unittest.TestCase):
@@ -109,39 +115,54 @@ class BranchPolicyHookTests(unittest.TestCase):
             run_harness_hook("pre-tool-use", payload, harness="codex")
         return out.getvalue().strip()
 
-    def test_block_mode_denies_switch_even_with_general_grant(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "block"})
+    def test_bypass_none_denies_switch_even_with_general_grant(self) -> None:
+        write_config(self.base, {"branchChanges": {"bypass": "none"}})
         create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
         out = json.loads(self.hook(self.switch_payload()))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("automatically denied", out["hookSpecificOutput"]["permissionDecisionReason"])
 
-    def test_block_mode_still_allows_non_branch_ops_with_grant(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "block"})
+    def test_bypass_none_on_branch_changes_still_allows_discard_with_grant(self) -> None:
+        # Groups are independent: tightening branchChanges doesn't touch discard.
+        write_config(self.base, {"branchChanges": {"bypass": "none"}})
         create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
         self.assertEqual(self.hook(self.reset_payload()), "")
 
-    def test_manual_mode_denies_switch_with_auto_grant(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "manual"})
+    def test_bypass_manual_denies_switch_with_general_auto_grant(self) -> None:
+        write_config(self.base, {"branchChanges": {"bypass": "manual"}})
         create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
         out = json.loads(self.hook(self.switch_payload()))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("auto-approval is disabled for branch changes", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertIn("auto-approval is disabled for this group", out["hookSpecificOutput"]["permissionDecisionReason"])
 
-    def test_manual_mode_allows_switch_with_branch_change_grant(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "manual"})
-        create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session", branch_change=True)
+    def test_bypass_manual_allows_switch_with_group_tagged_grant(self) -> None:
+        write_config(self.base, {"branchChanges": {"bypass": "manual"}})
+        create_grant(
+            base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session",
+            group="branchChanges",
+        )
         self.assertEqual(self.hook(self.switch_payload()), "")
 
-    def test_manual_mode_branch_grant_does_not_leak_beyond_session(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "manual"})
-        create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session", branch_change=True)
+    def test_bypass_manual_group_grant_does_not_cover_a_different_group(self) -> None:
+        write_config(self.base, {"branchChanges": {"bypass": "manual"}})
+        create_grant(
+            base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session",
+            group="discard",
+        )
+        out = json.loads(self.hook(self.switch_payload()))
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_bypass_manual_grant_does_not_leak_beyond_session(self) -> None:
+        write_config(self.base, {"branchChanges": {"bypass": "manual"}})
+        create_grant(
+            base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session",
+            group="branchChanges",
+        )
         other = dict(self.switch_payload(), session_id="other-session")
         out = json.loads(self.hook(other))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_follow_mode_allows_switch_with_general_grant(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "follow"})
+    def test_bypass_auto_allows_switch_with_general_grant(self) -> None:
         create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
         self.assertEqual(self.hook(self.switch_payload()), "")
 
@@ -178,28 +199,44 @@ class RequestBranchAccessTests(unittest.TestCase):
                 "--branch-change", "--reason", "switching",
             ])
 
-    def test_block_mode_auto_denies_branch_request(self) -> None:
-        self.assertEqual(self.request_branch(
-            {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "block"}), 1)
+    def test_bypass_none_auto_denies_branch_request(self) -> None:
+        self.assertEqual(self.request_branch({"branchChanges": {"bypass": "none"}}), 1)
         self.assertEqual(active_grants(), [])
 
-    def test_manual_mode_forces_human_approval_even_with_bypass(self) -> None:
+    def test_bypass_manual_forces_human_approval(self) -> None:
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "deny"}):
-            self.assertEqual(self.request_branch(
-                {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "manual"}), 1)
+            self.assertEqual(self.request_branch({"branchChanges": {"bypass": "manual"}}), 1)
         self.assertEqual(active_grants(), [])
 
-    def test_manual_mode_human_approval_grants_branch_change(self) -> None:
+    def test_bypass_manual_human_approval_grants_branch_change(self) -> None:
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "session"}):
-            self.assertEqual(self.request_branch(
-                {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "manual"}), 0)
+            self.assertEqual(self.request_branch({"branchChanges": {"bypass": "manual"}}), 0)
         self.assertTrue(active_grants())
-        self.assertTrue(active_grants()[0]["branch_change"])
+        self.assertEqual(active_grants()[0]["group"], "branchChanges")
 
-    def test_follow_mode_with_bypass_auto_grants_branch_change(self) -> None:
-        self.assertEqual(self.request_branch(
-            {"enabled": True, "writes": "block", "allowBypass": True, "branchChanges": "follow"}), 0)
-        self.assertTrue(active_grants()[0]["branch_change"])
+    def test_bypass_auto_grants_branch_change(self) -> None:
+        self.assertEqual(self.request_branch({}), 0)
+        self.assertEqual(active_grants()[0]["group"], "branchChanges")
+
+    def test_group_flag_is_equivalent_to_branch_change_alias(self) -> None:
+        with redirect_stdout(io.StringIO()):
+            code = main([
+                "request-base-access", "--repo", str(self.base),
+                "--group", "branchChanges", "--reason", "switching",
+            ])
+        self.assertEqual(code, 0)
+        self.assertEqual(active_grants()[0]["group"], "branchChanges")
+
+    def test_group_and_branch_change_are_mutually_exclusive(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main([
+                "request-base-access", "--repo", str(self.base),
+                "--group", "writes", "--branch-change", "--reason", "x",
+            ])
+
+    def test_group_is_required(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["request-base-access", "--repo", str(self.base), "--reason", "x"])
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> None:

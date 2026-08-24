@@ -63,7 +63,7 @@ def main() -> int:
                         f"{harness} {case.name}: expected {case.expected}, got {actual}: {details}"
                     )
 
-        failures.extend(allow_bypass_setting_failures(base, env))
+        failures.extend(bypass_setting_failures(base, env))
         expected_denials += 6  # codex, claude, grok unrequested base-edit denials x2 (bypass on/off)
         failures.extend(request_grant_failures(base, env))
         expected_denials += 1
@@ -245,13 +245,16 @@ def shim_failures(temp: Path) -> list[str]:
 
 
 def session_approval_failures(base: Path, env: dict[str, str]) -> list[str]:
-    """With bypass off, the request falls back to asking the local human."""
-    set_allow_bypass(env, "false")
+    """With bypass=manual, the request falls back to asking the local human."""
+    set_group_bypass(env, "discard", "manual")
     approval_env = {
         **env, "WTG_APPROVAL_RESPONSE": "session", "WTG_SESSION_ID": "approved-session",
     }
     result = subprocess.run(
-        [str(WTG), "request-base-access", "--repo", str(base), "--reason", "probe"],
+        [
+            str(WTG), "request-base-access", "--repo", str(base),
+            "--group", "discard", "--reason", "probe",
+        ],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=approval_env, check=False,
     )
     if result.returncode != 0:
@@ -271,24 +274,23 @@ def session_approval_failures(base: Path, env: dict[str, str]) -> list[str]:
     ]
 
 
-def allow_bypass_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
+def bypass_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
     failures: list[str] = []
-    for value in ("false", "true"):
+    for value in ("manual", "auto"):
         result = subprocess.run(
-            [str(WTG), "config", "--repo", str(base), "set", "allowBypass", value],
+            [str(WTG), "config", "--repo", str(base), "set", "writes.bypass", value],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=env, check=False,
         )
-        expected = "true" if value == "true" else "false"
-        if result.returncode != 0 or f"\"allowBypass\":{expected}" not in result.stdout:
-            failures.append(f"config set allowBypass {value} failed: {result.stderr}")
+        if result.returncode != 0 or f'"bypass":"{value}"' not in result.stdout.replace(" ", ""):
+            failures.append(f"config set writes.bypass {value} failed: {result.stderr}")
         # An unrequested base edit is denied regardless of the bypass setting.
         for harness in ("codex", "claude", "grok"):
             payload = {"session_id": f"unrequested-{harness}", **native(
                 base, "Edit", file_path=base / "README.md"
             )}
             actual, details = decision(harness, "pre-tool-use", payload, env)
-            print(f"{actual.upper():5} [{harness}] unrequested base edit blocked (bypass={expected})")
+            print(f"{actual.upper():5} [{harness}] unrequested base edit blocked (writes.bypass={value})")
             if actual != "deny":
                 failures.append(
                     f"{harness} unrequested edit expected deny, got {actual}: {details}"
@@ -298,10 +300,13 @@ def allow_bypass_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
 
 def request_grant_failures(base: Path, env: dict[str, str]) -> list[str]:
     """An explicit request is what auto-grants; the write alone never does."""
-    set_allow_bypass(env, "true")
+    set_group_bypass(env, "writes", "auto")
     request_env = {**env, "WTG_SESSION_ID": "granted-session"}
     result = subprocess.run(
-        [str(WTG), "request-base-access", "--repo", str(base), "--reason", "probe grant"],
+        [
+            str(WTG), "request-base-access", "--repo", str(base),
+            "--group", "writes", "--reason", "probe grant",
+        ],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=request_env, check=False,
     )
     if result.returncode != 0:
@@ -330,9 +335,9 @@ def request_grant_failures(base: Path, env: dict[str, str]) -> list[str]:
     return failures
 
 
-def set_allow_bypass(env: dict[str, str], value: str) -> None:
+def set_group_bypass(env: dict[str, str], group: str, value: str) -> None:
     subprocess.run(
-        [str(WTG), "config", "--repo", str(base_for_env(env)), "set", "allowBypass", value],
+        [str(WTG), "config", "--repo", str(base_for_env(env)), "set", f"{group}.bypass", value],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, check=False,
     )
 

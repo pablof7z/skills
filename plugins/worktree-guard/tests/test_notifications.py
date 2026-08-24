@@ -23,7 +23,7 @@ class NotificationTests(unittest.TestCase):
         which.return_value = "/opt/homebrew/bin/terminal-notifier"
         run.return_value = subprocess.CompletedProcess([], 0)
 
-        notify_auto_grant(Path("/repo"), reason="requested edit", session_id="session")
+        notify_auto_grant(Path("/repo"), reason="requested edit", session_id="session", group="writes")
 
         run.assert_called_once()
         command = run.call_args.args[0]
@@ -43,7 +43,7 @@ class NotificationTests(unittest.TestCase):
             subprocess.CompletedProcess([], 0),
         ]
 
-        notify_auto_grant(Path("/repo"), reason="requested edit", session_id="session")
+        notify_auto_grant(Path("/repo"), reason="requested edit", session_id="session", group="writes")
 
         self.assertEqual(run.call_count, 2)
         self.assertEqual(run.call_args_list[0].args[0][0], which.return_value)
@@ -55,7 +55,7 @@ class NotificationTests(unittest.TestCase):
     def test_uses_apple_script_without_native_sender(self, _which, run) -> None:
         run.return_value = subprocess.CompletedProcess([], 0)
 
-        notify_auto_grant(Path("/repo"), reason="requested edit", session_id="session")
+        notify_auto_grant(Path("/repo"), reason="requested edit", session_id="session", group="writes")
 
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0][:2], ["osascript", "-e"])

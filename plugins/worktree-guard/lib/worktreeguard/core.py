@@ -11,8 +11,29 @@ from typing import Any
 
 
 BLOCKED_GIT_COMMANDS = frozenset(
-    {"checkout", "clean", "rebase", "reset", "restore", "switch"}
+    {"checkout", "clean", "rebase", "reset", "restore", "stash", "switch"}
 )
+
+# Every blocked Git subcommand routes to exactly one guard group, each independently
+# configurable (see storage.RepoConfig / storage.GroupPolicy). "checkout" is
+# ambiguous on its own: a path restore (`git checkout -- file`) is a "discard", but
+# `git checkout <ref>` or `-b`/`-B` is a "branchChanges" — policy.git_command_group()
+# resolves it using the same branch-change detection as before. Every other blocked
+# subcommand maps statically:
+GIT_COMMAND_GROUPS = {
+    "switch": "branchChanges",
+    "clean": "discard",
+    "rebase": "discard",
+    "reset": "discard",
+    "restore": "discard",
+    "stash": "stash",
+}
+
+# The four independently configurable guard groups: "writes" covers native-tool file
+# writes; the rest cover the Git subcommands above (via GIT_COMMAND_GROUPS and
+# checkout's branch-change detection).
+GUARD_GROUPS = ("writes", "branchChanges", "discard", "stash")
+
 DEFAULT_GRANT_TTL_SECONDS = 30 * 60
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
 DEFAULT_REQUEST_LOG_FILE = "worktreeguard-base-access-requests.jsonl"

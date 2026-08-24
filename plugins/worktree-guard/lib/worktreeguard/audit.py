@@ -12,6 +12,15 @@ from .policy import BlockedFileOperation, BlockedGitOperation, BlockedOperation
 from .storage import RepoConfig
 
 
+# Human-readable label for each guard group, used in hint/warning prose.
+GROUP_LABELS = {
+    "writes": "native file writes",
+    "branchChanges": "branch changes",
+    "discard": "history/working-tree discards (clean/reset/restore/rebase)",
+    "stash": "git stash",
+}
+
+
 def denial_message(operation: BlockedOperation, config: RepoConfig) -> str:
     if isinstance(operation, BlockedGitOperation):
         summary = f"`git {operation.subcommand}` in the base checkout"
@@ -19,38 +28,40 @@ def denial_message(operation: BlockedOperation, config: RepoConfig) -> str:
     else:
         summary = f"the native `{operation.tool_name}` tool in the base checkout"
         detail = f"\nTarget: {operation.target}" if operation.target is not None else ""
-    hint = approval_hint(config, operation.base_path, getattr(operation, "branch_change", False))
+    hint = approval_hint(config, operation.base_path, operation.group)
     return (
         f"WorktreeGuard blocked {summary}:\n{operation.base_path}{detail}\n\n"
         f"Shouldn't you be working on a Git worktree?\n\n{hint}"
     )
 
 
-def approval_hint(config: RepoConfig, base_path: Path, is_branch_change: bool) -> str:
-    """Tell the agent what happens if it requests access for this operation."""
-    base = shlex.quote(str(base_path))
-    if is_branch_change and config.branch_changes == "block":
+def approval_hint(config: RepoConfig, base_path: Path, group: str) -> str:
+    """Tell the agent what happens if it requests access for this group."""
+    label = GROUP_LABELS.get(group, group)
+    bypass = config.policy(group).bypass
+    if bypass == "none":
         return (
-            "Changing the base branch is automatically denied for this repo — a request "
+            f"{label.capitalize()} are automatically denied for this repo — a request "
             "won't help. Use a linked worktree instead."
         )
-    if is_branch_change and config.branch_changes == "manual":
-        cmd = f"wtg request-base-access --branch-change --repo {base} --reason \"<why>\""
+    cmd = f'wtg request-base-access --group {group} --repo {shlex.quote(str(base_path))} --reason "<why>"'
+    if bypass == "manual":
         return (
-            "A request to change the branch will block until the user manually responds "
-            f"(auto-approval is disabled for branch changes). If you really meant to, use `{cmd}`."
+            f"A request for {label} will block until the user manually responds "
+            f"(auto-approval is disabled for this group). If you really meant to, use `{cmd}`."
         )
-    cmd = f"wtg request-base-access --repo {base} --reason \"<why>\""
-    if config.allow_bypass:
-        return f"A request will be automatically approved. If you really meant to, use `{cmd}`."
-    return f"A request will block until the user manually responds. If you really meant to, use `{cmd}`."
+    return f"A request will be automatically approved. If you really meant to, use `{cmd}`."
 
 
-def warn_message(operation: BlockedFileOperation) -> str:
-    detail = f"\nTarget: {operation.target}" if operation.target is not None else ""
+def warn_message(operation: BlockedOperation) -> str:
+    if isinstance(operation, BlockedGitOperation):
+        lead = f"You are running `git {operation.subcommand}` in the base directory of a protected repo"
+        detail = f"\nCommand: {operation.command}"
+    else:
+        lead = "You are modifying the base directory of a protected repo"
+        detail = f"\nTarget: {operation.target}" if operation.target is not None else ""
     return (
-        "You are modifying the base directory of a protected repo — are you sure "
-        "you shouldn't be working on a git worktree?"
+        f"{lead} — are you sure you shouldn't be working on a git worktree?"
         f"\n{operation.base_path}{detail}"
     )
 
@@ -68,6 +79,7 @@ def denial_record(
         "turn_id": payload_string(payload, "turn_id", "turnId"),
         "base_path": str(operation.base_path),
         "effective_cwd": str(operation.cwd),
+        "group": operation.group,
     }
     if isinstance(operation, BlockedGitOperation):
         record.update(
@@ -84,7 +96,7 @@ def denial_record(
 
 
 def request_record(
-    *, base_path: Path, reason: str, session_id: str, approved: bool, method: str,
+    *, base_path: Path, reason: str, session_id: str, approved: bool, method: str, group: str | None,
 ) -> dict[str, Any]:
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -94,4 +106,5 @@ def request_record(
         "session_id": session_id,
         "approved": approved,
         "method": method,
+        "group": group,
     }

@@ -10,7 +10,7 @@ from typing import Any
 from .audit import denial_message, denial_record, warn_message
 from .core import emit, resolve_path
 from .operations import extract_operation, operation_cwd, payload_string, recover_codex_exec_workdir
-from .policy import blocked_operation, warned_file_operation
+from .policy import blocked_operation, warned_operation
 from .storage import consume_valid_grant, load_hook_payload, repo_config, write_denial
 
 def emit_denial(harness: str, message: str) -> None:
@@ -49,9 +49,9 @@ def run_harness_hook(
             "thread_id", "threadId",
         )
         config = repo_config(blocked.base_path)
-        needs_branch = getattr(blocked, "branch_change", False)
+        bypass = config.policy(blocked.group).bypass
         if consume_valid_grant(
-            blocked.base_path, session_id=session_id, needs_branch_change=needs_branch,
+            blocked.base_path, session_id=session_id, group=blocked.group, bypass=bypass,
         ):
             return 0
 
@@ -60,7 +60,7 @@ def run_harness_hook(
         emit_denial(harness, message)
         return 0
 
-    warned = warned_file_operation(operation, cwd)
+    warned = warned_operation(operation, cwd)
     if warned is not None:
         message = warn_message(warned)
         if harness == "grok":

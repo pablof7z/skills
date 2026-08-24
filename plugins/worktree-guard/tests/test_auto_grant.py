@@ -70,11 +70,10 @@ class BaseAccessTests(unittest.TestCase):
             encoding="utf-8",
         )
         state = load_state()
-        self.assertEqual(state["version"], 7)
+        self.assertEqual(state["version"], 8)
         self.assertEqual([grant["id"] for grant in state["grants"]], ["session"])
 
     def test_unrequested_base_edit_is_denied_when_writes_block(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True})
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
         self.assertEqual(set(output), {"hookSpecificOutput"})
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
@@ -94,8 +93,7 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(output["decision"], "deny")
 
     def test_request_auto_grants_and_notifies_then_edits_pass(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True})
-        self.assertEqual(request_access(self.base, "user asked for a base edit"), 0)
+        self.assertEqual(request_access(self.base, "user asked for a base edit", group="writes"), 0)
         notices = read_jsonl(self.notifications)
         self.assertEqual(len(notices), 1)
         self.assertEqual(notices[0]["base_path"], str(self.base))
@@ -103,6 +101,7 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(len(active_grants()), 1)
         self.assertEqual(active_grants()[0]["scope"], "session")
         self.assertEqual(active_grants()[0]["session_id"], "session-one")
+        self.assertEqual(active_grants()[0]["group"], "writes")
         self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
         self.assertEqual(hook_output("pre-tool-use", native_payload(self.base, "session-one")), "")
         logged = read_requests()
@@ -112,15 +111,30 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(logged[0]["session_id"], "session-one")
         self.assertTrue(logged[0]["approved"])
         self.assertEqual(logged[0]["method"], "auto_grant")
+        self.assertEqual(logged[0]["group"], "writes")
 
-    def test_granted_session_also_unblocks_git(self) -> None:
-        self.assertEqual(request_access(self.base, "rebasing on purpose"), 0)
+    def test_an_auto_bypass_grant_covers_any_other_auto_bypass_group(self) -> None:
+        # Both writes and discard default to bypass=auto: once a session has been
+        # rubber-stamped for one, a second auto surface doesn't need its own ask —
+        # the same "approved once per session" convenience the tool has always had
+        # for its lenient tier. Precision lives in "manual"/"none", not here.
+        self.assertEqual(request_access(self.base, "editing files", group="writes"), 0)
         self.assertEqual(hook_output("pre-tool-use", git_payload(self.base, "session-one")), "")
 
-    def test_request_with_bypass_off_prompts_and_can_be_denied(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": False})
+    def test_a_manual_bypass_group_is_never_covered_by_a_differently_tagged_grant(self) -> None:
+        write_config(self.base, {"discard": {"bypass": "manual"}})
+        self.assertEqual(request_access(self.base, "editing files", group="writes"), 0)
+        output = json.loads(hook_output("pre-tool-use", git_payload(self.base, "session-one")))
+        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_a_discard_grant_unblocks_the_matching_git_command(self) -> None:
+        self.assertEqual(request_access(self.base, "rebasing on purpose", group="discard"), 0)
+        self.assertEqual(hook_output("pre-tool-use", git_payload(self.base, "session-one")), "")
+
+    def test_request_with_bypass_manual_prompts_and_can_be_denied(self) -> None:
+        write_config(self.base, {"writes": {"bypass": "manual"}})
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "deny"}):
-            self.assertEqual(request_access(self.base, "should be refused"), 1)
+            self.assertEqual(request_access(self.base, "should be refused", group="writes"), 1)
         self.assertEqual(active_grants(), [])
         self.assertFalse(self.notifications.exists())
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
@@ -132,15 +146,15 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(logged[0]["method"], "human_approval")
 
     def test_one_time_approval_response_is_rejected(self) -> None:
-        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": False})
+        write_config(self.base, {"writes": {"bypass": "manual"}})
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "once"}):
-            self.assertEqual(request_access(self.base, "one command only"), 1)
+            self.assertEqual(request_access(self.base, "one command only", group="writes"), 1)
         self.assertEqual(active_grants(), [])
 
     def test_scope_option_is_not_accepted(self) -> None:
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             main([
-                "request-base-access", "--repo", str(self.base),
+                "request-base-access", "--repo", str(self.base), "--group", "writes",
                 "--reason", "one command only", "--scope", "once",
             ])
 
@@ -148,7 +162,7 @@ class BaseAccessTests(unittest.TestCase):
         with patch.dict(os.environ, {
             "WTG_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "", "CODEX_THREAD_ID": "codex-session",
         }):
-            self.assertEqual(request_access(self.base, "codex base edit"), 0)
+            self.assertEqual(request_access(self.base, "codex base edit", group="writes"), 0)
         self.assertEqual(active_grants()[0]["session_id"], "codex-session")
 
     def test_claude_code_session_id_binds_request_when_override_is_absent(self) -> None:
@@ -156,18 +170,18 @@ class BaseAccessTests(unittest.TestCase):
             "WTG_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "claude-session",
             "CODEX_THREAD_ID": "",
         }):
-            self.assertEqual(request_access(self.base, "claude base edit"), 0)
+            self.assertEqual(request_access(self.base, "claude base edit", group="writes"), 0)
         self.assertEqual(active_grants()[0]["session_id"], "claude-session")
 
     def test_request_without_harness_session_is_refused(self) -> None:
         with patch.dict(os.environ, {
             "WTG_SESSION_ID": "", "CLAUDE_CODE_SESSION_ID": "", "CODEX_THREAD_ID": "",
         }), redirect_stderr(io.StringIO()):
-            self.assertEqual(request_access(self.base, "unbound edit"), 1)
+            self.assertEqual(request_access(self.base, "unbound edit", group="writes"), 1)
         self.assertEqual(active_grants(), [])
 
     def test_requests_command_reports_logged_reasons(self) -> None:
-        self.assertEqual(request_access(self.base, "auditable reason"), 0)
+        self.assertEqual(request_access(self.base, "auditable reason", group="writes"), 0)
         output = io.StringIO()
         with redirect_stdout(output):
             self.assertEqual(main(["requests", "--repo", str(self.base), "--json"]), 0)
@@ -176,7 +190,7 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(payload["tail"][0]["reason"], "auditable reason")
 
     def test_grant_does_not_leak_to_another_session(self) -> None:
-        self.assertEqual(request_access(self.base, "scoped to session-one"), 0)
+        self.assertEqual(request_access(self.base, "scoped to session-one", group="writes"), 0)
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-two")))
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
 
@@ -199,9 +213,11 @@ def git_payload(base: Path, session_id: str) -> dict[str, object]:
     }
 
 
-def request_access(base: Path, reason: str) -> int:
+def request_access(base: Path, reason: str, *, group: str) -> int:
     with redirect_stdout(io.StringIO()):
-        return main(["request-base-access", "--repo", str(base), "--reason", reason])
+        return main([
+            "request-base-access", "--repo", str(base), "--group", group, "--reason", reason,
+        ])
 
 
 def hook_output(

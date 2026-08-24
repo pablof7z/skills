@@ -10,14 +10,17 @@ import sys
 import time
 from pathlib import Path
 
-from .audit import request_record
-from .core import BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, WorktreeGuardError, emit, resolve_path
+from .audit import GROUP_LABELS, request_record
+from .core import (
+    BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, GUARD_GROUPS, WorktreeGuardError, emit,
+    resolve_path,
+)
 from .git import discover_repo
 from .hooks import cmd_hook_harness
 from .notifications import notify_auto_grant
 from .install import install_hooks
 from .storage import (
-    DEFAULT_CONFIG, active_grants, config_path, create_grant, deny_log_path,
+    active_grants, config_path, create_grant, default_config, deny_log_path,
     read_config, read_denials, read_requests, repo_config, request_human_approval,
     request_log_path, set_config_value, stable_hook_shim_path, state_path, write_config,
     write_request,
@@ -57,10 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--reason", required=True)
     request.add_argument("--ttl-seconds", type=int, default=DEFAULT_GRANT_TTL_SECONDS)
     request.add_argument("--timeout", type=int, default=0)
-    request.add_argument(
-        "--branch-change",
-        action="store_true",
-        help="Request approval specifically for switching the base branch",
+    which_group = request.add_mutually_exclusive_group(required=True)
+    which_group.add_argument(
+        "--group", choices=GUARD_GROUPS,
+        help="Which guard group to request access for",
+    )
+    which_group.add_argument(
+        "--branch-change", action="store_true",
+        help="Deprecated alias for --group branchChanges",
     )
     request.set_defaults(func=cmd_request_base_access)
 
@@ -70,7 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     config.set_defaults(func=cmd_config)
     config_set = config.add_subparsers(dest="setting", required=False)
     setter = config_set.add_parser("set", help="Set a key in .wtg.json")
-    setter.add_argument("key", choices=["enabled", "writes", "allowBypass", "branchChanges"])
+    setter.add_argument(
+        "key",
+        help="'enabled', or '<group>.disposition'/'<group>.bypass' "
+        f"(group one of: {', '.join(GUARD_GROUPS)})",
+    )
     setter.add_argument("value")
     setter.set_defaults(func=cmd_config_set)
     init = config_set.add_parser("init", help="Write a default .wtg.json")
@@ -122,10 +133,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Base checkout guarded: {repo.base_path}")
         print("Blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
         print(f"Config: {config_path(repo.base_path)}")
-        print(
-            f"enabled={config.enabled} writes={config.writes} "
-            f"allowBypass={config.allow_bypass} branchChanges={config.branch_changes}"
-        )
+        print(f"enabled={config.enabled}")
+        for group in GUARD_GROUPS:
+            policy = config.policy(group)
+            print(f"  {group}: disposition={policy.disposition} bypass={policy.bypass}")
     else:
         print(f"Linked worktree unrestricted: {repo.worktree_path}")
         print(f"Base checkout: {repo.base_path}")
@@ -135,19 +146,13 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_current(args: argparse.Namespace) -> int:
     path = resolve_path(args.repo)
     repo = discover_repo(path)
-    config = repo_config(repo.base_path)
     emit({
         "cwd": str(path),
         "base_checkout": str(repo.base_path),
         "worktree": str(repo.worktree_path),
         "is_base_checkout": repo.worktree_path == repo.base_path,
         "blocked_git_commands": sorted(BLOCKED_GIT_COMMANDS),
-        "config": {
-            "enabled": config.enabled,
-            "writes": config.writes,
-            "allowBypass": config.allow_bypass,
-            "branchChanges": config.branch_changes,
-        },
+        "config": read_config(repo.base_path),
         "config_path": str(config_path(repo.base_path)),
     })
     return 0
@@ -167,37 +172,40 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
             "Cannot determine the current Codex, Claude Code, or Grok session; "
             "no access was granted."
         )
-    branch_change = bool(getattr(args, "branch_change", False))
-    if branch_change and config.branch_changes == "block":
+    # The mutually exclusive, required group guarantees exactly one of these is set.
+    group = args.group or "branchChanges"
+    policy = config.policy(group)
+    label = GROUP_LABELS.get(group, group)
+
+    if policy.bypass == "none":
         write_request(request_record(
             base_path=repo.base_path, reason=args.reason, session_id=session_id,
-            approved=False, method="auto_deny_branch",
+            approved=False, method="auto_deny", group=group,
         ))
         print(
-            "Denied. Branch changes are automatically denied for this repo "
-            "(branchChanges=block). Use a linked worktree instead.", file=sys.stderr,
+            f"Denied. {label.capitalize()} are automatically denied for this repo "
+            f"({group}.bypass=none). Use a linked worktree instead.", file=sys.stderr,
         )
         return 1
-    if branch_change and config.branch_changes == "manual":
+
+    if policy.bypass == "manual":
         approved = request_human_approval(repo=repo, reason=args.reason, timeout=args.timeout)
         method = "human_approval"
-    elif config.allow_bypass:
+    else:
         approved = True
         method = "auto_grant"
-        notify_auto_grant(repo.base_path, reason=args.reason, session_id=session_id)
-    else:
-        approved = request_human_approval(repo=repo, reason=args.reason, timeout=args.timeout)
-        method = "human_approval"
+        notify_auto_grant(repo.base_path, reason=args.reason, session_id=session_id, group=group)
+
     write_request(request_record(
         base_path=repo.base_path, reason=args.reason, session_id=session_id,
-        approved=approved, method=method,
+        approved=approved, method=method, group=group,
     ))
     if not approved:
-        print("Denied. Run the Git command from a linked worktree instead.", file=sys.stderr)
+        print("Denied. Run the command from a linked worktree instead.", file=sys.stderr)
         return 1
     grant = create_grant(
         base_path=repo.base_path, reason=args.reason,
-        ttl_seconds=args.ttl_seconds, session_id=session_id, branch_change=branch_change,
+        ttl_seconds=args.ttl_seconds, session_id=session_id, group=group,
     )
     expires = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(grant["expires_at"]))
     print(f"Approved session override until {expires}. Retry the command.")
@@ -238,12 +246,7 @@ def cmd_config_init(args: argparse.Namespace) -> int:
     path = config_path(repo.base_path)
     if path.exists():
         raise WorktreeGuardError(f"already exists: {path}")
-    write_config(repo.base_path, {
-        "enabled": DEFAULT_CONFIG.enabled,
-        "writes": DEFAULT_CONFIG.writes,
-        "allowBypass": DEFAULT_CONFIG.allow_bypass,
-        "branchChanges": DEFAULT_CONFIG.branch_changes,
-    })
+    write_config(repo.base_path, default_config())
     print(f"wrote {path}")
     return 0
 
@@ -265,7 +268,10 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     )
     print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
     print(f"active overrides: {len(active_grants())}")
-    print("repo config: .wtg.json per base checkout (enabled, writes, allowBypass, branchChanges)")
+    print(
+        "repo config: .wtg.json per base checkout (enabled, plus "
+        f"{{disposition, bypass}} per group: {', '.join(GUARD_GROUPS)})"
+    )
     return 0 if git_path else 1
 
 
@@ -292,8 +298,9 @@ def cmd_denials(args: argparse.Namespace) -> int:
                 f"git {record.get('subcommand')}"
                 if record.get("subcommand") else str(record.get("tool_name") or "mutation")
             )
+            group = f" [{record['group']}]" if record.get("group") else ""
             print(
-                f"{record.get('timestamp', '')} {action} in {record.get('base_path', '')}"
+                f"{record.get('timestamp', '')} {action}{group} in {record.get('base_path', '')}"
             )
     return 0
 
@@ -312,8 +319,9 @@ def cmd_requests(args: argparse.Namespace) -> int:
         print(f"Base access requests: {len(records)} ({request_log_path()})")
         for record in tail:
             outcome = "approved" if record.get("approved") else "denied"
+            group = f" [{record['group']}]" if record.get("group") else ""
             print(
-                f"{record.get('timestamp', '')} {outcome} in {record.get('base_path', '')}: "
+                f"{record.get('timestamp', '')} {outcome}{group} in {record.get('base_path', '')}: "
                 f"{record.get('reason', '')}"
             )
     return 0
