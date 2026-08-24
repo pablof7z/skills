@@ -55,3 +55,12 @@ def is_main_worktree(path: Path) -> tuple[bool, Repo | None]:
     except (OSError, WorktreeGuardError):
         return False, None
     return repo.worktree_path == repo.base_path, repo
+
+
+def is_ref(cwd: Path, name: str) -> bool:
+    """True if ``name`` resolves to a Git revision (branch/commit/tag)."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", name],
+        cwd=str(cwd), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True, check=False,
+    )
+    return result.returncode == 0

@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "WorktreeGuard",
     "shortDescription": "Control and surface base-checkout mutations.",
-    "longDescription": "A lightweight accident-prevention hook that blocks six risky Git commands and harness-native file writes in Git base checkouts until an agent explicitly requests access, with configurable notified auto-granting of those requests.",
+    "longDescription": "A lightweight accident-prevention hook that blocks six risky Git commands and harness-native file writes in Git base checkouts until an agent explicitly requests access. Per-repo behavior is configured by a local .wtg.json (enabled, writes=block/off/warn, allowBypass).",
     "developerName": "Pablo Fernandez",
     "category": "Productivity",
     "capabilities": [

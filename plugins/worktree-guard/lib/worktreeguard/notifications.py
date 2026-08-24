@@ -15,7 +15,8 @@ def notify_auto_grant(base_path: Path, *, reason: str, session_id: str) -> None:
     message = (
         "An agent requested and was auto-granted temporary permission to mutate the "
         f"base checkout {base_path}. Reason: {reason}. "
-        "Require approval with: wtg config auto-grant-edits off."
+        "Require approval with: wtg config --repo "
+        f"{base_path} set allowBypass false."
     )
     test_log = os.environ.get("WTG_NOTIFICATION_LOG_FILE")
     if test_log:

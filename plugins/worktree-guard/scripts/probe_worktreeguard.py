@@ -63,8 +63,8 @@ def main() -> int:
                         f"{harness} {case.name}: expected {case.expected}, got {actual}: {details}"
                     )
 
-        failures.extend(auto_grant_setting_failures(base, env))
-        expected_denials += 3  # codex, claude, grok disabled-auto-grant denials
+        failures.extend(allow_bypass_setting_failures(base, env))
+        expected_denials += 6  # codex, claude, grok unrequested base-edit denials x2 (bypass on/off)
         failures.extend(request_grant_failures(base, env))
         expected_denials += 1
         failures.extend(session_approval_failures(base, env))
@@ -80,7 +80,7 @@ def main() -> int:
         if failures:
             print("\n".join(f"FAIL {failure}" for failure in failures), file=sys.stderr)
             return 1
-        print(f"PASS {len(cases) * 3 + 7} decisions; denials logged={len(records)}")
+        print(f"PASS {len(cases) * 3 + 12} decisions; denials logged={len(records)}")
         return 0
     finally:
         shutil.rmtree(temp, ignore_errors=True)
@@ -245,8 +245,8 @@ def shim_failures(temp: Path) -> list[str]:
 
 
 def session_approval_failures(base: Path, env: dict[str, str]) -> list[str]:
-    """With auto-grant off, the request falls back to asking the local human."""
-    set_auto_grant(env, "off")
+    """With bypass off, the request falls back to asking the local human."""
+    set_allow_bypass(env, "false")
     approval_env = {
         **env, "WTG_APPROVAL_RESPONSE": "session", "WTG_SESSION_ID": "approved-session",
     }
@@ -271,33 +271,34 @@ def session_approval_failures(base: Path, env: dict[str, str]) -> list[str]:
     ]
 
 
-def auto_grant_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
+def allow_bypass_setting_failures(base: Path, env: dict[str, str]) -> list[str]:
     failures: list[str] = []
-    for value in ("off", "on"):
+    for value in ("false", "true"):
         result = subprocess.run(
-            [str(WTG), "config", "auto-grant-edits", value],
+            [str(WTG), "config", "--repo", str(base), "set", "allowBypass", value],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=env, check=False,
         )
-        if result.returncode != 0 or f"auto-grant-edits: {value}" not in result.stdout:
-            failures.append(f"config auto-grant-edits {value} failed: {result.stderr}")
-        if value == "off":
-            for harness in ("codex", "claude", "grok"):
-                payload = {"session_id": f"disabled-{harness}", **native(
-                    base, "Edit", file_path=base / "README.md"
-                )}
-                actual, details = decision(harness, "pre-tool-use", payload, env)
-                print(f"{actual.upper():5} [{harness}] disabled auto-grant blocks base edit")
-                if actual != "deny":
-                    failures.append(
-                        f"{harness} disabled auto-grant expected deny, got {actual}: {details}"
-                    )
+        expected = "true" if value == "true" else "false"
+        if result.returncode != 0 or f"\"allowBypass\":{expected}" not in result.stdout:
+            failures.append(f"config set allowBypass {value} failed: {result.stderr}")
+        # An unrequested base edit is denied regardless of the bypass setting.
+        for harness in ("codex", "claude", "grok"):
+            payload = {"session_id": f"unrequested-{harness}", **native(
+                base, "Edit", file_path=base / "README.md"
+            )}
+            actual, details = decision(harness, "pre-tool-use", payload, env)
+            print(f"{actual.upper():5} [{harness}] unrequested base edit blocked (bypass={expected})")
+            if actual != "deny":
+                failures.append(
+                    f"{harness} unrequested edit expected deny, got {actual}: {details}"
+                )
     return failures
 
 
 def request_grant_failures(base: Path, env: dict[str, str]) -> list[str]:
     """An explicit request is what auto-grants; the write alone never does."""
-    set_auto_grant(env, "on")
+    set_allow_bypass(env, "true")
     request_env = {**env, "WTG_SESSION_ID": "granted-session"}
     result = subprocess.run(
         [str(WTG), "request-base-access", "--repo", str(base), "--reason", "probe grant"],
@@ -329,11 +330,16 @@ def request_grant_failures(base: Path, env: dict[str, str]) -> list[str]:
     return failures
 
 
-def set_auto_grant(env: dict[str, str], value: str) -> None:
+def set_allow_bypass(env: dict[str, str], value: str) -> None:
     subprocess.run(
-        [str(WTG), "config", "auto-grant-edits", value],
+        [str(WTG), "config", "--repo", str(base_for_env(env)), "set", "allowBypass", value],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, check=False,
     )
+
+
+def base_for_env(env: dict[str, str]) -> Path:
+    # The probe uses a single base repo created in the temp dir.
+    return Path(env["WTG_STATE_FILE"]).parent / "repo"
 
 
 def notification_failures(path: Path) -> list[str]:

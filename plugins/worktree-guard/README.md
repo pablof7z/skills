@@ -19,13 +19,39 @@ expires. Every grant is bound to the current Codex, Claude Code, or Grok
 session; there is no one-command scope or sessionless fallback. Everything is
 always allowed in linked worktrees.
 
-`auto-grant-edits` controls how a *request* is answered, not whether the guard
-applies. With it on (the default), a request is granted immediately and you get
-one macOS notification telling you it happened. With it off, the request puts a
-macOS approval dialog in front of you first.
+Behavior for each repository is controlled by a local `.wtg.json` in the base
+checkout root:
 
-That is the entire boundary. Every other Git command, non-Git shell command,
-and MCP tool is outside WorktreeGuard's policy.
+```json
+{
+  "enabled": true,
+  "writes": "block",
+  "allowBypass": true,
+  "branchChanges": "follow"
+}
+```
+
+- `enabled` (`false` = WorktreeGuard completely disabled for this repo).
+- `writes`: `block` (no native edits/writes in the base), `off` (native writes
+  allowed silently), or `warn` (native writes allowed but every one injects
+  "You are modifying the base directory of a protected repo — are you sure
+  you shouldn't be working on a git worktree?"). The six Git commands are
+  always blocked while `enabled` is true, regardless of `writes`.
+- `allowBypass`: `true` means `request-base-access` auto-grants (with one
+  macOS notification); `false` puts a macOS approval dialog in front of you.
+- `branchChanges`: controls switching the base checkout's branch
+  (`git switch`, `git checkout <branch>`, `git checkout -b/-B`). `follow`
+  (default) treats branch switches like the other blocked Git commands. `manual`
+  means a branch switch is never auto-approved, even with `allowBypass: true` —
+  it requires a human to approve a `wtg request-base-access --branch-change`
+  request. `block` means branch switches are always denied and cannot be
+  granted; use a linked worktree instead. Path restores (`git checkout -- file`,
+  `git checkout <file>`) are not branch switches and follow the normal rules.
+
+Missing or malformed `.wtg.json` falls back to the safe defaults per field
+(`enabled: true`, `writes: "block"`, `allowBypass: true`), so a repo with no
+file is guarded the same way it always was. Linked worktrees are always
+unrestricted and are unaffected by any setting.
 
 WorktreeGuard is not a security boundary. It recognizes ordinary direct Git
 invocations and the target paths provided by harness-native write tools. It
@@ -38,8 +64,10 @@ malicious or deliberately obfuscated caller.
 <plugin-root>/bin/wtg status --repo <path>
 <plugin-root>/bin/wtg current --repo <path>
 <plugin-root>/bin/wtg request-base-access --repo <path> --reason "<reason>"
-<plugin-root>/bin/wtg config auto-grant-edits [on|off]
-<plugin-root>/bin/wtg config repo <path> [full|files-only|off]
+<plugin-root>/bin/wtg request-base-access --repo <path> --branch-change --reason "<reason>"
+<plugin-root>/bin/wtg config --repo <path>                     # interactive UI (or --json)
+<plugin-root>/bin/wtg config --repo <path> set <key> <value>   # key: enabled|writes|allowBypass|branchChanges
+<plugin-root>/bin/wtg config --repo <path> init               # write a default .wtg.json
 <plugin-root>/bin/wtg denials --tail 20
 <plugin-root>/bin/wtg doctor
 <plugin-root>/bin/wtg install-hooks
@@ -47,34 +75,34 @@ python3 <plugin-root>/scripts/probe_worktreeguard.py
 python3 <plugin-root>/scripts/probe_codex_exec.py
 ```
 
-`request-base-access` is the only way to obtain a grant. It is auto-granted with
-a notification when `auto-grant-edits` is on, and asks through a local macOS
-dialog when it is off. A request outside a detectable Codex, Claude Code, or
-Grok session is refused. There is no remote approval, pairing, daemon, relay,
-MCP integration, automatic branch repair, session cwd tracking, or full
-allow-action audit.
+`request-base-access` is the only way to obtain a grant. When `allowBypass` is
+true (the default) it is auto-granted with a notification; when false it asks
+through a local macOS dialog. Pass `--branch-change` to request approval
+specifically for switching the base branch — with `branchChanges: manual` it
+always requires a human response (ignoring `allowBypass`), and with
+`branchChanges: block` it is refused outright. A request outside a detectable
+Codex, Claude Code, or Grok session is refused, and when `enabled` is false it
+is a no-op (nothing is blocked, so no override is needed). There is no remote
+approval, pairing, daemon, relay, MCP integration, automatic branch repair,
+session cwd tracking, or full allow-action audit.
+
+Every PreToolUse denial tells the agent what will happen if it asks for
+access (auto-approved, blocked until a human responds, or automatically
+denied) so it can choose a worktree instead of retrying.
+
+`config` prints the effective configuration as JSON (merged from `.wtg.json`
+with the safe defaults), or — when run in a terminal — opens an inquirer-style
+UI with arrow-key navigation to edit all four settings. `config set <key> <value>`
+updates one key in `.wtg.json`, creating the file if needed; `enabled` and
+`allowBypass` accept true/false/on/off/yes/no/1/0, `writes` accepts
+block/off/warn, and `branchChanges` accepts follow/manual/block. `config init`
+writes a default `.wtg.json` and refuses to clobber an existing one. Edit the
+file directly if you prefer — nothing else reads or writes it.
 
 `probe_codex_exec.py` is the end-to-end Codex check. It creates a disposable Git
 repository, asks a real ephemeral `codex exec` session to switch branches, and
 passes only when Codex reports the PreToolUse block, the branch remains `main`,
 and WorktreeGuard recorded exactly one denial.
-
-`config auto-grant-edits` prints the current preference when no value is
-provided. `on` is the default.
-
-`config repo <path> [full|files-only|off]` sets or shows a per-repo guard
-mode, keyed by the repo's resolved base checkout path. `full` (the default
-for any repo with no entry) blocks both the six Git commands and native file
-writes in the base checkout, as described above. `files-only` disables only
-the Git-command block, so the six commands run freely in the base checkout,
-while native file writes there still require a grant. `off` disables the
-guard entirely for that repo's base checkout; linked worktrees are already
-unrestricted and are unaffected by any mode. Modes are stored in
-`state.json` and, like the rest of WorktreeGuard, are a convenience
-guardrail, not a security boundary — a repo set to `off` or `files-only` is
-trusting the agent, not sandboxing it. Run `config repo <path>` with no mode
-to print the effective mode, or `config repo --list` to list every
-configured repo.
 
 ## Architecture
 
@@ -88,15 +116,14 @@ own permission system; base access is requested through `wtg`, not through a
 Claude, Codex, or Grok prompt.
 
 All Git main worktrees are guarded by default. No repository registration or
-protection database is required. A per-repo guard mode (see `config repo`
-above) can relax that default down to `files-only` or `off` for a specific
-base checkout. Local grants are stored in
-`~/.local/state/worktreeguard/state.json` alongside the auto-grant preference;
-denials are appended to `~/worktreeguard-denied-actions.jsonl`. Notifications are
-local, non-interactive, and best-effort; notification delivery failure does not
-block the grant. On macOS, WorktreeGuard prefers `terminal-notifier` when it is
-available so the title, status, and message appear directly in Notification
-Center. It falls back to AppleScript when no native sender is installed.
+protection database is required. A repo's `.wtg.json` (see `config` above)
+relaxes or tightens that default for its own base checkout. Local grants are
+stored in `~/.local/state/worktreeguard/state.json`; denials are appended to
+`~/worktreeguard-denied-actions.jsonl`. Notifications are local, non-interactive,
+and best-effort; notification delivery failure does not block the grant. On
+macOS, WorktreeGuard prefers `terminal-notifier` when it is available so the
+title, status, and message appear directly in Notification Center. It falls
+back to AppleScript when no native sender is installed.
 
 ## Install
 

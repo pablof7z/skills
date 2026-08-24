@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Union
 
 from .core import BLOCKED_GIT_COMMANDS, Repo, resolve_path
-from .git import is_main_worktree
+from .git import is_main_worktree, is_ref
 from .operations import native_write_targets, operation_is_native_write, operation_is_shell
-from .storage import repo_mode
+from .storage import repo_config
 
 
 CONTROL_TOKENS = {"&&", "||", ";", "|", "&"}
@@ -24,6 +24,7 @@ class BlockedGitOperation:
     command: str
     cwd: Path
     base_path: Path
+    branch_change: bool
 
 
 @dataclass(frozen=True)
@@ -49,12 +50,12 @@ def blocked_operation(operation: dict[str, object], cwd: Path) -> BlockedOperati
 def blocked_file_operation(
     operation: dict[str, object], cwd: Path
 ) -> BlockedFileOperation | None:
-    """Block native edit/write targets in a Git repository's base checkout."""
+    """Block native edit/write targets in a base checkout when writes=block."""
     resolved_cwd = resolve_path(cwd)
     targets = native_write_targets(operation, resolved_cwd)
     for target in targets:
         repo = base_repo_containing(target)
-        if repo is not None and repo_mode(repo.base_path) != "off":
+        if repo is not None and _writes_blocked(repo.base_path):
             return BlockedFileOperation(
                 str(operation.get("tool_name") or "file write"),
                 resolved_cwd,
@@ -65,7 +66,7 @@ def blocked_file_operation(
     if targets:
         return None
     is_base, repo = is_main_worktree(resolved_cwd)
-    if is_base and repo is not None and repo_mode(repo.base_path) != "off":
+    if is_base and repo is not None and _writes_blocked(repo.base_path):
         return BlockedFileOperation(
             str(operation.get("tool_name") or "file write"),
             resolved_cwd,
@@ -73,6 +74,45 @@ def blocked_file_operation(
             None,
         )
     return None
+
+
+def warned_file_operation(
+    operation: dict[str, object], cwd: Path
+) -> BlockedFileOperation | None:
+    """Surface a non-blocking warning for native writes when writes=warn."""
+    resolved_cwd = resolve_path(cwd)
+    targets = native_write_targets(operation, resolved_cwd)
+    for target in targets:
+        repo = base_repo_containing(target)
+        if repo is not None and _writes_warned(repo.base_path):
+            return BlockedFileOperation(
+                str(operation.get("tool_name") or "file write"),
+                resolved_cwd,
+                repo.base_path,
+                target,
+            )
+
+    if targets:
+        return None
+    is_base, repo = is_main_worktree(resolved_cwd)
+    if is_base and repo is not None and _writes_warned(repo.base_path):
+        return BlockedFileOperation(
+            str(operation.get("tool_name") or "file write"),
+            resolved_cwd,
+            repo.base_path,
+            None,
+        )
+    return None
+
+
+def _writes_blocked(base_path: Path) -> bool:
+    config = repo_config(base_path)
+    return config.enabled and config.writes == "block"
+
+
+def _writes_warned(base_path: Path) -> bool:
+    config = repo_config(base_path)
+    return config.enabled and config.writes == "warn"
 
 
 def base_repo_containing(target: Path) -> Repo | None:
@@ -106,13 +146,37 @@ def blocked_git_operation(command: str, cwd: Path) -> BlockedGitOperation | None
         invocation = git_invocation(tokens, active_cwd)
         if invocation is None:
             continue
-        git_cwd, subcommand = invocation
+        git_cwd, subcommand, rest = invocation
         if subcommand not in BLOCKED_GIT_COMMANDS:
             continue
         is_base, repo = is_main_worktree(git_cwd)
-        if is_base and repo is not None and repo_mode(repo.base_path) == "full":
-            return BlockedGitOperation(subcommand, command, git_cwd, repo.base_path)
+        if is_base and repo is not None and repo_config(repo.base_path).enabled:
+            branch_change = is_branch_change(subcommand, rest, git_cwd)
+            return BlockedGitOperation(subcommand, command, git_cwd, repo.base_path, branch_change)
     return None
+
+
+def is_branch_change(subcommand: str, args: list[str], git_cwd: Path) -> bool:
+    """Whether a blocked git checkout/switch actually switches branches.
+
+    git switch always moves HEAD. git checkout only counts when it targets a
+    ref (or uses -b/-B), not a path restore.
+    """
+    if subcommand == "switch":
+        return True
+    if subcommand != "checkout":
+        return False
+    positionals: list[str] = []
+    for arg in args:
+        if arg == "--":
+            return False
+        if arg in ("-b", "-B"):
+            return True
+        if not arg.startswith("-"):
+            positionals.append(arg)
+    if len(positionals) == 1:
+        return is_ref(git_cwd, positionals[0])
+    return False
 
 
 def shell_segments(command: str) -> list[list[str]]:
@@ -147,7 +211,7 @@ def cd_result(tokens: list[str], cwd: Path) -> Path:
     return resolve_path(candidate if candidate.is_absolute() else cwd / candidate)
 
 
-def git_invocation(tokens: list[str], cwd: Path) -> tuple[Path, str] | None:
+def git_invocation(tokens: list[str], cwd: Path) -> tuple[Path, str, list[str]] | None:
     index = command_index(tokens)
     if index is None or Path(tokens[index]).name != "git":
         return None
@@ -167,7 +231,7 @@ def command_index(tokens: list[str]) -> int | None:
     return index if index < len(tokens) else None
 
 
-def parse_git_args(args: list[str], cwd: Path) -> tuple[Path, str] | None:
+def parse_git_args(args: list[str], cwd: Path) -> tuple[Path, str, list[str]] | None:
     remaining = list(args)
     effective_cwd = cwd
     while remaining:
@@ -191,7 +255,7 @@ def parse_git_args(args: list[str], cwd: Path) -> tuple[Path, str] | None:
         elif arg.startswith("-"):
             return None
         else:
-            return effective_cwd, arg
+            return effective_cwd, arg, remaining[1:]
     return None
 
 

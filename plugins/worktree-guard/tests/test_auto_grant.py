@@ -21,8 +21,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 from worktreeguard.cli import main  # noqa: E402
 from worktreeguard.hooks import run_harness_hook  # noqa: E402
 from worktreeguard.storage import (  # noqa: E402
-    active_grants, auto_grant_base_edits_enabled, load_state, read_requests,
-    set_auto_grant_base_edits,
+    active_grants, load_state, read_requests, write_config,
 )
 
 
@@ -71,12 +70,11 @@ class BaseAccessTests(unittest.TestCase):
             encoding="utf-8",
         )
         state = load_state()
-        self.assertEqual(state["version"], 5)
+        self.assertEqual(state["version"], 7)
         self.assertEqual([grant["id"] for grant in state["grants"]], ["session"])
-        self.assertTrue(auto_grant_base_edits_enabled())
 
-    def test_unrequested_base_edit_is_denied_even_with_auto_grant_on(self) -> None:
-        self.assertTrue(auto_grant_base_edits_enabled())
+    def test_unrequested_base_edit_is_denied_when_writes_block(self) -> None:
+        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True})
         output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
         self.assertEqual(set(output), {"hookSpecificOutput"})
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
@@ -96,6 +94,7 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(output["decision"], "deny")
 
     def test_request_auto_grants_and_notifies_then_edits_pass(self) -> None:
+        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": True})
         self.assertEqual(request_access(self.base, "user asked for a base edit"), 0)
         notices = read_jsonl(self.notifications)
         self.assertEqual(len(notices), 1)
@@ -118,8 +117,8 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(request_access(self.base, "rebasing on purpose"), 0)
         self.assertEqual(hook_output("pre-tool-use", git_payload(self.base, "session-one")), "")
 
-    def test_request_with_auto_grant_off_prompts_and_can_be_denied(self) -> None:
-        set_auto_grant_base_edits(False)
+    def test_request_with_bypass_off_prompts_and_can_be_denied(self) -> None:
+        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": False})
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "deny"}):
             self.assertEqual(request_access(self.base, "should be refused"), 1)
         self.assertEqual(active_grants(), [])
@@ -133,7 +132,7 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(logged[0]["method"], "human_approval")
 
     def test_one_time_approval_response_is_rejected(self) -> None:
-        set_auto_grant_base_edits(False)
+        write_config(self.base, {"enabled": True, "writes": "block", "allowBypass": False})
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "once"}):
             self.assertEqual(request_access(self.base, "one command only"), 1)
         self.assertEqual(active_grants(), [])
