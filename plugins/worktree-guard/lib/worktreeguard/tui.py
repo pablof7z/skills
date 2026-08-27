@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import os
-import select
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
 from .core import GUARD_GROUPS
 from .storage import config_path, read_config, write_config
+from .tui_input import drain, read_key
+from .tui_message import edit_policy_message
 
 
 RESET = "\x1b[0m"
@@ -25,7 +25,7 @@ SHOW_CURSOR = "\x1b[?25h"
 CLEAR = "\x1b[H\x1b[2J"
 
 WriteFn = Callable[[str], Any]
-KeyFn = Callable[[], str]
+KeyFn = Callable[[], str | None]
 
 _GROUP_LABELS = {
     "writes": "file writes",
@@ -61,8 +61,8 @@ def run_interactive_config(base_path: Path) -> int:
     path = config_path(base_path)
     try:
         tty.setcbreak(fd)
-        _drain(fd)
-        return _config_loop(base_path, path, data, lambda: _read_key(fd), sys.stdout.write)
+        drain(fd)
+        return _config_loop(base_path, path, data, lambda: read_key(fd), sys.stdout.write)
     except (KeyboardInterrupt, EOFError):
         sys.stdout.write(CLEAR)
         sys.stdout.write(f"{DIM}Cancelled.{RESET}\n")
@@ -93,16 +93,17 @@ def _config_loop(
         key = read_key()
         if key is None:
             continue
+        action = key.lower()
 
         item = items[index]
 
-        if key in ("up", "k"):
+        if action in ("up", "k"):
             index = (index - 1) % len(items)
             sel = 0
-        elif key in ("down", "j"):
+        elif action in ("down", "j"):
             index = (index + 1) % len(items)
             sel = 0
-        elif key == "tab":
+        elif action == "tab":
             if item in GUARD_GROUPS:
                 if sel == 0 and data[item]["disposition"] == "block":
                     sel = 1
@@ -112,14 +113,14 @@ def _config_loop(
             else:
                 index = (index + 1) % len(items)
                 sel = 0
-        elif key == "right":
+        elif action == "right":
             if item in GUARD_GROUPS:
                 if sel == 0 and data[item]["disposition"] == "block":
                     sel = 1
-        elif key == "left":
+        elif action == "left":
             if item in GUARD_GROUPS and sel == 1:
                 sel = 0
-        elif key == "enter":
+        elif action == "enter":
             if item == "enabled":
                 data[item] = not data[item]
                 dirty = True
@@ -143,9 +144,18 @@ def _config_loop(
                 return _save(base_path, path, data, write)
             elif item == "cancel":
                 return _cancel(path, dirty, write)
-        elif key == "s":
+        elif action == "m" and item in GUARD_GROUPS:
+            current = data[item].get("message")
+            message = edit_policy_message(_GROUP_LABELS[item], current, read_key, write)
+            if message != current:
+                if message is None:
+                    data[item].pop("message", None)
+                else:
+                    data[item]["message"] = message
+                dirty = True
+        elif action == "s":
             return _save(base_path, path, data, write)
-        elif key in ("q", "esc"):
+        elif action in ("q", "esc"):
             return _cancel(path, dirty, write)
 
 
@@ -187,10 +197,10 @@ def _hint_text(item: str, sel: int, data: dict[str, Any]) -> str:
         return "\u2191/\u2193 navigate \u00b7 enter toggle \u00b7 s save \u00b7 q quit"
     if item in GUARD_GROUPS:
         if sel == 1:
-            return "\u2191/\u2193 navigate \u00b7 enter cycle \u00b7 \u2190 back \u00b7 s save \u00b7 q quit"
+            return "\u2191/\u2193 navigate \u00b7 enter cycle \u00b7 \u2190 back \u00b7 m message \u00b7 s save \u00b7 q quit"
         if data[item]["disposition"] == "block":
-            return "\u2191/\u2193 navigate \u00b7 enter cycle \u00b7 tab approval \u00b7 s save \u00b7 q quit"
-        return "\u2191/\u2193 navigate \u00b7 enter cycle \u00b7 s save \u00b7 q quit"
+            return "\u2191/\u2193 navigate \u00b7 enter cycle \u00b7 tab approval \u00b7 m message \u00b7 s save \u00b7 q quit"
+        return "\u2191/\u2193 navigate \u00b7 enter cycle \u00b7 m message \u00b7 s save \u00b7 q quit"
     return "\u2191/\u2193 navigate \u00b7 enter select \u00b7 s save \u00b7 q quit"
 
 def _main_row(item: str, data: dict[str, Any], focused: bool, sel: int) -> str:
@@ -243,6 +253,10 @@ def _group_row(pointer: str, group: str, policy: dict[str, str], focused: bool, 
             styled_val = _disposition_label(disp)
             plain_val = disp
 
+    if policy.get("message"):
+        styled_val += f"  {CYAN}custom message{RESET}"
+        plain_val += "  custom message"
+
     pad = " " * max(2, 32 - len(plain_val))
     return f" {pointer}{label_styled}{label_pad}{styled_val}{pad}{DIM}{desc}{RESET}\n"
 
@@ -281,51 +295,3 @@ def _bypass_phrase_colored(byp: str, active: bool = False) -> str:
     if byp == "none":
         return f"{RED}{ul}never allowed{RESET}"
     return byp
-
-
-def _read_key(fd: int) -> str | None:
-    ch = os.read(fd, 1)
-    if ch == b"":
-        raise EOFError
-    if ch == b"\x1b":
-        if not select.select([fd], [], [], 0.1)[0]:
-            return "esc"
-        nxt = os.read(fd, 1)
-        if nxt in (b"[", b"O"):
-            return _csi_key(fd, nxt)
-        return "esc"
-    if ch in (b"\r", b"\n"):
-        return "enter"
-    if ch == b"\x03":
-        raise KeyboardInterrupt
-    if ch in (b"\x7f", b"\x08"):
-        return "backspace"
-    return ch.decode("utf-8", "replace").lower()
-
-
-_CSI_ARROWS = {b"A": "up", b"B": "down", b"C": "right", b"D": "left", b"H": "home", b"F": "end"}
-_SS3_ARROWS = {b"A": "up", b"B": "down", b"C": "right", b"D": "left"}
-
-
-def _csi_key(fd: int, intro: bytes) -> str | None:
-    """Parse a CSI (\`\x1b[\`) or SS3 (\`\x1bO\`) sequence.
-
-    Unknown sequences return None so the UI ignores them.
-    """
-    while True:
-        if not select.select([fd], [], [], 0.1)[0]:
-            return None
-        b = os.read(fd, 1)
-        if b == b"":
-            return None
-        if 0x40 <= b[0] <= 0x7E:
-            if intro == b"[":
-                return _CSI_ARROWS.get(b)
-            return _SS3_ARROWS.get(b)
-
-
-def _drain(fd: int) -> None:
-    """Discard any input bytes already waiting before the UI starts."""
-    while select.select([fd], [], [], 0)[0]:
-        if not os.read(fd, 4096):
-            break

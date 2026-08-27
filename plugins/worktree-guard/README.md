@@ -122,7 +122,9 @@ retrying. A policy `message` intentionally replaces that default completely.
 `config` prints the effective configuration as JSON (merged from `.wtg.json`
 with the safe defaults), or — when run in a terminal — opens an inquirer-style
 UI with arrow-key navigation: pick a policy, set its disposition, and (only if
-it ends up `block`) its bypass. `config set <key> <value>` updates one leaf
+it ends up `block`) its bypass. Press `m` on any policy to edit its custom
+message; Enter accepts, Escape cancels, Ctrl-U clears it back to the default,
+and Ctrl-N inserts a line break. `config set <key> <value>` updates one leaf
 in `.wtg.json`, creating the file if needed — `enabled` accepts
 true/false/on/off/yes/no/1/0, `<policy>.disposition` accepts
 allow/warn/block, and `<policy>.bypass` accepts auto/manual/none. `config

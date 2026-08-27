@@ -114,6 +114,31 @@ class ConfigLoopTests(unittest.TestCase):
         self.assertTrue(last_group_frames)
         self.assertIn("require human approval", last_group_frames[-1])
 
+    def test_branch_changes_message_editor_saves_exact_text(self) -> None:
+        message = "Stay on THIS branch."
+        keys = (
+            ["down"] * (BRANCH_CHANGES - ENABLED)
+            + ["m", *message, "enter"]
+            + ["down"] * (SAVE - BRANCH_CHANGES) + ["enter"]
+        )
+        code, output = self.run_loop(keys)
+        self.assertEqual(code, 0)
+        self.assertEqual(read_config(self.base)["branchChanges"]["message"], message)
+        self.assertIn("custom message", "".join(output))
+
+    def test_message_editor_ctrl_u_clears_an_existing_override(self) -> None:
+        config_path(self.base).write_text(
+            json.dumps({"writes": {"message": "Original text"}}), encoding="utf-8",
+        )
+        keys = ["down", "m", "ctrl-u", "enter"] + ["down"] * (SAVE - WRITES) + ["enter"]
+        self.assertEqual(self.loop(keys), 0)
+        self.assertNotIn("message", read_config(self.base)["writes"])
+
+    def test_message_editor_ctrl_n_inserts_a_line_break(self) -> None:
+        keys = ["down", "m", "A", "ctrl-n", "B", "enter"] + ["down"] * (SAVE - WRITES) + ["enter"]
+        self.assertEqual(self.loop(keys), 0)
+        self.assertEqual(read_config(self.base)["writes"]["message"], "A\nB")
+
     def test_discard_and_stash_are_independently_editable(self) -> None:
         keys = (
             ["down"] * (DISCARD - ENABLED)    # focus discard, sel=0
