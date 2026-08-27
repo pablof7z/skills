@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -17,12 +16,11 @@ from .core import (
 from .git import discover_repo
 from .hooks import cmd_hook_harness
 from .notifications import notify_auto_grant
-from .install import install_hooks, toast_binary_path
+from .install import install_hooks
 from .storage import (
-    ApprovalOutcome, active_grants, config_path, create_grant, default_config, deny_log_path,
-    global_config_path, read_config, read_denials, read_requests, repo_config,
+    ApprovalOutcome, config_path, create_grant, default_config, read_config, read_requests, repo_config,
     request_human_approval, request_log_path, revoke_grants, set_config_value,
-    stable_hook_shim_path, state_path, write_config, write_request,
+    write_config, write_request,
 )
 from .tui import is_interactive
 
@@ -107,9 +105,6 @@ def build_parser() -> argparse.ArgumentParser:
     init = config_set.add_parser("init", help="Write a default .wtg.json")
     init.set_defaults(func=cmd_config_init)
 
-    doctor = subparsers.add_parser("doctor", help="Check the local WorktreeGuard installation")
-    doctor.set_defaults(func=cmd_doctor)
-
     install = subparsers.add_parser(
         "install-hooks",
         help="Install stable hook shims and register the Grok global hook",
@@ -120,13 +115,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip writing ~/.grok/hooks/worktree-guard.json",
     )
     install.set_defaults(func=cmd_install_hooks)
-
-    denials = subparsers.add_parser("denials", help="Inspect blocked Git command records")
-    denials.add_argument("--tail", type=int, default=20)
-    denials.add_argument("--repo")
-    denials.add_argument("--session")
-    denials.add_argument("--json", action="store_true")
-    denials.set_defaults(func=cmd_denials)
 
     requests = subparsers.add_parser(
         "requests", help="Inspect past request-base-access reasons"
@@ -293,67 +281,9 @@ def cmd_config_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_doctor(_args: argparse.Namespace) -> int:
-    git_path = shutil.which("git")
-    print(f"git: {git_path or 'missing'}")
-    print(f"state: {state_path()}")
-    print(f"deny log: {deny_log_path()}")
-    print(f"request log: {request_log_path()}")
-    for harness in ("codex", "claude", "grok", "dispatch"):
-        shim = stable_hook_shim_path(harness)
-        status = "executable" if os.access(shim, os.X_OK) else "missing"
-        print(f"hook shim ({harness}): {shim} ({status})")
-    grok_hook = Path.home() / ".grok" / "hooks" / "worktree-guard.json"
-    print(
-        f"grok global hook: {grok_hook} "
-        f"({'present' if grok_hook.is_file() else 'missing'})"
-    )
-    global_cfg = global_config_path()
-    print(
-        f"global config: {global_cfg} "
-        f"({'present' if global_cfg.is_file() else 'not set — repos use hard-coded defaults as fallback'})"
-    )
-    toast = toast_binary_path()
-    print(
-        f"notification toast: {toast} "
-        f"({'present' if toast.is_file() else 'missing — falls back to a plain approval dialog'})"
-    )
-    print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
-    print(f"active overrides: {len(active_grants())}")
-    print(
-        "repo config: .wtg.json per base checkout (enabled, plus "
-        f"{{disposition, bypass, optional message}} per policy: {', '.join(GUARD_GROUPS)})"
-    )
-    return 0 if git_path else 1
-
-
 def cmd_install_hooks(args: argparse.Namespace) -> int:
     for message in install_hooks(grok=not args.no_grok):
         print(message)
-    return 0
-
-
-def cmd_denials(args: argparse.Namespace) -> int:
-    records = read_denials()
-    if args.repo:
-        repo = str(resolve_path(args.repo))
-        records = [record for record in records if record.get("base_path") == repo]
-    if args.session:
-        records = [record for record in records if record.get("session_id") == args.session]
-    tail = records[-max(0, args.tail) :] if args.tail else []
-    if args.json:
-        emit({"log": str(deny_log_path()), "total": len(records), "tail": tail})
-    else:
-        print(f"Denied commands: {len(records)} ({deny_log_path()})")
-        for record in tail:
-            action = (
-                f"git {record.get('subcommand')}"
-                if record.get("subcommand") else str(record.get("tool_name") or "mutation")
-            )
-            scope = f" [{record['scope']}]" if record.get("scope") else ""
-            print(
-                f"{record.get('timestamp', '')} {action}{scope} in {record.get('base_path', '')}"
-            )
     return 0
 
 

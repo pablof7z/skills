@@ -95,8 +95,6 @@ mutation is a fundamentally different (and much larger) problem.
 <plugin-root>/bin/wtg config --repo <path> set <policy>.bypass <auto|manual|none>
 <plugin-root>/bin/wtg config --repo <path> set <policy>.message "Exact message for the agent"
 <plugin-root>/bin/wtg config --repo <path> init                        # write a default .wtg.json
-<plugin-root>/bin/wtg denials --tail 20
-<plugin-root>/bin/wtg doctor
 <plugin-root>/bin/wtg install-hooks
 python3 <plugin-root>/scripts/probe_worktreeguard.py
 python3 <plugin-root>/scripts/probe_codex_exec.py

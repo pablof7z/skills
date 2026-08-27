@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 
@@ -243,6 +243,12 @@ class RepoConfigTests(unittest.TestCase):
         write_config(self.base, {"enabled": False})
         self.assertEqual(main(["config", "--repo", str(self.base), "init"]), 1)
         self.assertFalse(read_config(self.base)["enabled"])
+
+    def test_removed_doctor_and_denials_commands_are_rejected(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["doctor"])
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["denials"])
 
     def test_all_four_groups_are_configurable(self) -> None:
         self.assertEqual(set(GUARD_GROUPS), {"writes", "branchChanges", "discard", "stash"})

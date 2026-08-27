@@ -107,10 +107,6 @@ def request_log_path() -> Path:
     return resolve_path(override) if override else Path.home() / DEFAULT_REQUEST_LOG_FILE
 
 
-def stable_hook_shim_path(harness: str) -> Path:
-    return Path.home() / ".local/bin" / f"wtg-hook-{harness}"
-
-
 def load_state() -> dict[str, Any]:
     try:
         payload = json.loads(state_path().read_text(encoding="utf-8"))
@@ -453,10 +449,6 @@ def _approval_outcome(raw: str) -> ApprovalOutcome:
 
 def write_denial(record: dict[str, Any]) -> None:
     _append_jsonl(deny_log_path(), record)
-
-
-def read_denials() -> list[dict[str, Any]]:
-    return _read_jsonl(deny_log_path())
 
 
 def write_request(record: dict[str, Any]) -> None:
