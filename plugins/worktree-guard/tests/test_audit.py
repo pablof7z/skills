@@ -48,6 +48,14 @@ class DenialMessageTests(unittest.TestCase):
         self.assertIn("the native `Edit` tool in the base checkout", message)
         self.assertIn("--scope writes", message)
 
+    def test_custom_policy_message_replaces_a_denial_completely(self) -> None:
+        base = Path("/repo")
+        message = denial_message(
+            BlockedGitOperation("switch", "git switch main", base, base, True, "branchChanges"),
+            config_with(branch_changes=GroupPolicy("block", "auto", "Use the feature worktree.")),
+        )
+        self.assertEqual(message, "Use the feature worktree.")
+
 
 class ApprovalHintTests(unittest.TestCase):
     base = Path("/repo")
@@ -85,7 +93,7 @@ class WarnMessageTests(unittest.TestCase):
     def test_warn_message_for_a_file_write_names_the_base_and_target(self) -> None:
         base = Path("/repo")
         target = base / "tracked.txt"
-        message = warn_message(BlockedFileOperation("Edit", base, base, target))
+        message = warn_message(BlockedFileOperation("Edit", base, base, target), DEFAULT_CONFIG)
         self.assertIn("You are modifying the base directory of a protected repo", message)
         self.assertIn("shouldn't be working on a git worktree?", message)
         self.assertIn(str(base), message)
@@ -93,10 +101,20 @@ class WarnMessageTests(unittest.TestCase):
 
     def test_warn_message_for_a_git_command_names_the_subcommand(self) -> None:
         base = Path("/repo")
-        message = warn_message(BlockedGitOperation("stash", "git stash", base, base, False, "stash"))
+        message = warn_message(
+            BlockedGitOperation("stash", "git stash", base, base, False, "stash"), DEFAULT_CONFIG,
+        )
         self.assertIn("git stash", message)
         self.assertIn("shouldn't be working on a git worktree?", message)
         self.assertIn(str(base), message)
+
+    def test_custom_policy_message_replaces_a_warning_completely(self) -> None:
+        base = Path("/repo")
+        message = warn_message(
+            BlockedFileOperation("Edit", base, base, base / "tracked.txt"),
+            config_with(writes=GroupPolicy("warn", "auto", "Edit only in the worktree.")),
+        )
+        self.assertEqual(message, "Edit only in the worktree.")
 
 
 if __name__ == "__main__":

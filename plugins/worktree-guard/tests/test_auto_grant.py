@@ -76,6 +76,14 @@ class BaseAccessTests(unittest.TestCase):
         self.assertEqual(active_grants(), [])
         self.assertFalse(self.notifications.exists())
 
+    def test_writes_custom_message_is_the_complete_codex_denial_reason(self) -> None:
+        write_config(self.base, {"writes": {"message": "Edit only in the linked worktree."}})
+        output = json.loads(hook_output("pre-tool-use", native_payload(self.base, "session-one")))
+        self.assertEqual(
+            output["hookSpecificOutput"]["permissionDecisionReason"],
+            "Edit only in the linked worktree.",
+        )
+
     def test_harness_permission_events_are_not_wtg_business(self) -> None:
         self.assertEqual(hook_output("permission-request", native_payload(self.base, "s")), "")
         self.assertEqual(read_jsonl(self.denials), [])

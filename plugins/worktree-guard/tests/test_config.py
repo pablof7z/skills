@@ -159,6 +159,19 @@ class RepoConfigTests(unittest.TestCase):
         self.assertEqual(config["writes"], {"disposition": "warn", "bypass": "manual"})
         self.assertEqual(config["stash"], {"disposition": "block", "bypass": "auto"})
 
+    def test_policy_message_is_optional_and_round_trips_exactly(self) -> None:
+        text = "Change branches only in a linked worktree.\nAsk first if needed."
+        write_config(self.base, {"branchChanges": {"message": text}})
+        config = repo_config(self.base)
+        self.assertEqual(config.branch_changes.message, text)
+        self.assertEqual(read_config(self.base)["branchChanges"]["message"], text)
+
+    def test_blank_or_nonstring_policy_message_uses_the_default(self) -> None:
+        write_config(self.base, {"writes": {"message": "   "}})
+        self.assertIsNone(repo_config(self.base).writes.message)
+        write_config(self.base, {"writes": {"message": 42}})
+        self.assertIsNone(repo_config(self.base).writes.message)
+
     def test_set_config_value_rejects_unknown_key(self) -> None:
         from worktreeguard.core import WorktreeGuardError
         with self.assertRaises(WorktreeGuardError):
@@ -198,6 +211,19 @@ class RepoConfigTests(unittest.TestCase):
             )
         self.assertEqual(json.loads(buffer.getvalue())["writes"]["disposition"], "warn")
         self.assertEqual(read_config(self.base)["writes"]["disposition"], "warn")
+
+    def test_cli_config_set_message_and_empty_value_clears_it(self) -> None:
+        text = "Keep edits in the linked worktree."
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                main(["config", "--repo", str(self.base), "set", "writes.message", text]), 0,
+            )
+        self.assertEqual(read_config(self.base)["writes"]["message"], text)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                main(["config", "--repo", str(self.base), "set", "writes.message", ""]), 0,
+            )
+        self.assertNotIn("message", read_config(self.base)["writes"])
 
     def test_cli_config_set_enabled_false(self) -> None:
         with redirect_stdout(io.StringIO()):

@@ -26,7 +26,7 @@ VALID_BYPASS = frozenset({"auto", "manual", "none"})
 
 @dataclass(frozen=True)
 class GroupPolicy:
-    """The two independent axes that govern one guard group.
+    """The settings that govern one guard group.
 
     ``disposition`` is what happens by default: ``allow`` (silent), ``warn``
     (allowed, but a nudge is injected) or ``block`` (refused until a grant covers
@@ -34,11 +34,14 @@ class GroupPolicy:
     ``wtg request-base-access --scope <name>`` is granted automatically (with a
     local notification), ``manual`` means it blocks until a human approves via the
     local dialog, ``none`` means it can never be granted at all — only a linked
-    worktree gets you out of it.
+    worktree gets you out of it. ``message`` optionally replaces the entire
+    agent-visible message when this policy is triggered; ``None`` retains the
+    built-in contextual message.
     """
 
     disposition: str
     bypass: str
+    message: str | None = None
 
 
 DEFAULT_GROUP_POLICY = GroupPolicy(disposition="block", bypass="auto")
@@ -279,7 +282,10 @@ def _group_policy(data: dict[str, Any], group: str) -> GroupPolicy:
         bypass = str(raw.get("bypass", DEFAULT_GROUP_POLICY.bypass))
         if bypass not in VALID_BYPASS:
             bypass = DEFAULT_GROUP_POLICY.bypass
-        return GroupPolicy(disposition, bypass)
+        message = raw.get("message")
+        if not isinstance(message, str) or not message.strip():
+            message = None
+        return GroupPolicy(disposition, bypass, message)
     return DEFAULT_GROUP_POLICY
 
 
@@ -304,7 +310,10 @@ def _config_dict(config: RepoConfig) -> dict[str, Any]:
 
 
 def _policy_dict(policy: GroupPolicy) -> dict[str, str]:
-    return {"disposition": policy.disposition, "bypass": policy.bypass}
+    result = {"disposition": policy.disposition, "bypass": policy.bypass}
+    if policy.message is not None:
+        result["message"] = policy.message
+    return result
 
 
 def write_config(base_path: Path, config: dict[str, Any]) -> None:
@@ -316,8 +325,9 @@ def write_config(base_path: Path, config: dict[str, Any]) -> None:
 def set_config_value(base_path: Path, key: str, value: Any) -> dict[str, Any]:
     """Set one leaf of the effective config and write it back in the new shape.
 
-    ``key`` is either ``enabled`` or ``<policy>.disposition``/``<policy>.bypass``
-    for a policy key in :data:`worktreeguard.core.GUARD_GROUPS`.
+    ``key`` is either ``enabled`` or a ``<policy>.disposition``,
+    ``<policy>.bypass``, or ``<policy>.message`` leaf for a policy key in
+    :data:`worktreeguard.core.GUARD_GROUPS`.
     """
     config = read_config(base_path)
     if key == "enabled":
@@ -325,13 +335,22 @@ def set_config_value(base_path: Path, key: str, value: Any) -> dict[str, Any]:
         write_config(base_path, config)
         return config
     policy_key, separator, field = key.partition(".")
-    if not separator or policy_key not in GUARD_GROUPS or field not in ("disposition", "bypass"):
+    if not separator or policy_key not in GUARD_GROUPS or field not in (
+        "disposition", "bypass", "message",
+    ):
         raise WorktreeGuardError(
             f"unknown config key: {key!r} (expected 'enabled' or "
-            f"'<policy>.disposition'/'<policy>.bypass', policy one of "
+            f"'<policy>.disposition'/'<policy>.bypass'/'<policy>.message', policy one of "
             f"{', '.join(GUARD_GROUPS)})"
         )
-    config[policy_key][field] = normalize_group_value(field, value)
+    if field == "message":
+        message = normalize_policy_message(value)
+        if message is None:
+            config[policy_key].pop("message", None)
+        else:
+            config[policy_key]["message"] = message
+    else:
+        config[policy_key][field] = normalize_group_value(field, value)
     write_config(base_path, config)
     return config
 
@@ -355,6 +374,13 @@ def normalize_group_value(field: str, value: Any) -> str:
             f"invalid {field} value: {value!r} (expected one of {', '.join(sorted(valid))})"
         )
     return text
+
+
+def normalize_policy_message(value: Any) -> str | None:
+    """An empty CLI value clears the override and restores the default message."""
+    if not isinstance(value, str):
+        raise WorktreeGuardError("policy message must be a string")
+    return value if value.strip() else None
 
 
 def request_human_approval(

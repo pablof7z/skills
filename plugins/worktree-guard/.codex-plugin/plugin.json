@@ -1,6 +1,6 @@
 {
   "name": "worktree-guard",
-  "version": "0.7.0+codex.20260827101441",
+  "version": "0.7.0+codex.20260827111045",
   "description": "Configurable Git and native-edit awareness for base checkouts.",
   "author": {
     "name": "Pablo Fernandez",

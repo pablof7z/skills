@@ -17,7 +17,7 @@ lesser one, even though `git stash` is technically recoverable. Shell tools
 recognized for the Git commands above include `Bash`, `Shell`, and Grok
 `run_terminal_command`.
 
-Each policy has two independent settings:
+Each policy has these settings:
 
 - **`disposition`** — what happens by default: `allow` (silent), `warn`
   (allowed, but a nudge is injected: "You are modifying/running `git X` in
@@ -28,6 +28,10 @@ Each policy has two independent settings:
   with one local notification), `manual` (the request blocks until a human
   approves via a local dialog), or `none` (never grantable at all — a linked
   worktree is the only way out).
+- **`message`** — an optional nonempty string that replaces the whole message
+  WorktreeGuard gives the agent when that policy is triggered. Omit it to keep
+  the contextual built-in wording. The override is used for both `block` and
+  `warn`; WorktreeGuard adds no title, hint, command, or path around it.
 
 Every policy supports every combination — there is no policy that's
 special-cased to a narrower set of states than another.
@@ -48,7 +52,11 @@ checkout root:
 {
   "enabled": true,
   "writes": { "disposition": "block", "bypass": "auto" },
-  "branchChanges": { "disposition": "block", "bypass": "auto" },
+  "branchChanges": {
+    "disposition": "block",
+    "bypass": "auto",
+    "message": "Do not change branches in this checkout. Continue in a linked worktree."
+  },
   "discard": { "disposition": "block", "bypass": "auto" },
   "stash": { "disposition": "block", "bypass": "auto" }
 }
@@ -57,7 +65,7 @@ checkout root:
 - `enabled` — `false` disables every protection policy for this repo; `wtg
   request-base-access` becomes a no-op ("no override is needed") and nothing
   is blocked or warned.
-- Each of the four policies accepts `{"disposition": ..., "bypass": ...}`.
+- Each of the four policies accepts `{"disposition": ..., "bypass": ..., "message": ...}`.
   Missing fields fall back to the safe defaults (`block`/`auto`) — so setting
   just `{"stash": {"disposition": "warn"}}` leaves `stash.bypass` at `auto`
   (unused while disposition isn't `block`) and every other policy untouched.
@@ -85,6 +93,7 @@ mutation is a fundamentally different (and much larger) problem.
 <plugin-root>/bin/wtg config --repo <path> set enabled <bool>
 <plugin-root>/bin/wtg config --repo <path> set <policy>.disposition <allow|warn|block>
 <plugin-root>/bin/wtg config --repo <path> set <policy>.bypass <auto|manual|none>
+<plugin-root>/bin/wtg config --repo <path> set <policy>.message "Exact message for the agent"
 <plugin-root>/bin/wtg config --repo <path> init                        # write a default .wtg.json
 <plugin-root>/bin/wtg denials --tail 20
 <plugin-root>/bin/wtg doctor
@@ -105,10 +114,10 @@ Code, or Grok session is refused, and when `enabled` is false it is a no-op.
 There is no remote approval, pairing, daemon, relay, MCP integration,
 automatic branch repair, session cwd tracking, or full allow-action audit.
 
-Every PreToolUse denial tells the agent what will happen if it asks for
-access for that specific scope (auto-approved, blocked until a human
+By default, every PreToolUse denial tells the agent what will happen if it
+asks for access for that specific scope (auto-approved, blocked until a human
 responds, or automatically denied) so it can choose a worktree instead of
-retrying.
+retrying. A policy `message` intentionally replaces that default completely.
 
 `config` prints the effective configuration as JSON (merged from `.wtg.json`
 with the safe defaults), or — when run in a terminal — opens an inquirer-style
@@ -117,6 +126,8 @@ it ends up `block`) its bypass. `config set <key> <value>` updates one leaf
 in `.wtg.json`, creating the file if needed — `enabled` accepts
 true/false/on/off/yes/no/1/0, `<policy>.disposition` accepts
 allow/warn/block, and `<policy>.bypass` accepts auto/manual/none. `config
+set <policy>.message <text>` sends `<text>` exactly to the agent on that
+policy's block or warning; passing an empty text clears the override. `config
 init` writes a default `.wtg.json` and refuses to clobber an existing one.
 Edit the file directly if you prefer — nothing else reads or writes it.
 

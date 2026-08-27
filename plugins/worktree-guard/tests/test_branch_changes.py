@@ -122,6 +122,16 @@ class BranchPolicyHookTests(unittest.TestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("automatically denied", out["hookSpecificOutput"]["permissionDecisionReason"])
 
+    def test_branch_changes_custom_message_is_the_complete_codex_denial_reason(self) -> None:
+        write_config(self.base, {
+            "branchChanges": {"message": "Stay on this branch; use a linked worktree."},
+        })
+        out = json.loads(self.hook(self.switch_payload()))
+        self.assertEqual(
+            out["hookSpecificOutput"]["permissionDecisionReason"],
+            "Stay on this branch; use a linked worktree.",
+        )
+
     def test_bypass_none_on_branch_changes_still_allows_discard_with_grant(self) -> None:
         # Groups are independent: tightening branchChanges doesn't touch discard.
         write_config(self.base, {"branchChanges": {"bypass": "none"}})

@@ -23,6 +23,8 @@ SCOPE_LABELS = {
 
 
 def denial_message(operation: BlockedOperation, config: RepoConfig) -> str:
+    if message := config.policy(operation.group).message:
+        return message
     if isinstance(operation, BlockedGitOperation):
         summary = f"`git {operation.subcommand}` in the base checkout"
         detail = f"\nRejected command:\n{operation.command}"
@@ -56,7 +58,9 @@ def approval_hint(config: RepoConfig, base_path: Path, group: str) -> str:
     return f"A request will be automatically approved. If you really meant to, use `{cmd}`."
 
 
-def warn_message(operation: BlockedOperation) -> str:
+def warn_message(operation: BlockedOperation, config: RepoConfig) -> str:
+    if message := config.policy(operation.group).message:
+        return message
     if isinstance(operation, BlockedGitOperation):
         lead = f"You are running `git {operation.subcommand}` in the base directory of a protected repo"
         detail = f"\nCommand: {operation.command}"

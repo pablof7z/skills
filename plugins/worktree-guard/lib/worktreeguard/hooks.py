@@ -63,7 +63,7 @@ def run_harness_hook(
 
     warned = warned_operation(operation, cwd)
     if warned is not None:
-        message = warn_message(warned)
+        message = warn_message(warned, repo_config(warned.base_path))
         if harness == "grok":
             emit({"decision": "allow", "reason": message})
         elif harness != "codex":

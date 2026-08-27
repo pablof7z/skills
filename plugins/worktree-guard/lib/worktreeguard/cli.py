@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     setter = config_set.add_parser("set", help="Set a key in .wtg.json")
     setter.add_argument(
         "key",
-        help="'enabled', or '<policy>.disposition'/'<policy>.bypass' "
+        help="'enabled', or '<policy>.disposition'/'<policy>.bypass'/'<policy>.message' "
         f"(policy one of: {', '.join(GUARD_GROUPS)})",
     )
     setter.add_argument("value")
@@ -156,7 +156,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"enabled={config.enabled}")
         for group in GUARD_GROUPS:
             policy = config.policy(group)
-            print(f"  {group}: disposition={policy.disposition} bypass={policy.bypass}")
+            message = " custom-message" if policy.message is not None else ""
+            print(f"  {group}: disposition={policy.disposition} bypass={policy.bypass}{message}")
     else:
         print(f"Linked worktree unrestricted: {repo.worktree_path}")
         print(f"Base checkout: {repo.base_path}")
@@ -321,7 +322,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     print(f"active overrides: {len(active_grants())}")
     print(
         "repo config: .wtg.json per base checkout (enabled, plus "
-        f"{{disposition, bypass}} per policy: {', '.join(GUARD_GROUPS)})"
+        f"{{disposition, bypass, optional message}} per policy: {', '.join(GUARD_GROUPS)})"
     )
     return 0 if git_path else 1
 
