@@ -7,23 +7,22 @@ import json
 import os
 import shutil
 import sys
-import time
 from pathlib import Path
 
-from .audit import GROUP_LABELS, request_record
+from .audit import SCOPE_LABELS, request_record
 from .core import (
-    BLOCKED_GIT_COMMANDS, DEFAULT_GRANT_TTL_SECONDS, GUARD_GROUPS, WorktreeGuardError, emit,
-    resolve_path,
+    ACCESS_SCOPES, BLOCKED_GIT_COMMANDS, DEFAULT_REQUEST_TIMEOUT_SECONDS, GUARD_GROUPS,
+    WorktreeGuardError, emit, group_for_access_scope, resolve_path,
 )
 from .git import discover_repo
 from .hooks import cmd_hook_harness
 from .notifications import notify_auto_grant
-from .install import install_hooks
+from .install import install_hooks, toast_binary_path
 from .storage import (
-    active_grants, config_path, create_grant, default_config, deny_log_path,
-    read_config, read_denials, read_requests, repo_config, request_human_approval,
-    request_log_path, set_config_value, stable_hook_shim_path, state_path, write_config,
-    write_request,
+    ApprovalOutcome, active_grants, config_path, create_grant, default_config, deny_log_path,
+    global_config_path, read_config, read_denials, read_requests, repo_config,
+    request_human_approval, request_log_path, revoke_grants, set_config_value,
+    stable_hook_shim_path, state_path, write_config, write_request,
 )
 from .tui import is_interactive
 
@@ -41,6 +40,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def positive_seconds(value: str) -> int:
+    try:
+        seconds = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds") from error
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return seconds
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wtg")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -54,22 +63,33 @@ def build_parser() -> argparse.ArgumentParser:
         command.set_defaults(func=handler)
 
     request = subparsers.add_parser(
-        "request-base-access", help="Ask locally for a temporary blocked-command override"
+        "request-base-access", help="Ask locally for session access to a blocked operation"
     )
     request.add_argument("--repo", default=".")
     request.add_argument("--reason", required=True)
-    request.add_argument("--ttl-seconds", type=int, default=DEFAULT_GRANT_TTL_SECONDS)
-    request.add_argument("--timeout", type=int, default=0)
-    which_group = request.add_mutually_exclusive_group(required=True)
-    which_group.add_argument(
-        "--group", choices=GUARD_GROUPS,
-        help="Which guard group to request access for",
+    request.add_argument(
+        "--timeout", type=positive_seconds, default=DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        help="Seconds to wait for a manual decision (default: 300)",
     )
-    which_group.add_argument(
-        "--branch-change", action="store_true",
-        help="Deprecated alias for --group branchChanges",
+    request.add_argument(
+        "--scope", required=True, choices=ACCESS_SCOPES,
+        help="The access scope to request",
     )
     request.set_defaults(func=cmd_request_base_access)
+
+    revoke = subparsers.add_parser(
+        "revoke", help="Revoke a live session access grant"
+    )
+    revoke.add_argument("--repo", default=".")
+    revoke.add_argument(
+        "--session",
+        help="Only revoke this session's grant (default: every session's grant for the repo)",
+    )
+    revoke.add_argument(
+        "--grant-id",
+        help="Only revoke this exact grant (what the notification toast's revoke control uses)",
+    )
+    revoke.set_defaults(func=cmd_revoke)
 
     config = subparsers.add_parser("config", help="Inspect or set the local .wtg.json guard config")
     config.add_argument("--repo", default=".")
@@ -79,8 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
     setter = config_set.add_parser("set", help="Set a key in .wtg.json")
     setter.add_argument(
         "key",
-        help="'enabled', or '<group>.disposition'/'<group>.bypass' "
-        f"(group one of: {', '.join(GUARD_GROUPS)})",
+        help="'enabled', or '<policy>.disposition'/'<policy>.bypass' "
+        f"(policy one of: {', '.join(GUARD_GROUPS)})",
     )
     setter.add_argument("value")
     setter.set_defaults(func=cmd_config_set)
@@ -172,43 +192,54 @@ def cmd_request_base_access(args: argparse.Namespace) -> int:
             "Cannot determine the current Codex, Claude Code, or Grok session; "
             "no access was granted."
         )
-    # The mutually exclusive, required group guarantees exactly one of these is set.
-    group = args.group or "branchChanges"
+    scope = args.scope
+    group = group_for_access_scope(scope)
     policy = config.policy(group)
-    label = GROUP_LABELS.get(group, group)
+    label = SCOPE_LABELS.get(scope, scope)
 
     if policy.bypass == "none":
         write_request(request_record(
             base_path=repo.base_path, reason=args.reason, session_id=session_id,
-            approved=False, method="auto_deny", group=group,
+            outcome="denied_by_policy", scope=scope,
         ))
         print(
             f"Denied. {label.capitalize()} are automatically denied for this repo "
-            f"({group}.bypass=none). Use a linked worktree instead.", file=sys.stderr,
+            "(bypass=none). Use a linked worktree instead.", file=sys.stderr,
         )
         return 1
 
     if policy.bypass == "manual":
-        approved = request_human_approval(repo=repo, reason=args.reason, timeout=args.timeout)
-        method = "human_approval"
+        outcome = request_human_approval(
+            repo=repo, reason=args.reason, scope=scope, timeout=args.timeout,
+        )
     else:
-        approved = True
-        method = "auto_grant"
-        notify_auto_grant(repo.base_path, reason=args.reason, session_id=session_id, group=group)
+        outcome = ApprovalOutcome.APPROVED
 
     write_request(request_record(
         base_path=repo.base_path, reason=args.reason, session_id=session_id,
-        approved=approved, method=method, group=group,
+        outcome=outcome.value, scope=scope,
     ))
-    if not approved:
-        print("Denied. Run the command from a linked worktree instead.", file=sys.stderr)
+    if outcome is ApprovalOutcome.TIMED_OUT:
+        print(
+            f"No answer from the user within {args.timeout} seconds; access was not granted. "
+            "Use a linked worktree or request access again.", file=sys.stderr,
+        )
+        return 1
+    if outcome is ApprovalOutcome.REJECTED:
+        print("Denied by the user. Run the command from a linked worktree instead.", file=sys.stderr)
         return 1
     grant = create_grant(
-        base_path=repo.base_path, reason=args.reason,
-        ttl_seconds=args.ttl_seconds, session_id=session_id, group=group,
+        base_path=repo.base_path, reason=args.reason, session_id=session_id, scope=scope,
+        iterm_session_id=os.environ.get("ITERM_SESSION_ID", ""),
     )
-    expires = time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(grant["expires_at"]))
-    print(f"Approved session override until {expires}. Retry the command.")
+    if policy.bypass == "auto":
+        # Fired after the grant exists so its revoke control has a real id to
+        # target — revoking must never touch a sibling grant for another scope.
+        notify_auto_grant(
+            repo.base_path, reason=args.reason, session_id=session_id,
+            scope=scope, grant_id=grant["id"],
+        )
+    print(f"Approved session access for {scope}. Retry the command.")
     return 0
 
 
@@ -223,6 +254,16 @@ def current_session_id() -> str:
         if session_id:
             return session_id
     return ""
+
+
+def cmd_revoke(args: argparse.Namespace) -> int:
+    repo = discover_repo(Path(args.repo))
+    removed = revoke_grants(repo.base_path, session_id=args.session, grant_id=args.grant_id)
+    if removed:
+        print(f"Revoked {removed} grant(s) for {repo.base_path}.")
+    else:
+        print(f"No live grants to revoke for {repo.base_path}.")
+    return 0
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -266,11 +307,21 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         f"grok global hook: {grok_hook} "
         f"({'present' if grok_hook.is_file() else 'missing'})"
     )
+    global_cfg = global_config_path()
+    print(
+        f"global config: {global_cfg} "
+        f"({'present' if global_cfg.is_file() else 'not set — repos use hard-coded defaults as fallback'})"
+    )
+    toast = toast_binary_path()
+    print(
+        f"notification toast: {toast} "
+        f"({'present' if toast.is_file() else 'missing — falls back to a plain approval dialog'})"
+    )
     print("blocked Git commands: " + ", ".join(sorted(BLOCKED_GIT_COMMANDS)))
     print(f"active overrides: {len(active_grants())}")
     print(
         "repo config: .wtg.json per base checkout (enabled, plus "
-        f"{{disposition, bypass}} per group: {', '.join(GUARD_GROUPS)})"
+        f"{{disposition, bypass}} per policy: {', '.join(GUARD_GROUPS)})"
     )
     return 0 if git_path else 1
 
@@ -298,9 +349,9 @@ def cmd_denials(args: argparse.Namespace) -> int:
                 f"git {record.get('subcommand')}"
                 if record.get("subcommand") else str(record.get("tool_name") or "mutation")
             )
-            group = f" [{record['group']}]" if record.get("group") else ""
+            scope = f" [{record['scope']}]" if record.get("scope") else ""
             print(
-                f"{record.get('timestamp', '')} {action}{group} in {record.get('base_path', '')}"
+                f"{record.get('timestamp', '')} {action}{scope} in {record.get('base_path', '')}"
             )
     return 0
 
@@ -318,10 +369,10 @@ def cmd_requests(args: argparse.Namespace) -> int:
     else:
         print(f"Base access requests: {len(records)} ({request_log_path()})")
         for record in tail:
-            outcome = "approved" if record.get("approved") else "denied"
-            group = f" [{record['group']}]" if record.get("group") else ""
+            outcome = str(record.get("outcome") or "unknown")
+            scope = f" [{record['scope']}]" if record.get("scope") else ""
             print(
-                f"{record.get('timestamp', '')} {outcome}{group} in {record.get('base_path', '')}: "
+                f"{record.get('timestamp', '')} {outcome}{scope} in {record.get('base_path', '')}: "
                 f"{record.get('reason', '')}"
             )
     return 0

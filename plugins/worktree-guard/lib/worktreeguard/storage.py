@@ -8,32 +8,20 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from .core import (
-    DEFAULT_DENY_LOG_FILE, DEFAULT_GRANT_TTL_SECONDS, DEFAULT_REQUEST_LOG_FILE, GUARD_GROUPS, Repo,
+    ACCESS_SCOPES, DEFAULT_DENY_LOG_FILE, DEFAULT_REQUEST_LOG_FILE, GUARD_GROUPS, Repo,
     WorktreeGuardError, resolve_path,
 )
 
 
-STATE_VERSION = 8
+STATE_VERSION = 9
 CONFIG_FILENAME = ".wtg.json"
 VALID_DISPOSITIONS = frozenset({"allow", "warn", "block"})
 VALID_BYPASS = frozenset({"auto", "manual", "none"})
-
-# Legacy (pre-group) shapes, still read from an old-format .wtg.json and upgraded
-# on the fly: "writes"/"branchChanges" as bare strings, plus a top-level
-# "allowBypass" boolean that used to be the single global bypass switch for every
-# blocked-by-default surface. write_config always saves the new nested shape, so
-# these only ever apply on read.
-_LEGACY_WRITES_DISPOSITION = {"block": "block", "warn": "warn", "off": "allow"}
-# value -> (disposition, bypass override or None to defer to legacy allowBypass)
-_LEGACY_BRANCH_CHANGES = {
-    "follow": ("block", None),
-    "manual": ("block", "manual"),
-    "block": ("block", "none"),
-}
 
 
 @dataclass(frozen=True)
@@ -43,7 +31,7 @@ class GroupPolicy:
     ``disposition`` is what happens by default: ``allow`` (silent), ``warn``
     (allowed, but a nudge is injected) or ``block`` (refused until a grant covers
     it). ``bypass`` only matters when ``disposition == "block"``: ``auto`` means
-    ``wtg request-base-access --group <name>`` is granted automatically (with a
+    ``wtg request-base-access --scope <name>`` is granted automatically (with a
     local notification), ``manual`` means it blocks until a human approves via the
     local dialog, ``none`` means it can never be granted at all — only a linked
     worktree gets you out of it.
@@ -87,6 +75,12 @@ DEFAULT_CONFIG = RepoConfig(
 )
 
 
+class ApprovalOutcome(str, Enum):
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    TIMED_OUT = "timed_out"
+
+
 def load_hook_payload(stdin: bytes) -> dict[str, Any]:
     try:
         payload = json.loads(stdin.decode("utf-8")) if stdin.strip() else {}
@@ -121,14 +115,16 @@ def load_state() -> dict[str, Any]:
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
+    if payload.get("version") != STATE_VERSION:
+        return {"version": STATE_VERSION, "grants": []}
     grants = payload.get("grants", [])
     if not isinstance(grants, list):
         grants = []
     session_grants = [
         grant for grant in grants
         if isinstance(grant, dict)
-        and grant.get("scope") == "session"
         and str(grant.get("session_id") or "")
+        and str(grant.get("scope") or "") in ACCESS_SCOPES
     ]
     return {"version": STATE_VERSION, "grants": session_grants}
 
@@ -147,22 +143,24 @@ def save_state(state: dict[str, Any]) -> None:
 
 
 def create_grant(
-    *, base_path: Path, reason: str, ttl_seconds: int, session_id: str, group: str | None = None,
+    *, base_path: Path, reason: str, session_id: str, scope: str,
+    iterm_session_id: str = "",
 ) -> dict[str, Any]:
     if not session_id:
         raise ValueError("session_id is required")
+    if scope not in ACCESS_SCOPES:
+        raise ValueError(f"unknown access scope: {scope!r}")
     now = int(time.time())
     grant: dict[str, Any] = {
         "id": f"grant-{now}-{os.getpid()}",
         "base_path": str(resolve_path(base_path)),
-        "scope": "session",
+        "scope": scope,
         "reason": reason,
         "created_at": now,
-        "expires_at": now + max(1, ttl_seconds),
         "session_id": session_id,
-        # None = a general-purpose grant: covers any group whose bypass is "auto",
-        # never one whose bypass is "manual" (that needs the exact group tag).
-        "group": group,
+        # The iTerm2 tab this grant was requested from, if any — lets the
+        # notification toast jump back to it. Empty when not running in iTerm2.
+        "iterm_session_id": iterm_session_id,
     }
     state = load_state()
     state["grants"].append(grant)
@@ -170,22 +168,19 @@ def create_grant(
     return grant
 
 
-def consume_valid_grant(base_path: Path, *, session_id: str, group: str, bypass: str) -> bool:
-    """True if an active grant covers ``group`` (whose configured bypass mode is
+def consume_valid_grant(base_path: Path, *, session_id: str, scope: str, bypass: str) -> bool:
+    """True if a session grant covers ``scope`` (whose configured bypass mode is
     ``bypass``) for this session.
 
     ``none`` is never satisfiable. ``manual`` only a grant explicitly requested for
-    this exact ``group`` (``wtg request-base-access --group <name>``). ``auto`` any
-    live grant for this base_path/session, tagged or not.
+    this exact scope. ``auto`` accepts any grant for this base path/session.
     """
     if not session_id or bypass == "none":
         return False
     state = load_state()
-    now = int(time.time())
-    active: list[dict[str, Any]] = []
     matched = False
     for grant in state["grants"]:
-        if not isinstance(grant, dict) or int(grant.get("expires_at", 0)) <= now:
+        if not isinstance(grant, dict):
             continue
         grant_session = str(grant.get("session_id") or "")
         applies = (
@@ -194,81 +189,98 @@ def consume_valid_grant(base_path: Path, *, session_id: str, group: str, bypass:
             and grant_session == session_id
         )
         if applies and bypass == "manual":
-            applies = grant.get("group") == group
+            applies = grant.get("scope") == scope
         if applies:
             matched = True
-        active.append(grant)
-    if active != state["grants"]:
-        state["grants"] = active
-        save_state(state)
     return matched
 
 
+def revoke_grants(
+    base_path: Path, *, session_id: str | None = None, grant_id: str | None = None,
+) -> int:
+    """Remove live grants for ``base_path``.
+
+    ``grant_id`` scopes to exactly one grant (what the notification toast's
+    revoke control uses, so revoking one auto-granted request never touches a
+    sibling grant for a different access scope in the same session). Without it,
+    every grant for ``base_path`` is removed, optionally narrowed to one
+    ``session_id`` — the coarse form the bare ``wtg revoke`` CLI uses.
+
+    Returns the number of grants removed.
+    """
+    state = load_state()
+    target = str(resolve_path(base_path))
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for grant in state["grants"]:
+        matches = (
+            isinstance(grant, dict)
+            and str(grant.get("base_path") or "") == target
+            and (session_id is None or str(grant.get("session_id") or "") == session_id)
+            and (grant_id is None or str(grant.get("id") or "") == grant_id)
+        )
+        if matches:
+            removed += 1
+        else:
+            kept.append(grant)
+    if removed:
+        state["grants"] = kept
+        save_state(state)
+    return removed
+
+
 def active_grants() -> list[dict[str, Any]]:
-    now = int(time.time())
-    return [
-        grant
-        for grant in load_state()["grants"]
-        if isinstance(grant, dict) and int(grant.get("expires_at", 0)) > now
-    ]
+    return list(load_state()["grants"])
 
 
 def config_path(base_path: Path) -> Path:
     return resolve_path(base_path) / CONFIG_FILENAME
 
 
+def global_config_path() -> Path:
+    """Path to the home-directory-wide fallback config.
+
+    Overridable via ``WTG_GLOBAL_CONFIG_FILE`` for testing.
+    """
+    override = os.environ.get("WTG_GLOBAL_CONFIG_FILE")
+    return resolve_path(override) if override else Path.home() / ".config" / "worktreeguard" / "config.json"
+
+
 def repo_config(base_path: Path) -> RepoConfig:
     """Load the per-repo ``.wtg.json`` from the base checkout root.
 
-    Missing or malformed files fall back to the safe defaults per field. Old-format
-    keys (bare-string ``writes``/``branchChanges``, a top-level ``allowBypass``) are
-    transparently upgraded; ``write_config`` always saves the new nested shape, so
-    a repo only ever sees the old shape once, on its first read after upgrading.
+    Falls back to the global home-directory config (``~/.config/worktreeguard/config.json``)
+    when the repo has no local file (or the file is unreadable/malformed), then to
+    hard-coded defaults.
     """
-    try:
-        data = json.loads(config_path(base_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return DEFAULT_CONFIG
-    if not isinstance(data, dict):
-        return DEFAULT_CONFIG
-    return RepoConfig(
-        enabled=bool(data.get("enabled", DEFAULT_CONFIG.enabled)),
-        writes=_group_policy(data, "writes"),
-        branch_changes=_group_policy(data, "branchChanges"),
-        discard=_group_policy(data, "discard"),
-        stash=_group_policy(data, "stash"),
-    )
+    for path_fn in (lambda: config_path(base_path), global_config_path):
+        try:
+            data = json.loads(path_fn().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        return RepoConfig(
+            enabled=bool(data.get("enabled", DEFAULT_CONFIG.enabled)),
+            writes=_group_policy(data, "writes"),
+            branch_changes=_group_policy(data, "branchChanges"),
+            discard=_group_policy(data, "discard"),
+            stash=_group_policy(data, "stash"),
+        )
+    return DEFAULT_CONFIG
 
 
 def _group_policy(data: dict[str, Any], group: str) -> GroupPolicy:
     raw = data.get(group)
-    legacy_bypass = _legacy_bypass_default(data)
     if isinstance(raw, dict):
         disposition = str(raw.get("disposition", DEFAULT_GROUP_POLICY.disposition))
         if disposition not in VALID_DISPOSITIONS:
             disposition = DEFAULT_GROUP_POLICY.disposition
-        bypass = str(raw.get("bypass", legacy_bypass))
+        bypass = str(raw.get("bypass", DEFAULT_GROUP_POLICY.bypass))
         if bypass not in VALID_BYPASS:
-            bypass = legacy_bypass
+            bypass = DEFAULT_GROUP_POLICY.bypass
         return GroupPolicy(disposition, bypass)
-    if isinstance(raw, str):
-        if group == "writes":
-            disposition = _LEGACY_WRITES_DISPOSITION.get(raw, DEFAULT_GROUP_POLICY.disposition)
-            return GroupPolicy(disposition, legacy_bypass)
-        if group == "branchChanges":
-            disposition, override = _LEGACY_BRANCH_CHANGES.get(
-                raw, (DEFAULT_GROUP_POLICY.disposition, None)
-            )
-            return GroupPolicy(disposition, override or legacy_bypass)
-    # Absent — or "discard"/"stash", which never had a legacy scalar form of their
-    # own and always implicitly followed the single legacy allowBypass switch.
-    return GroupPolicy(DEFAULT_GROUP_POLICY.disposition, legacy_bypass)
-
-
-def _legacy_bypass_default(data: dict[str, Any]) -> str:
-    if "allowBypass" in data:
-        return "auto" if bool(data["allowBypass"]) else "manual"
-    return DEFAULT_GROUP_POLICY.bypass
+    return DEFAULT_GROUP_POLICY
 
 
 def read_config(base_path: Path) -> dict[str, Any]:
@@ -304,22 +316,22 @@ def write_config(base_path: Path, config: dict[str, Any]) -> None:
 def set_config_value(base_path: Path, key: str, value: Any) -> dict[str, Any]:
     """Set one leaf of the effective config and write it back in the new shape.
 
-    ``key`` is either ``enabled`` or ``<group>.disposition``/``<group>.bypass``
-    for a group in :data:`worktreeguard.core.GUARD_GROUPS`.
+    ``key`` is either ``enabled`` or ``<policy>.disposition``/``<policy>.bypass``
+    for a policy key in :data:`worktreeguard.core.GUARD_GROUPS`.
     """
     config = read_config(base_path)
     if key == "enabled":
         config["enabled"] = normalize_bool(value)
         write_config(base_path, config)
         return config
-    group, separator, field = key.partition(".")
-    if not separator or group not in GUARD_GROUPS or field not in ("disposition", "bypass"):
+    policy_key, separator, field = key.partition(".")
+    if not separator or policy_key not in GUARD_GROUPS or field not in ("disposition", "bypass"):
         raise WorktreeGuardError(
             f"unknown config key: {key!r} (expected 'enabled' or "
-            f"'<group>.disposition'/'<group>.bypass', group one of "
+            f"'<policy>.disposition'/'<policy>.bypass', policy one of "
             f"{', '.join(GUARD_GROUPS)})"
         )
-    config[group][field] = normalize_group_value(field, value)
+    config[policy_key][field] = normalize_group_value(field, value)
     write_config(base_path, config)
     return config
 
@@ -345,12 +357,45 @@ def normalize_group_value(field: str, value: Any) -> str:
     return text
 
 
-def request_human_approval(*, repo: Repo, reason: str, timeout: int) -> bool:
+def request_human_approval(
+    *, repo: Repo, reason: str, scope: str, timeout: int,
+) -> ApprovalOutcome:
     override = os.environ.get("WTG_APPROVAL_RESPONSE", "").strip().lower()
     if override:
-        return override in {"allow", "approve", "session"}
+        if override in {"allow", "approve", "session"}:
+            return ApprovalOutcome.APPROVED
+        if override in {"timeout", "timed_out"}:
+            return ApprovalOutcome.TIMED_OUT
+        return ApprovalOutcome.REJECTED
     if sys.platform != "darwin":
-        return False
+        return ApprovalOutcome.REJECTED
+
+    from .install import toast_binary_path
+    toast = toast_binary_path()
+    if toast.is_file():
+        return _approve_via_toast(toast, repo=repo, reason=reason, scope=scope, timeout=timeout)
+    return _approve_via_dialog(repo=repo, reason=reason, timeout=timeout)
+
+
+def _approve_via_toast(
+    toast: Path, *, repo: Repo, reason: str, scope: str, timeout: int,
+) -> ApprovalOutcome:
+    from .notifications import iterm_focus_command
+    try:
+        result = subprocess.run(
+            [
+                str(toast), repo.base_path.name, scope, "1", reason,
+                str(timeout), iterm_focus_command() or "", "",
+            ],
+            capture_output=True, text=True,
+            timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ApprovalOutcome.TIMED_OUT
+    return _approval_outcome(result.stdout.strip())
+
+
+def _approve_via_dialog(*, repo: Repo, reason: str, timeout: int) -> ApprovalOutcome:
     prompt = (
         "Allow a coding agent to run a normally blocked Git command?\n\n"
         f"Base checkout: {repo.base_path}\nScope: current harness session\n\nReason:\n{reason}"
@@ -363,13 +408,21 @@ def request_human_approval(*, repo: Repo, reason: str, timeout: int) -> bool:
     try:
         result = subprocess.run(
             ["osascript", "-e", script], capture_output=True, text=True,
-            timeout=timeout if timeout > 0 else None, check=False,
+            timeout=timeout, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return ApprovalOutcome.TIMED_OUT
     if result.returncode != 0:
-        return False
-    return result.stdout.strip() == "Allow session"
+        return ApprovalOutcome.REJECTED
+    return ApprovalOutcome.APPROVED if result.stdout.strip() == "Allow session" else ApprovalOutcome.REJECTED
+
+
+def _approval_outcome(raw: str) -> ApprovalOutcome:
+    if raw == "approve":
+        return ApprovalOutcome.APPROVED
+    if raw == "timeout":
+        return ApprovalOutcome.TIMED_OUT
+    return ApprovalOutcome.REJECTED
 
 
 def write_denial(record: dict[str, Any]) -> None:

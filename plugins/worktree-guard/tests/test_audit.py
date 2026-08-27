@@ -37,7 +37,7 @@ class DenialMessageTests(unittest.TestCase):
         self.assertIn("Shouldn't you be working on a Git worktree?", message)
         self.assertIn(f"Rejected command:\n{command}", message)
         self.assertIn("A request will be automatically approved.", message)
-        self.assertIn("wtg request-base-access --group discard --repo /repo --reason", message)
+        self.assertIn("wtg request-base-access --scope discard --repo /repo --reason", message)
         self.assertNotIn("/plugins/worktree-guard", message)
 
     def test_denial_for_a_file_write_names_the_writes_group(self) -> None:
@@ -46,7 +46,7 @@ class DenialMessageTests(unittest.TestCase):
             BlockedFileOperation("Edit", base, base, base / "f.txt"), DEFAULT_CONFIG,
         )
         self.assertIn("the native `Edit` tool in the base checkout", message)
-        self.assertIn("--group writes", message)
+        self.assertIn("--scope writes", message)
 
 
 class ApprovalHintTests(unittest.TestCase):
@@ -55,13 +55,13 @@ class ApprovalHintTests(unittest.TestCase):
     def test_bypass_auto_auto_approves(self) -> None:
         hint = approval_hint(config_with(writes=GroupPolicy("block", "auto")), self.base, "writes")
         self.assertIn("automatically approved", hint)
-        self.assertIn("--group writes", hint)
+        self.assertIn("--scope writes", hint)
 
     def test_bypass_manual_requires_manual(self) -> None:
         hint = approval_hint(config_with(writes=GroupPolicy("block", "manual")), self.base, "writes")
-        self.assertIn("block until the user manually responds", hint)
-        self.assertIn("auto-approval is disabled for this group", hint)
-        self.assertIn("--group writes", hint)
+        self.assertIn("wait up to 300 seconds", hint)
+        self.assertIn("auto-approval is disabled for this scope", hint)
+        self.assertIn("--scope writes", hint)
 
     def test_bypass_none_says_auto_denied_and_no_request_command(self) -> None:
         hint = approval_hint(config_with(discard=GroupPolicy("block", "none")), self.base, "discard")
@@ -69,11 +69,16 @@ class ApprovalHintTests(unittest.TestCase):
         self.assertIn("won't help", hint)
         self.assertNotIn("request-base-access", hint)
 
-    def test_every_group_gets_its_own_hint_naming_that_group(self) -> None:
-        for group in ("writes", "branchChanges", "discard", "stash"):
-            with self.subTest(group=group):
+    def test_every_policy_gets_its_own_hint_naming_the_request_scope(self) -> None:
+        for group, scope in (
+            ("writes", "writes"),
+            ("branchChanges", "change-branch"),
+            ("discard", "discard"),
+            ("stash", "stash"),
+        ):
+            with self.subTest(scope=scope):
                 hint = approval_hint(DEFAULT_CONFIG, self.base, group)
-                self.assertIn(f"--group {group}", hint)
+                self.assertIn(f"--scope {scope}", hint)
 
 
 class WarnMessageTests(unittest.TestCase):

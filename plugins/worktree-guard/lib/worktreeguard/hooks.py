@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from .audit import denial_message, denial_record, warn_message
-from .core import emit, resolve_path
+from .core import access_scope_for_group, emit, resolve_path
 from .operations import extract_operation, operation_cwd, payload_string, recover_codex_exec_workdir
 from .policy import blocked_operation, warned_operation
 from .storage import consume_valid_grant, load_hook_payload, repo_config, write_denial
@@ -51,7 +51,8 @@ def run_harness_hook(
         config = repo_config(blocked.base_path)
         bypass = config.policy(blocked.group).bypass
         if consume_valid_grant(
-            blocked.base_path, session_id=session_id, group=blocked.group, bypass=bypass,
+            blocked.base_path, session_id=session_id, scope=access_scope_for_group(blocked.group),
+            bypass=bypass,
         ):
             return 0
 
@@ -65,7 +66,9 @@ def run_harness_hook(
         message = warn_message(warned)
         if harness == "grok":
             emit({"decision": "allow", "reason": message})
-        else:
+        elif harness != "codex":
+            # Claude Code accepts permissionDecision:"allow" to surface the nudge.
+            # Codex only supports "deny"; for warn we emit nothing (empty stdout = allow).
             emit({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",

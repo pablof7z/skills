@@ -7,15 +7,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .core import DEFAULT_REQUEST_TIMEOUT_SECONDS, access_scope_for_group
 from .operations import payload_string
 from .policy import BlockedFileOperation, BlockedGitOperation, BlockedOperation
 from .storage import RepoConfig
 
 
-# Human-readable label for each guard group, used in hint/warning prose.
-GROUP_LABELS = {
+# Human-readable labels for the public access-request scopes.
+SCOPE_LABELS = {
     "writes": "native file writes",
-    "branchChanges": "branch changes",
+    "change-branch": "branch changes",
     "discard": "history/working-tree discards (clean/reset/restore/rebase)",
     "stash": "git stash",
 }
@@ -37,18 +38,20 @@ def denial_message(operation: BlockedOperation, config: RepoConfig) -> str:
 
 def approval_hint(config: RepoConfig, base_path: Path, group: str) -> str:
     """Tell the agent what happens if it requests access for this group."""
-    label = GROUP_LABELS.get(group, group)
+    scope = access_scope_for_group(group)
+    label = SCOPE_LABELS.get(scope, scope)
     bypass = config.policy(group).bypass
     if bypass == "none":
         return (
             f"{label.capitalize()} are automatically denied for this repo — a request "
             "won't help. Use a linked worktree instead."
         )
-    cmd = f'wtg request-base-access --group {group} --repo {shlex.quote(str(base_path))} --reason "<why>"'
+    cmd = f'wtg request-base-access --scope {scope} --repo {shlex.quote(str(base_path))} --reason "<why>"'
     if bypass == "manual":
         return (
-            f"A request for {label} will block until the user manually responds "
-            f"(auto-approval is disabled for this group). If you really meant to, use `{cmd}`."
+            f"A request for {label} will wait up to {DEFAULT_REQUEST_TIMEOUT_SECONDS} seconds "
+            "for the user to respond (or a supplied --timeout). If nobody answers, it reports "
+            f"the timeout and grants nothing; auto-approval is disabled for this scope. Use `{cmd}`."
         )
     return f"A request will be automatically approved. If you really meant to, use `{cmd}`."
 
@@ -79,7 +82,7 @@ def denial_record(
         "turn_id": payload_string(payload, "turn_id", "turnId"),
         "base_path": str(operation.base_path),
         "effective_cwd": str(operation.cwd),
-        "group": operation.group,
+        "scope": access_scope_for_group(operation.group),
     }
     if isinstance(operation, BlockedGitOperation):
         record.update(
@@ -96,7 +99,7 @@ def denial_record(
 
 
 def request_record(
-    *, base_path: Path, reason: str, session_id: str, approved: bool, method: str, group: str | None,
+    *, base_path: Path, reason: str, session_id: str, outcome: str, scope: str,
 ) -> dict[str, Any]:
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -104,7 +107,6 @@ def request_record(
         "base_path": str(base_path),
         "reason": reason,
         "session_id": session_id,
-        "approved": approved,
-        "method": method,
-        "group": group,
+        "outcome": outcome,
+        "scope": scope,
     }

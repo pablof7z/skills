@@ -117,7 +117,7 @@ class BranchPolicyHookTests(unittest.TestCase):
 
     def test_bypass_none_denies_switch_even_with_general_grant(self) -> None:
         write_config(self.base, {"branchChanges": {"bypass": "none"}})
-        create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
+        create_grant(base_path=self.base, reason="r", session_id="branch-session", scope="writes")
         out = json.loads(self.hook(self.switch_payload()))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("automatically denied", out["hookSpecificOutput"]["permissionDecisionReason"])
@@ -125,29 +125,27 @@ class BranchPolicyHookTests(unittest.TestCase):
     def test_bypass_none_on_branch_changes_still_allows_discard_with_grant(self) -> None:
         # Groups are independent: tightening branchChanges doesn't touch discard.
         write_config(self.base, {"branchChanges": {"bypass": "none"}})
-        create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
+        create_grant(base_path=self.base, reason="r", session_id="branch-session", scope="writes")
         self.assertEqual(self.hook(self.reset_payload()), "")
 
     def test_bypass_manual_denies_switch_with_general_auto_grant(self) -> None:
         write_config(self.base, {"branchChanges": {"bypass": "manual"}})
-        create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
+        create_grant(base_path=self.base, reason="r", session_id="branch-session", scope="writes")
         out = json.loads(self.hook(self.switch_payload()))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("auto-approval is disabled for this group", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertIn("auto-approval is disabled for this scope", out["hookSpecificOutput"]["permissionDecisionReason"])
 
-    def test_bypass_manual_allows_switch_with_group_tagged_grant(self) -> None:
+    def test_bypass_manual_allows_switch_with_matching_scope_grant(self) -> None:
         write_config(self.base, {"branchChanges": {"bypass": "manual"}})
         create_grant(
-            base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session",
-            group="branchChanges",
+            base_path=self.base, reason="r", session_id="branch-session", scope="change-branch",
         )
         self.assertEqual(self.hook(self.switch_payload()), "")
 
-    def test_bypass_manual_group_grant_does_not_cover_a_different_group(self) -> None:
+    def test_bypass_manual_scope_grant_does_not_cover_a_different_scope(self) -> None:
         write_config(self.base, {"branchChanges": {"bypass": "manual"}})
         create_grant(
-            base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session",
-            group="discard",
+            base_path=self.base, reason="r", session_id="branch-session", scope="discard",
         )
         out = json.loads(self.hook(self.switch_payload()))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
@@ -155,15 +153,14 @@ class BranchPolicyHookTests(unittest.TestCase):
     def test_bypass_manual_grant_does_not_leak_beyond_session(self) -> None:
         write_config(self.base, {"branchChanges": {"bypass": "manual"}})
         create_grant(
-            base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session",
-            group="branchChanges",
+            base_path=self.base, reason="r", session_id="branch-session", scope="change-branch",
         )
         other = dict(self.switch_payload(), session_id="other-session")
         out = json.loads(self.hook(other))
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_bypass_auto_allows_switch_with_general_grant(self) -> None:
-        create_grant(base_path=self.base, reason="r", ttl_seconds=300, session_id="branch-session")
+        create_grant(base_path=self.base, reason="r", session_id="branch-session", scope="writes")
         self.assertEqual(self.hook(self.switch_payload()), "")
 
 
@@ -196,7 +193,7 @@ class RequestBranchAccessTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
             return main([
                 "request-base-access", "--repo", str(self.base),
-                "--branch-change", "--reason", "switching",
+                "--scope", "change-branch", "--reason", "switching",
             ])
 
     def test_bypass_none_auto_denies_branch_request(self) -> None:
@@ -212,29 +209,36 @@ class RequestBranchAccessTests(unittest.TestCase):
         with patch.dict(os.environ, {"WTG_APPROVAL_RESPONSE": "session"}):
             self.assertEqual(self.request_branch({"branchChanges": {"bypass": "manual"}}), 0)
         self.assertTrue(active_grants())
-        self.assertEqual(active_grants()[0]["group"], "branchChanges")
+        self.assertEqual(active_grants()[0]["scope"], "change-branch")
 
     def test_bypass_auto_grants_branch_change(self) -> None:
         self.assertEqual(self.request_branch({}), 0)
-        self.assertEqual(active_grants()[0]["group"], "branchChanges")
+        self.assertEqual(active_grants()[0]["scope"], "change-branch")
 
-    def test_group_flag_is_equivalent_to_branch_change_alias(self) -> None:
+    def test_scope_flag_requests_change_branch_access(self) -> None:
         with redirect_stdout(io.StringIO()):
             code = main([
                 "request-base-access", "--repo", str(self.base),
-                "--group", "branchChanges", "--reason", "switching",
+                "--scope", "change-branch", "--reason", "switching",
             ])
         self.assertEqual(code, 0)
-        self.assertEqual(active_grants()[0]["group"], "branchChanges")
+        self.assertEqual(active_grants()[0]["scope"], "change-branch")
 
-    def test_group_and_branch_change_are_mutually_exclusive(self) -> None:
+    def test_removed_group_flag_is_rejected(self) -> None:
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             main([
                 "request-base-access", "--repo", str(self.base),
-                "--group", "writes", "--branch-change", "--reason", "x",
+                "--group", "writes", "--reason", "x",
             ])
 
-    def test_group_is_required(self) -> None:
+    def test_removed_branch_change_flag_is_rejected(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main([
+                "request-base-access", "--repo", str(self.base),
+                "--branch-change", "--reason", "x",
+            ])
+
+    def test_scope_is_required(self) -> None:
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             main(["request-base-access", "--repo", str(self.base), "--reason", "x"])
 

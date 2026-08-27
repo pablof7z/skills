@@ -253,7 +253,7 @@ def session_approval_failures(base: Path, env: dict[str, str]) -> list[str]:
     result = subprocess.run(
         [
             str(WTG), "request-base-access", "--repo", str(base),
-            "--group", "discard", "--reason", "probe",
+            "--scope", "discard", "--reason", "probe",
         ],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=approval_env, check=False,
     )
@@ -305,7 +305,7 @@ def request_grant_failures(base: Path, env: dict[str, str]) -> list[str]:
     result = subprocess.run(
         [
             str(WTG), "request-base-access", "--repo", str(base),
-            "--group", "writes", "--reason", "probe grant",
+            "--scope", "writes", "--reason", "probe grant",
         ],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=request_env, check=False,
     )

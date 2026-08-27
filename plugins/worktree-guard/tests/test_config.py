@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -21,8 +22,8 @@ from worktreeguard.policy import (  # noqa: E402
     blocked_git_operation, blocked_operation, warned_git_operation, warned_operation,
 )
 from worktreeguard.storage import (  # noqa: E402
-    DEFAULT_CONFIG, config_path, default_config, read_config, repo_config, set_config_value,
-    write_config,
+    DEFAULT_CONFIG, config_path, default_config, global_config_path, read_config, repo_config,
+    set_config_value, write_config,
 )
 
 
@@ -41,6 +42,12 @@ class RepoConfigTests(unittest.TestCase):
         root = Path(self.temporary.name).resolve()
         self.base = root / "repo"
         self.linked = root / "linked"
+        # Isolate from any real home-directory config on this machine.
+        nonexistent_global = str(root / "no-global-config.json")
+        self.global_cfg_patch = unittest.mock.patch.dict(
+            "os.environ", {"WTG_GLOBAL_CONFIG_FILE": nonexistent_global}
+        )
+        self.global_cfg_patch.start()
         run(["git", "init", "-q", "-b", "main", str(self.base)])
         run(["git", "config", "user.email", "probe@example.com"], cwd=self.base)
         run(["git", "config", "user.name", "Probe"], cwd=self.base)
@@ -50,6 +57,7 @@ class RepoConfigTests(unittest.TestCase):
         run(["git", "worktree", "add", "-q", "-b", "linked", str(self.linked)], cwd=self.base)
 
     def tearDown(self) -> None:
+        self.global_cfg_patch.stop()
         self.temporary.cleanup()
 
     def test_missing_config_defaults_to_enabled_block_auto_everywhere(self) -> None:
@@ -138,6 +146,13 @@ class RepoConfigTests(unittest.TestCase):
         config_path(self.base).write_text("{not json", encoding="utf-8")
         self.assertEqual(repo_config(self.base), DEFAULT_CONFIG)
 
+    def test_legacy_scalar_config_is_not_migrated(self) -> None:
+        config_path(self.base).write_text(
+            json.dumps({"writes": "off", "branchChanges": "manual", "allowBypass": False}),
+            encoding="utf-8",
+        )
+        self.assertEqual(repo_config(self.base), DEFAULT_CONFIG)
+
     def test_read_config_returns_serializable_mapping(self) -> None:
         write_config(self.base, {"writes": {"disposition": "warn", "bypass": "manual"}})
         config = read_config(self.base)
@@ -207,74 +222,54 @@ class RepoConfigTests(unittest.TestCase):
         self.assertEqual(set(GUARD_GROUPS), {"writes", "branchChanges", "discard", "stash"})
 
 
-class LegacyMigrationTests(unittest.TestCase):
-    """A pre-groups ``.wtg.json`` (writes/branchChanges/allowBypass, no discard/stash
-    keys) must upgrade to the equivalent new-shape policy on read, so an existing
-    repo's real prior behavior survives the migration untouched."""
+class GlobalConfigFallbackTests(unittest.TestCase):
+    """When a repo has no local .wtg.json, the home-directory config is the next source."""
 
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="wtg-legacy-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="wtg-global-")
         root = Path(self.temporary.name).resolve()
         self.base = root / "repo"
+        self.global_cfg = root / "global.json"
         run(["git", "init", "-q", "-b", "main", str(self.base)])
+        self.global_cfg_patch = unittest.mock.patch.dict(
+            "os.environ", {"WTG_GLOBAL_CONFIG_FILE": str(self.global_cfg)}
+        )
+        self.global_cfg_patch.start()
 
     def tearDown(self) -> None:
+        self.global_cfg_patch.stop()
         self.temporary.cleanup()
 
-    def write_legacy(self, data: dict) -> None:
-        config_path(self.base).write_text(json.dumps(data), encoding="utf-8")
-
-    def test_legacy_writes_off_becomes_allow(self) -> None:
-        self.write_legacy({"writes": "off"})
-        self.assertEqual(repo_config(self.base).writes.disposition, "allow")
-
-    def test_legacy_writes_warn_stays_warn(self) -> None:
-        self.write_legacy({"writes": "warn"})
-        self.assertEqual(repo_config(self.base).writes.disposition, "warn")
-
-    def test_legacy_writes_block_stays_block(self) -> None:
-        self.write_legacy({"writes": "block"})
-        self.assertEqual(repo_config(self.base).writes.disposition, "block")
-
-    def test_legacy_allow_bypass_true_becomes_auto_everywhere_absent(self) -> None:
-        self.write_legacy({"writes": "block", "allowBypass": True})
+    def test_global_config_used_when_repo_has_no_local_file(self) -> None:
+        self.global_cfg.write_text(
+            '{"writes": {"disposition": "warn", "bypass": "manual"}}', encoding="utf-8"
+        )
         config = repo_config(self.base)
-        self.assertEqual(config.writes.bypass, "auto")
-        self.assertEqual(config.discard.bypass, "auto")
-        self.assertEqual(config.stash.bypass, "auto")
-
-    def test_legacy_allow_bypass_false_becomes_manual_everywhere_absent(self) -> None:
-        self.write_legacy({"writes": "block", "allowBypass": False})
-        config = repo_config(self.base)
+        self.assertEqual(config.writes.disposition, "warn")
         self.assertEqual(config.writes.bypass, "manual")
-        self.assertEqual(config.discard.bypass, "manual")
-        self.assertEqual(config.stash.bypass, "manual")
+        # Other groups inherit DEFAULT_CONFIG within the same global config parse.
+        self.assertEqual(config.branch_changes, DEFAULT_CONFIG.branch_changes)
 
-    def test_legacy_branch_changes_follow_defers_to_allow_bypass(self) -> None:
-        self.write_legacy({"branchChanges": "follow", "allowBypass": False})
+    def test_repo_config_takes_precedence_over_global(self) -> None:
+        self.global_cfg.write_text(
+            '{"writes": {"disposition": "allow"}}', encoding="utf-8"
+        )
+        write_config(self.base, {"writes": {"disposition": "block", "bypass": "auto"}})
         config = repo_config(self.base)
-        self.assertEqual(config.branch_changes.disposition, "block")
-        self.assertEqual(config.branch_changes.bypass, "manual")
+        self.assertEqual(config.writes.disposition, "block")
 
-    def test_legacy_branch_changes_manual_ignores_allow_bypass_true(self) -> None:
-        self.write_legacy({"branchChanges": "manual", "allowBypass": True})
+    def test_malformed_repo_config_falls_through_to_global(self) -> None:
+        config_path(self.base).write_text("{not json", encoding="utf-8")
+        self.global_cfg.write_text(
+            '{"writes": {"disposition": "warn"}}', encoding="utf-8"
+        )
         config = repo_config(self.base)
-        self.assertEqual(config.branch_changes.disposition, "block")
-        self.assertEqual(config.branch_changes.bypass, "manual")
+        self.assertEqual(config.writes.disposition, "warn")
 
-    def test_legacy_branch_changes_block_becomes_bypass_none(self) -> None:
-        self.write_legacy({"branchChanges": "block"})
+    def test_missing_global_config_falls_back_to_defaults(self) -> None:
+        # global_cfg does not exist — should fall back to hard-coded defaults
         config = repo_config(self.base)
-        self.assertEqual(config.branch_changes.disposition, "block")
-        self.assertEqual(config.branch_changes.bypass, "none")
-
-    def test_legacy_file_with_no_stash_key_still_guards_stash(self) -> None:
-        # The gap this redesign closes: stash was never blockable before, but an old
-        # config upgrades to the same strictness as every other group, not "allow".
-        self.write_legacy({"writes": "block", "allowBypass": True})
-        config = repo_config(self.base)
-        self.assertEqual(config.stash.disposition, "block")
-        self.assertEqual(config.stash.bypass, "auto")
+        self.assertEqual(config, DEFAULT_CONFIG)
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> None:

@@ -43,5 +43,18 @@ class HookContractTests(unittest.TestCase):
         )
 
 
+    def test_codex_rejects_allow_permission_decision(self) -> None:
+        # Regression: Codex does not support permissionDecision:"allow"; the hook
+        # contract must reject it to catch any future regression in hooks.py.
+        body = {"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "warn only",
+        }}
+        decision, error = denial_decision("codex", body)
+        self.assertEqual(decision, "error")
+        self.assertIn("permissionDecision", error)
+
+
 if __name__ == "__main__":
     unittest.main()

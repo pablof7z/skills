@@ -29,12 +29,24 @@ GIT_COMMAND_GROUPS = {
     "stash": "stash",
 }
 
-# The four independently configurable guard groups: "writes" covers native-tool file
+# The four independently configurable policy keys. "writes" covers native-tool file
 # writes; the rest cover the Git subcommands above (via GIT_COMMAND_GROUPS and
 # checkout's branch-change detection).
 GUARD_GROUPS = ("writes", "branchChanges", "discard", "stash")
 
-DEFAULT_GRANT_TTL_SECONDS = 30 * 60
+# Access requests expose stable, user-facing scope names. The config key
+# ``branchChanges`` remains an implementation detail of .wtg.json, rather than
+# leaking its camelCase spelling into every request, log, and notification.
+ACCESS_SCOPES = ("writes", "change-branch", "discard", "stash")
+_GROUP_BY_ACCESS_SCOPE = {
+    "writes": "writes",
+    "change-branch": "branchChanges",
+    "discard": "discard",
+    "stash": "stash",
+}
+_ACCESS_SCOPE_BY_GROUP = {group: scope for scope, group in _GROUP_BY_ACCESS_SCOPE.items()}
+
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 5 * 60
 DEFAULT_DENY_LOG_FILE = "worktreeguard-denied-actions.jsonl"
 DEFAULT_REQUEST_LOG_FILE = "worktreeguard-base-access-requests.jsonl"
 
@@ -49,6 +61,14 @@ class Repo:
 
 class WorktreeGuardError(RuntimeError):
     pass
+
+
+def group_for_access_scope(scope: str) -> str:
+    return _GROUP_BY_ACCESS_SCOPE[scope]
+
+
+def access_scope_for_group(group: str) -> str:
+    return _ACCESS_SCOPE_BY_GROUP[group]
 
 
 def resolve_path(raw_path: str | Path) -> Path:

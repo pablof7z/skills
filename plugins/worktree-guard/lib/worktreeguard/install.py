@@ -6,6 +6,8 @@ import json
 import os
 import shutil
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 HOOK_MATCHER = (
@@ -65,7 +67,41 @@ def install_hooks(*, grok: bool = True) -> list[str]:
 
     if grok:
         messages.extend(install_grok_global_hook(bin_dir / "wtg-hook-dispatch"))
+    messages.extend(install_toast(root, bin_dir))
     return messages
+
+
+def toast_binary_path() -> Path:
+    return Path.home() / ".local" / "bin" / "wtg-toast"
+
+
+def install_toast(root: Path, bin_dir: Path) -> list[str]:
+    """Compile the native notification/approval toast, if this machine can.
+
+    macOS-only, and only when the Swift toolchain is present. Its absence just
+    means notifications.py falls back to a plain approval prompt — never a
+    reason to fail the rest of install-hooks.
+    """
+    script = root / "bin" / "wtg-focus-iterm.applescript"
+    if script.is_file():
+        shutil.copy2(script, bin_dir / "wtg-focus-iterm.applescript")
+
+    if sys.platform != "darwin":
+        return ["skipped wtg-toast (not macOS)"]
+    swiftc = shutil.which("swiftc")
+    if not swiftc:
+        return ["skipped wtg-toast (no swiftc on PATH)"]
+    source = root / "bin" / "wtg-toast.swift"
+    if not source.is_file():
+        return [f"missing source: {source}"]
+    target = toast_binary_path()
+    result = subprocess.run(
+        [swiftc, "-O", str(source), "-o", str(target)],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return [f"failed to build wtg-toast: {result.stderr.strip()[-500:]}"]
+    return [f"installed {target}"]
 
 
 def install_executable(source: Path, target: Path) -> None:

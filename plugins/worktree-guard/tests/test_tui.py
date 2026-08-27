@@ -55,32 +55,34 @@ class ConfigLoopTests(unittest.TestCase):
         return code, output
 
     def test_toggle_enabled_and_save(self) -> None:
-        keys = ["enter"] + ["down"] * (SAVE - ENABLED) + ["enter"]
+        # Toggling enabled off hides group rows; save lands at index 1.
+        keys = ["enter", "down", "enter"]
         code, output = self.run_loop(keys)
         self.assertEqual(code, 0)
         self.assertFalse(read_config(self.base)["enabled"])
         self.assertTrue(any("Saved" in frame for frame in output))
 
     def test_writes_disposition_warn_no_bypass_step_since_not_block(self) -> None:
-        # Picker cursors start on the *current* value, and the default disposition
-        # is "block" (index 2 of allow/warn/block) — one "up" reaches "warn".
+        # focus writes (sel=0, mode=block); enter cycles block -> warn.
+        # No approval selector visible after change since mode != block.
         keys = (
-            ["down"] * (WRITES - ENABLED) + ["enter"]  # focus writes, open picker (starts at block)
-            + ["up", "enter"]  # block -> warn, confirm (no bypass step follows: not block)
-            + ["down"] * (SAVE - WRITES) + ["enter"]  # navigate to save
+            ["down"] * (WRITES - ENABLED)        # focus writes
+            + ["enter"]                           # cycle disposition: block -> warn
+            + ["down"] * (SAVE - WRITES) + ["enter"]
         )
         code, output = self.run_loop(keys)
         self.assertEqual(code, 0)
         saved = read_config(self.base)
         self.assertEqual(saved["writes"]["disposition"], "warn")
-        self.assertEqual(saved["writes"]["bypass"], "auto")  # untouched, still the default
+        self.assertEqual(saved["writes"]["bypass"], "auto")  # untouched
         self.assertTrue(any("writes" in frame for frame in output))
 
     def test_writes_disposition_block_then_bypass_manual(self) -> None:
+        # focus writes; tab moves to approval selector (mode=block); enter cycles auto -> manual.
         keys = (
-            ["down"] * (WRITES - ENABLED) + ["enter"]
-            + ["enter"]  # disposition picker: block already selected, confirm as-is
-            + ["down", "enter"]  # bypass picker opens automatically: auto -> manual, confirm
+            ["down"] * (WRITES - ENABLED)  # focus writes
+            + ["tab"]                       # advance to approval selector
+            + ["enter"]                     # cycle bypass: auto -> manual
             + ["down"] * (SAVE - WRITES) + ["enter"]
         )
         code, output = self.run_loop(keys)
@@ -88,25 +90,37 @@ class ConfigLoopTests(unittest.TestCase):
         saved = read_config(self.base)
         self.assertEqual(saved["writes"], {"disposition": "block", "bypass": "manual"})
 
-    def test_branch_changes_bypass_manual(self) -> None:
+    def test_branch_changes_shows_configured_auto_approval_when_blocked(self) -> None:
+        keys = ["down"] * (BRANCH_CHANGES - ENABLED) + ["s"]
+        code, output = self.run_loop(keys)
+        self.assertEqual(code, 0)
+        all_output = "".join(output)
+        self.assertIn("changing branch", all_output)
+        self.assertIn("auto-approve", all_output)
+        self.assertNotIn("never allowed", all_output)
+        self.assertEqual(read_config(self.base)["branchChanges"]["bypass"], "auto")
+
+    def test_branch_changes_right_selects_and_cycles_approval(self) -> None:
         keys = (
-            ["down"] * (BRANCH_CHANGES - ENABLED) + ["enter"]  # focus branchChanges
-            + ["enter"]  # disposition picker: block already selected, confirm as-is
-            + ["down", "enter"]  # bypass picker: auto -> manual, confirm
+            ["down"] * (BRANCH_CHANGES - ENABLED)  # focus branchChanges
+            + ["right", "enter"]                  # select approval; auto -> manual
             + ["down"] * (SAVE - BRANCH_CHANGES) + ["enter"]
         )
         code, output = self.run_loop(keys)
         self.assertEqual(code, 0)
-        self.assertEqual(read_config(self.base)["branchChanges"]["bypass"], "manual")
-        self.assertTrue(any("branchChanges" in frame for frame in output))
+        saved = read_config(self.base)
+        self.assertEqual(saved["branchChanges"], {"disposition": "block", "bypass": "manual"})
+        last_group_frames = [f for f in output if "changing branch" in f]
+        self.assertTrue(last_group_frames)
+        self.assertIn("require human approval", last_group_frames[-1])
 
     def test_discard_and_stash_are_independently_editable(self) -> None:
         keys = (
-            ["down"] * (DISCARD - ENABLED) + ["enter"]
-            + ["enter"]  # disposition picker: block already selected, confirm as-is
-            + ["down", "down", "enter"]  # bypass: auto -> manual -> none
-            + ["down"] * (STASH - DISCARD) + ["enter"]
-            + ["up", "enter"]  # stash disposition picker (starts at block): block -> warn
+            ["down"] * (DISCARD - ENABLED)    # focus discard, sel=0
+            + ["tab"]                          # advance to approval selector
+            + ["enter", "enter"]               # bypass: auto -> manual -> none
+            + ["down"]                         # focus stash, sel resets to 0
+            + ["enter"]                        # disposition: block -> warn
             + ["down"] * (SAVE - STASH) + ["enter"]
         )
         code, _ = self.run_loop(keys)
@@ -125,21 +139,18 @@ class ConfigLoopTests(unittest.TestCase):
         self.assertFalse(config_path(self.base).exists())
         self.assertTrue(any("No changes" in frame for frame in output))
 
-    def test_disposition_picker_back_returns_without_change(self) -> None:
-        keys = (
-            ["down"] * (WRITES - ENABLED) + ["enter"]  # focus writes, open picker
-            + ["esc"]  # back out immediately
-            + ["down"] * (SAVE - WRITES) + ["enter"]
-        )
+    def test_navigation_without_edit_preserves_defaults(self) -> None:
+        # Navigating to group rows without cycling leaves data unchanged.
+        keys = ["down"] * (SAVE - ENABLED) + ["enter"]
         self.assertEqual(self.loop(keys), 0)
         self.assertEqual(read_config(self.base), DEFAULTS)
 
-    def test_bypass_picker_back_does_not_change_bypass(self) -> None:
+    def test_approval_selector_navigate_away_without_enter_preserves_bypass(self) -> None:
+        # Navigate to approval selector via tab, then move away without pressing enter.
         keys = (
-            ["down"] * (WRITES - ENABLED) + ["enter"]
-            + ["enter"]  # disposition picker: block already selected, confirm as-is
-            + ["esc"]  # back out of the bypass picker without choosing
-            + ["down"] * (SAVE - WRITES) + ["enter"]
+            ["down"]   # focus writes, sel=0
+            + ["tab"]  # advance to approval selector (sel=1, mode=block)
+            + ["down"] * (SAVE - WRITES) + ["enter"]  # navigate away; sel resets, no change
         )
         self.assertEqual(self.loop(keys), 0)
         saved = read_config(self.base)
@@ -157,6 +168,19 @@ class ConfigLoopTests(unittest.TestCase):
         saved = read_config(self.base)
         self.assertFalse(saved["enabled"])
         self.assertEqual(saved["writes"]["disposition"], "allow")
+
+
+    def test_disabled_config_hides_group_rows(self) -> None:
+        # When enabled=false on load, group rows are absent from the rendered output.
+        config_path(self.base).write_text(
+            json.dumps({"enabled": False}), encoding="utf-8"
+        )
+        keys = ["down", "enter"]  # focus save (index 1 when disabled), save
+        code, output = self.run_loop(keys)
+        self.assertEqual(code, 0)
+        all_output = "".join(output)
+        self.assertNotIn("file writes", all_output)
+        self.assertNotIn("changing branch", all_output)
 
 
 def run(command: list[str], *, cwd: Path | None = None) -> None:

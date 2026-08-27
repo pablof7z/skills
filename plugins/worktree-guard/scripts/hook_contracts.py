@@ -26,6 +26,8 @@ def denial_decision(harness: str, body: dict[str, Any]) -> tuple[str, str]:
     if output.get("hookEventName") != "PreToolUse":
         return "error", f"invalid {harness} hookEventName"
     decision = output.get("permissionDecision")
-    if decision not in {"allow", "deny", "ask"}:
-        return "error", f"invalid {harness} permissionDecision"
+    # Codex only accepts "deny"; Claude Code also accepts "allow" and "ask".
+    valid = {"deny"} if harness == "codex" else {"allow", "deny", "ask"}
+    if decision not in valid:
+        return "error", f"invalid {harness} permissionDecision: {decision!r}"
     return str(decision), ""
